@@ -30,6 +30,7 @@ class SystemPanel:
         self.scroll_max = 0
         self.hits = []
         self.viewport = (0, 0, 0, 0)
+        self.remove_token_hit = None
 
     def reset(self):
         self.scroll = 0
@@ -71,6 +72,7 @@ class SystemPanel:
         return y - math.ceil(len(kinds) / columns) * 38
 
     def draw(self, window, tile, left):
+        self.remove_token_hit = None
         px, width = left + 18, window.sidebar - 36
         text = window.text
         text('system_label', 'SELECTED SYSTEM', px, window.height - 26, 10, MUTED)
@@ -78,14 +80,36 @@ class SystemPanel:
         text('system_name', name, px, window.height - 62, 14, INK, width)
         text('system_id', f'Tile {tile.system_id} · {len(tile.units)} units in system', px, window.height - 88, 11, MUTED)
         if tile.player:
-            text('owner', tile.player, px, window.height - 124, 11, tuple(tile.color))
+            text('owner', tile.player, px, window.height - 111, 11, tuple(tile.color))
+        token_players = [player for player in window.player_panel.players if player.faction in tile.command_tokens]
+        if token_players:
+            text('token_info_title', 'COMMAND TOKENS', px, window.height - 143, 9, MUTED)
+            cell_width = width / 3
+            for index, player in enumerate(token_players):
+                row, column = divmod(index, 3)
+                x, y = px + column * cell_width, window.height - 165 - row * 20
+                window.player_panel.image(f'command_token/command_{player.color_code}.png', x + 9, y + 6, 15)
+                window.player_panel.image(f'factions/{player.faction}.png', x + 9, y + 6, 8)
+                text(('token_info', player.faction), player.faction.upper(), x + 20, y + 2, 9, INK, cell_width - 22)
+        else:
+            text('token_info_title', 'COMMAND TOKENS', px, window.height - 143, 9, MUTED)
+            text('token_info_empty', 'None', px + 95, window.height - 143, 9, MUTED)
+        if window.token_context and window.token_context[0] == tile.position:
+            faction = window.token_context[1]
+            if faction in tile.command_tokens:
+                label = f'Remove {faction.upper()} token · debug'
+                bx, by, bw, bh = px, window.height - 201, width, 23
+                arcade.draw_lrbt_rectangle_filled(bx, bx + bw, by, by + bh, (80, 43, 47))
+                arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh, (184, 94, 91), 1)
+                text('remove_token_button', label, bx + 8, by + 6, 10, INK, bw - 16)
+                self.remove_token_hit = (bx, bx + bw, by, by + bh)
         inventory = system_inventory(tile)
         texture = window.tile_sprites[tile].texture
         preview_width = min(250, width)
         preview_height = preview_width * texture.height / texture.width
-        arcade.draw_texture_rect(texture, arcade.XYWH(px + width / 2, window.height - 133 - preview_height / 2,
+        arcade.draw_texture_rect(texture, arcade.XYWH(px + width / 2, window.height - 218 - preview_height / 2,
                                                      preview_width, preview_height))
-        top, bottom = window.height - 151 - preview_height, 100
+        top, bottom = window.height - 236 - preview_height, 100
         self.viewport = (int(left), bottom, int(window.sidebar), max(1, int(top - bottom)))
         self.hits.clear()
         previous_scissor = window.ctx.scissor

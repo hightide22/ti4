@@ -64,6 +64,8 @@ class BoardWindow(arcade.Window):
         self.movement = MovementController(self.board)
         self.movement_panel = MovementPanel()
         self.movement_error = None
+        self.token_hits = []
+        self.token_context = None
         self.selected_units = ()
         self.hovered_units = ()
         self.focus_view = False
@@ -127,10 +129,15 @@ class BoardWindow(arcade.Window):
         texture = self.tile_sprites[tile].texture
         arcade.draw_texture_rect(texture, arcade.XYWH(x, y, width, width * texture.height / texture.width))
         self.unit_renderer.draw(tile, x, y, width, detailed=detailed, selected=self.selected_units, hovered=self.hovered_units, interactive=interactive, scope=scope)
-        for index, player in enumerate(self.player_panel.players):
-            if player.faction in tile.command_tokens:
-                self.player_panel.image(f'command_token/command_{player.color_code}.png',
-                                        x + width * (.35 - index * .12), y + width * .35, width * .16)
+        players = [player for player in self.player_panel.players if player.faction in tile.command_tokens]
+        token_size = width * .18
+        spacing = token_size + max(2, width * .012)
+        for index, player in enumerate(players):
+            cx = x + (index - (len(players) - 1) / 2) * spacing
+            cy = y
+            self.player_panel.image(f'command_token/command_{player.color_code}.png', cx, cy, token_size)
+            self.player_panel.image(f'factions/{player.faction}.png', cx, cy, token_size * .55)
+            self.token_hits.append((tile.position, player.faction, cx, cy, token_size * .52))
 
     @property
     def planet_hover_system(self):
@@ -164,6 +171,7 @@ class BoardWindow(arcade.Window):
             self.selected = next(iter(self.board))
         self.tile_sprites = {tile: self.tile_sprites.get(tile) or TileSprite(tile) for tile in self.board.values()}
         self.unit_renderer.hits.clear()
+        self.token_hits.clear()
         if self.focus_view:
             tile = self.board[self.selected]
             cx, cy = self.viewport_center
@@ -328,7 +336,7 @@ class BoardWindow(arcade.Window):
                               if any(self.movement.route(home, tile, unit, sol_player)
                                      for unit in home.units if unit.owner == 'sol'))
                 before_units = list(home.units)
-                before_strategic = sol_player.command_pools['strategic']
+                before_tactical = sol_player.command_pools['tactical']
                 self.movement.activate(sol_player, target.position)
                 self.selected = target.position
                 self.on_draw()
@@ -347,8 +355,32 @@ class BoardWindow(arcade.Window):
                 self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
                 assert home.units == before_units and ship not in target.units
                 assert 'sol' not in target.command_tokens
-                assert sol_player.command_pools['strategic'] == before_strategic
+                assert sol_player.command_pools['tactical'] == before_tactical
                 self.selected = target.position
+                hacan_player = next((player for player in self.player_panel.players if player.faction == 'hacan'), None)
+                if hacan_player:
+                    target.command_tokens.update(('sol', 'hacan'))
+                    self.on_draw()
+                    assert {faction for position, faction, *_ in self.token_hits if position == target.position} == {'sol', 'hacan'}
+                    arcade.get_image().save(preview_dir / 'command-tokens-preview.png')
+                    before_tactical = hacan_player.command_pools['tactical']
+                    token_hit = next(hit for hit in self.token_hits if hit[0] == target.position and hit[1] == 'hacan')
+                    self.on_mouse_press(token_hit[2], token_hit[3], arcade.MOUSE_BUTTON_RIGHT, 0)
+                    self.on_draw()
+                    assert self.system_panel.remove_token_hit
+                    bounds = self.system_panel.remove_token_hit
+                    self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                        (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert 'hacan' not in target.command_tokens
+                    assert hacan_player.command_pools['tactical'] == before_tactical + 1
+                    # The second token verifies that removing one faction's token leaves the other intact.
+                    token_hit = next(hit for hit in self.token_hits if hit[0] == target.position and hit[1] == 'sol')
+                    self.on_mouse_press(token_hit[2], token_hit[3], arcade.MOUSE_BUTTON_RIGHT, 0)
+                    self.on_draw()
+                    bounds = self.system_panel.remove_token_hit
+                    self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                        (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert not target.command_tokens
                 self.on_draw()
                 arcade.get_image().save(preview_dir / 'movement-preview.png')
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
@@ -365,8 +397,22 @@ class BoardWindow(arcade.Window):
         self.hovered_units = tuple(u.unit_id for u in hit.placement.units) if hit else tuple(u.unit_id for u in inventory_hit.units) if inventory_hit else ()
 
     def on_mouse_press(self, x, y, button, modifiers):
+        if button == arcade.MOUSE_BUTTON_RIGHT:
+            if not self.movement.session:
+                hit = next(((position, faction) for position, faction, cx, cy, radius in reversed(self.token_hits)
+                            if math.dist((x, y), (cx, cy)) <= radius), None)
+                if hit:
+                    self.token_context = hit
+                    self.selected = hit[0]
+                    self.focus_view = False
+                    self.system_panel.reset()
+                else:
+                    self.token_context = None
+            return
         if button != arcade.MOUSE_BUTTON_LEFT:
             return
+        if self.token_context and self.token_context[0] != self.selected:
+            self.token_context = None
         left = self.width - self.sidebar
         if self.movement.session:
             if x >= left:
@@ -396,6 +442,18 @@ class BoardWindow(arcade.Window):
             self.toggle_focus()
             return
         if x >= left:
+            remove = self.system_panel.remove_token_hit
+            if self.token_context and remove and remove[0] <= x <= remove[1] and remove[2] <= y <= remove[3]:
+                position, faction = self.token_context
+                tile = self.board[position]
+                if faction in tile.command_tokens:
+                    tile.command_tokens.remove(faction)
+                    player = next((p for p in self.player_panel.players if p.faction == faction), None)
+                    if player:
+                        player.command_pools['tactical'] += 1
+                self.token_context = None
+                self.system_panel.reset()
+                return
             inventory_hit = self.system_panel.hit_test(x, y)
             if inventory_hit:
                 self.selected_units = tuple(u.unit_id for u in inventory_hit.units)
@@ -459,6 +517,7 @@ class BoardWindow(arcade.Window):
                 self.movement_panel.reset()
                 self.movement_error = None
             self.focus_view = False
+            self.token_context = None
         elif symbol == arcade.key.F and not self.movement.session:
             self.focus_view = False
             self.fit()

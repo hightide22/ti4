@@ -66,7 +66,7 @@ class MovementPanel:
         target = session.target
         window.text('move_header', 'ACTIVATED SYSTEM', x, window.height - 26, 10, ACCENT)
         window.text('move_target', target.name, x, window.height - 62, 14, INK, width)
-        window.text('move_token', f'{session.player.faction.upper()} · Strategic reserve: {session.player.command_pools["strategic"]}',
+        window.text('move_token', f'{session.player.faction.upper()} · Tactical reserve: {session.player.command_pools["tactical"]}',
                     x, window.height - 90, 11, MUTED)
         texture = window.tile_sprites[target].texture
         preview_width = min(250, width)

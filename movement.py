@@ -134,8 +134,8 @@ class MovementController:
         target = self.board[position]
         if player.faction in target.command_tokens:
             raise MovementError('You have already activated this system')
-        if player.command_pools['strategic'] <= 0:
-            raise MovementError('No command tokens in the strategic reserve')
+        if player.command_pools['tactical'] <= 0:
+            raise MovementError('No command tokens in the tactical reserve')
         sources = {}
         for origin in self.board.values():
             routes = {}
@@ -152,7 +152,7 @@ class MovementController:
                                (u.kind in ('infantry', 'mech') and u.location.region == Region.PLANET))]
                 sources[origin.position] = Source(origin, ships, passengers, routes)
         snapshot = Snapshot.capture(self.board, player)
-        player.command_pools['strategic'] -= 1
+        player.command_pools['tactical'] -= 1
         target.command_tokens.add(player.faction)
         self.session = Session(player, target, sources, snapshot)
         return self.session

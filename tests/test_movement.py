@@ -17,10 +17,10 @@ class MovementTests(unittest.TestCase):
                            if not tile.command_tokens)
 
     def test_activation_moves_carrier_and_selected_infantry_and_undo_restores(self):
-        strategic = self.player.command_pools['strategic']
+        tactical = self.player.command_pools['tactical']
         original_units = list(self.home.units)
         session = self.controller.activate(self.player, self.target.position)
-        self.assertEqual(self.player.command_pools['strategic'], strategic - 1)
+        self.assertEqual(self.player.command_pools['tactical'], tactical - 1)
         self.assertIn('sol', self.target.command_tokens)
 
         source = session.sources[self.home.position]
@@ -39,15 +39,15 @@ class MovementTests(unittest.TestCase):
         self.assertTrue(self.controller.undo())
         self.assertEqual(self.home.units, original_units)
         self.assertNotIn('sol', self.target.command_tokens)
-        self.assertEqual(self.player.command_pools['strategic'], strategic)
+        self.assertEqual(self.player.command_pools['tactical'], tactical)
 
-    def test_cancel_activation_restores_strategic_token(self):
-        strategic = self.player.command_pools['strategic']
+    def test_cancel_activation_restores_tactical_token(self):
+        tactical = self.player.command_pools['tactical']
         self.controller.activate(self.player, self.target.position)
         self.assertTrue(self.controller.undo())
         self.assertIsNone(self.controller.session)
         self.assertNotIn('sol', self.target.command_tokens)
-        self.assertEqual(self.player.command_pools['strategic'], strategic)
+        self.assertEqual(self.player.command_pools['tactical'], tactical)
 
     def test_activated_system_cannot_be_activated_twice(self):
         self.controller.activate(self.player, self.target.position)
