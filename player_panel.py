@@ -34,6 +34,7 @@ class PlayerPanel:
         self.controls = []
         self.textures = {}
         self.hovered_planet = None
+        self.production_planets = set()
         self.source_pool = None
         self.card_offset = 0
 
@@ -169,15 +170,19 @@ class PlayerPanel:
         card = self.player.planets[index]
         planet = card.planet
         exhausted = card.exhausted
+        paying_for_production = planet.planet_id in self.production_planets
         hit_y = y
         hovered = index == self.hovered_planet
         if hovered:
             y += 3
             arcade.draw_lrbt_rectangle_filled(x - 3, x + width + 3, y - 3, y + height + 3, (*ACCENT, 24))
-        background = (29, 53, 68) if hovered else (19, 29, 43) if exhausted else CARD
+        background = ((76, 65, 38) if paying_for_production else
+                      (29, 53, 68) if hovered else (19, 29, 43) if exhausted else CARD)
         arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + height, background)
         arcade.draw_lrbt_rectangle_outline(x, x + width, y, y + height,
-                                          ACCENT if hovered else (64, 74, 90) if exhausted else (67, 133, 154), 2 if hovered else 1)
+                                          GOLD if paying_for_production else ACCENT if hovered else
+                                          (64, 74, 90) if exhausted else (67, 133, 154),
+                                          2 if paying_for_production or hovered else 1)
         window.text(('planet_name', index), planet.name, x + 8, y + height - 19, 12, INK, width - 16)
         tint = (140, 150, 164, 170) if exhausted else None
         self.image(self.trait_image(planet), x + 21, y + 43, 25, tint)

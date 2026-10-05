@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from math import ceil
 
 from player import PlanetCard
 from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile, unit_profiles
@@ -326,7 +327,7 @@ class MovementController:
         return sum(session.production_choices.values())
 
     def production_cost(self, session):
-        return sum(self.unit_cost(kind, session.player) * count
+        return sum(ceil(self.unit_cost(kind, session.player) * count)
                    for kind, count in session.production_choices.items())
 
     def production_payment(self, session):
@@ -341,13 +342,12 @@ class MovementController:
         current = session.production_choices.get(kind, 0)
         if delta > 0:
             remaining = session.production_limit - self.production_total(session)
-            addition = (2 if remaining >= 2 else 1) if kind in ('infantry', 'fighter') else 1
+            addition = min(2, remaining) if kind in ('infantry', 'fighter') else 1
             if addition > remaining:
                 return
             session.production_choices[kind] = current + addition
         elif current:
-            removal = (2 if current >= 2 else 1) if kind in ('infantry', 'fighter') else 1
-            updated = current - removal
+            updated = current - 1
             if updated:
                 session.production_choices[kind] = updated
             else:

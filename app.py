@@ -225,6 +225,9 @@ class BoardWindow(arcade.Window):
             if self.movement_error:
                 self.text('movement_error', self.movement_error, left + 18, 34, 10,
                           (245, 142, 128), self.sidebar - 36)
+        self.player_panel.production_planets = (
+            set(self.movement.session.production_planets)
+            if self.movement.session and self.movement.session.stage == 'production' else set())
         self.player_panel.draw(self)
 
     def on_update(self, delta_time):
@@ -448,6 +451,32 @@ class BoardWindow(arcade.Window):
                 assert home.units == before_units and ship not in target.units
                 assert 'sol' not in target.command_tokens
                 assert sol_player.command_pools['tactical'] == before_tactical
+                # Exercise the real Ctrl+Z handler after fleet overflow destroys a carrier and its cargo.
+                fleet_before = sol_player.command_pools['fleet']
+                sol_player.command_pools['fleet'] = 1
+                overflow_before_units = list(home.units)
+                self.movement.activate(sol_player, target.position)
+                overflow_session = self.movement.session
+                overflow_source = overflow_session.sources[home.position]
+                overflow_carrier = next(unit for unit in overflow_source.ships if unit.kind == 'carrier')
+                overflow_destroyer = next(unit for unit in overflow_source.ships if unit.kind == 'destroyer')
+                overflow_infantry = next(unit for unit in overflow_source.passengers if unit.kind == 'infantry')
+                for unit in (overflow_carrier, overflow_destroyer, overflow_infantry):
+                    overflow_session.toggle(unit.unit_id)
+                self.movement.confirm()
+                assert overflow_session.stage == 'fleet_overflow'
+                self.movement.toggle_overflow_ship(overflow_carrier.unit_id)
+                self.movement.resolve_fleet_overflow()
+                assert overflow_session.stage == 'invasion'
+                assert overflow_carrier not in target.units and overflow_infantry not in target.units
+                self.movement.establish_control()
+                assert self.movement.session is None
+                self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
+                assert home.units == overflow_before_units
+                assert overflow_carrier in home.units and overflow_infantry in home.units
+                assert 'sol' not in target.command_tokens
+                assert sol_player.command_pools['fleet'] == 1
+                sol_player.command_pools['fleet'] = fleet_before
                 self.selected = target.position
                 hacan_player = next((player for player in self.player_panel.players if player.faction == 'hacan'), None)
                 if hacan_player:

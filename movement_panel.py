@@ -192,12 +192,13 @@ class MovementPanel:
                 window.text('production_capacity', f'Production limit: {produced}/{session.production_limit}',
                             x, y, 10, MUTED)
                 y -= 16
-                window.text('production_payment', f'Payment: {amount(paid)}/{amount(selected_cost)}',
+                window.text('production_payment', f'Planets + trade goods: {amount(paid)}/{amount(selected_cost)}',
                             x, y, 10, INK)
                 y -= 23
                 arcade.draw_lrbt_rectangle_filled(x, x + width, y - 24, y, CARD)
-                window.text('production_trade_goods', f'Trade goods: {session.trade_goods_to_spend}',
-                            x + 8, y - 16, 10, INK)
+                window.text('production_trade_goods',
+                            f'Use trade goods: {session.trade_goods_to_spend}/{session.player.trade_goods}',
+                            x + 8, y - 16, 9, INK)
                 for delta, left in ((-1, x + width - 57), (1, x + width - 29)):
                     arcade.draw_lrbt_rectangle_filled(left, left + 23, y - 21, y - 3, (37, 65, 83))
                     window.text(('production_tg_button', delta), '+' if delta > 0 else '−',
@@ -209,12 +210,17 @@ class MovementPanel:
                     count = session.production_choices.get(kind, 0)
                     cost = window.movement.unit_cost(kind, session.player)
                     arcade.draw_lrbt_rectangle_filled(x, x + width, top - 30, top, CARD)
-                    window.player_panel.image(f'units/{session.player.color_code}_{UNIT_TYPES[kind]["sprite"]}.png',
-                                              x + 15, top - 15, 20)
-                    pair_note = ' · 2 per click' if kind in ('infantry', 'fighter') else ''
+                    sprite_path = f'units/{session.player.color_code}_{UNIT_TYPES[kind]["sprite"]}.png'
+                    if kind in ('infantry', 'fighter'):
+                        window.player_panel.image(sprite_path, x + 10, top - 15, 16)
+                        window.player_panel.image(sprite_path, x + 23, top - 15, 16)
+                    else:
+                        window.player_panel.image(sprite_path, x + 17, top - 15, 20)
+                    displayed_cost = (amount(window.movement.unit_cost(kind, session.player) * 2)
+                                      if kind in ('infantry', 'fighter') else amount(cost))
                     window.text(('production_unit', kind),
-                                f'{UNIT_TYPES[kind]["name"]} · {amount(cost)} each{pair_note}',
-                                x + 30, top - 11, 9, INK)
+                                f'{UNIT_TYPES[kind]["name"]} · {displayed_cost}',
+                                x + 43, top - 11, 9, INK)
                     window.text(('production_count', kind), str(count), x + width - 49, top - 11, 10, ACCENT)
                     for delta, left in ((-1, x + width - 36), (1, x + width - 18)):
                         arcade.draw_lrbt_rectangle_filled(left, left + 16, top - 26, top - 4,
@@ -224,7 +230,7 @@ class MovementPanel:
                         self.hits.append((('production_unit', kind, delta), left, left + 16,
                                           top - 26, top - 4))
                     y -= 34
-                window.text('production_help', 'Click ready planet cards below to exhaust them for resources.',
+                window.text('production_help', 'Yellow planets pay resources; trade goods cover the rest.',
                             x, y, 9, MUTED, width)
             self.scroll_max = max(0, start - (y - self.scroll) - (top - bottom) + 40)
             self.scroll_by(0)

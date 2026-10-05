@@ -110,9 +110,16 @@ class MovementTests(unittest.TestCase):
 
         original_limit = session.production_limit
         session.production_limit = 5
+        session.production_choices['infantry'] = 1
+        self.assertEqual(self.controller.production_cost(session), 1)
+        session.production_choices.clear()
         self.controller.adjust_production('infantry', 1)
         self.controller.adjust_production('infantry', 1)
         self.assertEqual(session.production_choices['infantry'], 4)
+        self.controller.adjust_production('infantry', -1)
+        self.assertEqual(session.production_choices['infantry'], 3)
+        self.assertEqual(self.controller.production_cost(session), 2)
+        self.controller.adjust_production('infantry', 1)
         self.controller.adjust_production('infantry', 1)
         self.assertEqual(session.production_choices['infantry'], 5)
         session.production_choices.clear()
@@ -153,23 +160,32 @@ class MovementTests(unittest.TestCase):
 
     def test_fleet_limit_after_movement_requires_destroying_exact_excess(self):
         self.player.command_pools['fleet'] = 1
+        original_home_units = list(self.home.units)
         session = self.controller.activate(self.player, self.target.position)
         source = session.sources[self.home.position]
         carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
         destroyer = next(unit for unit in source.ships if unit.kind == 'destroyer')
+        infantry = next(unit for unit in source.passengers if unit.kind == 'infantry')
         session.toggle(carrier.unit_id)
         session.toggle(destroyer.unit_id)
+        session.toggle(infantry.unit_id)
         self.controller.confirm()
         self.assertEqual(session.stage, 'fleet_overflow')
         self.assertEqual(session.overflow_required, 1)
         with self.assertRaises(MovementError):
             self.controller.resolve_fleet_overflow()
-        self.controller.toggle_overflow_ship(destroyer.unit_id)
+        self.controller.toggle_overflow_ship(carrier.unit_id)
         self.controller.resolve_fleet_overflow()
         self.assertEqual(session.stage, 'invasion')
-        self.assertNotIn(destroyer, self.target.units)
+        self.assertNotIn(carrier, self.target.units)
+        self.assertNotIn(infantry, self.target.units)
         self.controller.establish_control()
         self.assertIsNone(self.controller.session)
+        self.assertTrue(self.controller.undo())
+        self.assertEqual(self.home.units, original_home_units)
+        self.assertIn(carrier, self.home.units)
+        self.assertIn(infantry, self.home.units)
+        self.assertNotIn('sol', self.target.command_tokens)
 
     def test_ship_production_goes_to_space_and_skipping_refunds_exhausted_planets(self):
         self.player.command_pools['fleet'] = 4
