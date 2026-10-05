@@ -3,9 +3,84 @@
   "commit": "bd234c306286c00cc379f428558ac54152ebb0fe",
   "files": [
     {
+      "path": "command_token/command_blu.png",
+      "size": 6302,
+      "sha": "8de4569bcde16e057a52e9cf8748b1c2e253a93d"
+    },
+    {
+      "path": "command_token/command_ppl.png",
+      "size": 6711,
+      "sha": "4660105d15338fee0027242a6be2cbebfb3c3d91"
+    },
+    {
+      "path": "command_token/command_ylw.png",
+      "size": 6402,
+      "sha": "c1d1f638cebe65620f9d739ce8609a5fc42fc291"
+    },
+    {
+      "path": "command_token/fleet_blu.png",
+      "size": 8459,
+      "sha": "90bd3e8ea1545db516d5232a2e7fb2896cde8960"
+    },
+    {
+      "path": "command_token/fleet_ppl.png",
+      "size": 8717,
+      "sha": "7fed5ecea9f880d479e7c316884a51c47999806a"
+    },
+    {
+      "path": "command_token/fleet_ylw.png",
+      "size": 8551,
+      "sha": "adc4d26d207d62c6b94b1e53cca25dcc484838cb"
+    },
+    {
       "path": "data/factions/base.json",
       "size": 27781,
       "sha": "881892a384cce08d7a17360657d26662aa9d2243"
+    },
+    {
+      "path": "factions/hacan.png",
+      "size": 296125,
+      "sha": "f36ea77a96e3754af8ed922db3ae572867310564"
+    },
+    {
+      "path": "factions/jolnar.png",
+      "size": 333022,
+      "sha": "6b61464ddca6919f29598586bfddf65db95c9390"
+    },
+    {
+      "path": "factions/sol.png",
+      "size": 247081,
+      "sha": "25c214183de93135c26127da1896929c60388279"
+    },
+    {
+      "path": "general/Commodity1.png",
+      "size": 2929,
+      "sha": "ecb4fa59db56f05e9e97a727d0a50bac8b0473db"
+    },
+    {
+      "path": "general/tg1.png",
+      "size": 3203,
+      "sha": "558ddf6668117561315eea2a2caf04fa500cdd84"
+    },
+    {
+      "path": "planet_cards/pc_inf_exh.png",
+      "size": 2099,
+      "sha": "322b3083b1aef5dc0de62a73055c2d40c79f64d0"
+    },
+    {
+      "path": "planet_cards/pc_inf_rdy.png",
+      "size": 2128,
+      "sha": "b552f76299517a0c2213d0cb04a3f2f16f67f0ea"
+    },
+    {
+      "path": "planet_cards/pc_res_exh.png",
+      "size": 2298,
+      "sha": "639fa34d0c25f88e71819eba225ecfa9636374cf"
+    },
+    {
+      "path": "planet_cards/pc_res_rdy.png",
+      "size": 2333,
+      "sha": "711d2ef0670f5604092ae3a3cf837fce6555c910"
     },
     {
       "path": "planets/0.0.0.json",

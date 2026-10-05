@@ -52,9 +52,18 @@ Units are currently displayed in their starting positions. Movement, transport a
 
 ## Asset source
 
-`assets/resources.lock.json` pins the 195 resources needed by this build to AsyncTI4 commit `bd234c306286c00cc379f428558ac54152ebb0fe`. The restore script downloads about 10 MB and verifies each file against its Git blob hash. Downloaded artwork, virtual environments, local IDE settings and generated previews are excluded from Git. Original TI4 artwork remains third-party material; this repository does not grant a license to that artwork.
+`assets/resources.lock.json` pins the 210 resources needed by this build to AsyncTI4 commit `bd234c306286c00cc379f428558ac54152ebb0fe`. The restore script downloads about 10 MB and verifies each file against its Git blob hash. Downloaded artwork, virtual environments, local IDE settings and generated previews are excluded from Git. Original TI4 artwork remains third-party material; this repository does not grant a license to that artwork.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/fetch_assets.py --check
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
+
+
+## Player dashboard
+
+The bottom panel switches between the three faction dashboards. Each player starts with their home planet cards, 3 tactical tokens, 3 fleet tokens, 2 strategic tokens, zero trade goods and zero commodities. Commodity capacity comes from faction data (Sol 4, Hacan 6, Jol-Nar 4).
+
+Click a planet card to switch between ready and exhausted sides. Ready resource and influence totals update immediately. Cards use original tile planet artwork and AsyncTI4 resource icons; the upstream resources do not provide scans of these planet cards. Use the currency +/- controls to adjust balances; commodities cannot exceed capacity. Click a command pool, then another pool, to move one token. These are prototype state controls; turn timing, payments and other rules are not enforced yet, and state lasts for the current session.
+
+The board and dashboard render live. Smoke-test screenshots are written to the ignored `previews/` directory and are not used by the game.

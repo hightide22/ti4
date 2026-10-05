@@ -13,6 +13,8 @@ from board import Board, Tile, load_board
 from units import Region, UNIT_TYPES
 from unit_view import UnitRenderer
 from system_panel import SystemPanel
+from player import create_players
+from player_panel import PlayerPanel
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -55,6 +57,7 @@ class BoardWindow(arcade.Window):
         self.labels = {}
         self.unit_renderer = UnitRenderer()
         self.system_panel = SystemPanel()
+        self.player_panel = PlayerPanel(create_players(self.board, self.map_config))
         self.selected_units = ()
         self.hovered_units = ()
         self.focus_view = False
@@ -76,12 +79,12 @@ class BoardWindow(arcade.Window):
 
     @property
     def viewport_center(self):
-        return (self.width - self.sidebar) / 2, (self.height - 80) / 2
+        return (self.width - self.sidebar) / 2, self.player_panel.HEIGHT + (self.height - 80 - self.player_panel.HEIGHT) / 2
 
     def fit(self):
         coords = [world(p) for p in self.board]
         xs, ys = zip(*coords)
-        self.fit_scale = min((self.width - self.sidebar - 80) / (max(xs) - min(xs) + 2), (self.height - 180) / (max(ys) - min(ys) + math.sqrt(3)))
+        self.fit_scale = min((self.width - self.sidebar - 80) / (max(xs) - min(xs) + 2), (self.height - 180 - self.player_panel.HEIGHT) / (max(ys) - min(ys) + math.sqrt(3)))
         self.map_center = [(max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2]
         self.zoom = self.target_zoom = 1.0
 
@@ -92,7 +95,7 @@ class BoardWindow(arcade.Window):
         return cx + (x - self.map_center[0]) * scale, cy + (y - self.map_center[1]) * scale
 
     def pick(self, x, y):
-        if x >= self.width - self.sidebar or y > self.height - 80:
+        if x >= self.width - self.sidebar or y > self.height - 80 or y < self.player_panel.HEIGHT:
             return None
         cx, cy = self.viewport_center
         scale = self.fit_scale * self.zoom
@@ -136,7 +139,7 @@ class BoardWindow(arcade.Window):
         if self.focus_view:
             tile = self.board[self.selected]
             cx, cy = self.viewport_center
-            width = min(self.width - self.sidebar - 90, (self.height - 200) * 345 / 299) * self.focus_zoom
+            width = min(self.width - self.sidebar - 90, (self.height - 200 - self.player_panel.HEIGHT) * 345 / 299) * self.focus_zoom
             self.draw_tile(tile, cx, cy + 15, width, detailed=True)
         else:
             for position, tile in self.board.items():
@@ -156,13 +159,15 @@ class BoardWindow(arcade.Window):
         arcade.draw_lrbt_rectangle_filled(left - 225, left - 85, self.height - 56, self.height - 24, (25, 45, 63))
         self.text('focus_button', 'Galaxy view' if self.focus_view else 'Detail view', left - 212, self.height - 46, 12, ACCENT)
         self.system_panel.draw(self, self.board[self.selected], left)
-        self.text('status', f'{len(self.board)} systems  /  {len(self.board.home_tiles)} home systems', 24, 21, 12, MUTED)
+        self.player_panel.draw(self)
 
     def on_update(self, delta_time):
         self.unit_renderer.update(delta_time)
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
         self.frames += 1
         if self.smoke and self.frames == 5:
+            preview_dir = ROOT / 'previews'
+            preview_dir.mkdir(exist_ok=True)
             for p in self.board:
                 assert self.pick(*self.screen(p)) == p, f'Picking failed: {p}'
             for p in self.board:
@@ -172,21 +177,21 @@ class BoardWindow(arcade.Window):
                 self.on_mouse_press(x, y, arcade.MOUSE_BUTTON_LEFT, 0)
                 assert self.selected == p
             assert self.pick(self.width - 10, 100) is None
-            self.on_mouse_scroll(100, 100, 0, 100)
+            self.on_mouse_scroll(100, 400, 0, 100)
             assert self.target_zoom == 3.5
-            self.on_mouse_scroll(100, 100, 0, -100)
+            self.on_mouse_scroll(100, 400, 0, -100)
             assert self.target_zoom == .55
             self.fit()
             previous = tuple(self.map_center)
-            self.on_mouse_drag(100, 100, 30, 20, arcade.MOUSE_BUTTON_RIGHT, 0)
+            self.on_mouse_drag(100, 400, 30, 20, arcade.MOUSE_BUTTON_RIGHT, 0)
             assert tuple(self.map_center) != previous
             self.fit()
             self.selected = self.board.home_tiles[0].position if self.board.home_tiles else next(iter(self.board))
             self.on_draw()
-            arcade.get_image().save(ROOT / 'board-home-preview.png')
+            arcade.get_image().save(preview_dir / 'board-home-preview.png')
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
             self.on_draw()
-            arcade.get_image().save(ROOT / 'board-preview.png')
+            arcade.get_image().save(preview_dir / 'board-preview.png')
             for tile in self.board.home_tiles:
                 if tile.units:
                     self.focus_view = True
@@ -201,25 +206,63 @@ class BoardWindow(arcade.Window):
                     self.selected_units = tuple(u.unit_id for u in hit.placement.units)
                     assert self.unit_renderer.hit_test(hit.x, hit.y) is not None
                     self.on_draw()
-                    arcade.get_image().save(ROOT / f'unit-preview-{tile.units[0].owner}.png')
+                    arcade.get_image().save(preview_dir / f'unit-preview-{tile.units[0].owner}.png')
                     if self.system_panel.scroll_max:
                         self.on_mouse_scroll(self.width - 30, self.height / 2, 0, -3)
                         assert self.system_panel.scroll > 0
                         self.on_draw()
-                        arcade.get_image().save(ROOT / f'unit-preview-{tile.units[0].owner}-scrolled.png')
+                        arcade.get_image().save(preview_dir / f'unit-preview-{tile.units[0].owner}-scrolled.png')
                         self.system_panel.reset()
 
+            if self.player_panel.player:
+                self.player_panel.active = 0
+                self.on_draw()
+                panel = self.player_panel
+                def click_control(action):
+                    control = next(c for c in panel.controls if c.action == action)
+                    self.on_mouse_press(control.left + control.width / 2,
+                                        control.bottom + control.height / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                    self.on_draw()
+                click_control(('planet', 0))
+                assert panel.player.planets[0].exhausted
+                click_control(('currency', 'commodities', 1))
+                assert panel.player.commodities == 1
+                click_control(('pool', 'tactical'))
+                click_control(('pool', 'strategic'))
+                assert panel.player.command_pools == {'tactical': 2, 'fleet': 3, 'strategic': 3}
+                self.focus_view = False
+                self.selected = self.board.home_tiles[0].position
+                self.system_panel.reset()
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'player-panel-preview.png')
+                click_control(('planet', 0))
+                click_control(('currency', 'commodities', -1))
+                click_control(('pool', 'strategic'))
+                click_control(('pool', 'tactical'))
+                if len(panel.players) > 1:
+                    click_control(('player', 1))
+                    assert panel.player.commodities == 0
+                    assert not panel.player.planets[0].exhausted
+                    click_control(('player', 0))
+                hacan = next((i for i, p in enumerate(panel.players) if p.faction == 'hacan'), None)
+                if hacan is not None:
+                    click_control(('player', hacan))
+                    click_control(('planet', 0))
+                    self.on_draw()
+                    arcade.get_image().save(preview_dir / 'player-panel-hacan-preview.png')
+                    click_control(('planet', 0))
+                    click_control(('player', 0))
             self.focus_view = False
             self.selected_units = ()
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
             self.on_draw()
-            arcade.get_image().save(ROOT / 'board-preview.png')
-            print(f'PASS: {len(self.board)} independent tile objects and sprites; selection, zoom and pan checked')
+            arcade.get_image().save(preview_dir / 'board-preview.png')
+            print(f'PASS: {len(self.board)} independent tile objects and sprites; map interaction, planet cards, currency limits and command transfers checked')
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.hover = None if self.focus_view else self.pick(x, y)
-        hit = self.unit_renderer.hit_test(x, y) if x < self.width - self.sidebar and y < self.height - 80 else None
+        hit = self.unit_renderer.hit_test(x, y) if x < self.width - self.sidebar and self.player_panel.HEIGHT <= y < self.height - 80 else None
         inventory_hit = self.system_panel.hit_test(x, y)
         self.hovered_units = tuple(u.unit_id for u in hit.placement.units) if hit else tuple(u.unit_id for u in inventory_hit.units) if inventory_hit else ()
 
@@ -227,6 +270,9 @@ class BoardWindow(arcade.Window):
         if button != arcade.MOUSE_BUTTON_LEFT:
             return
         left = self.width - self.sidebar
+        if x < left and y < self.player_panel.HEIGHT:
+            self.player_panel.handle_click(x, y)
+            return
         if left - 225 <= x <= left - 85 and self.height - 56 <= y <= self.height - 24:
             self.toggle_focus()
             return
@@ -256,12 +302,14 @@ class BoardWindow(arcade.Window):
                 self.last_click = (picked, now)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
-        if not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and x < self.width - self.sidebar:
+        if not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and x < self.width - self.sidebar and y >= self.player_panel.HEIGHT:
             scale = self.fit_scale * self.zoom
             self.map_center[0] -= dx / scale
             self.map_center[1] -= dy / scale
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
+        if x < self.width - self.sidebar and y < self.player_panel.HEIGHT:
+            return
         if x >= self.width - self.sidebar:
             self.system_panel.scroll -= scroll_y * 40
             self.system_panel.clamp()
