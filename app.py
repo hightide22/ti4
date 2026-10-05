@@ -13,7 +13,7 @@ from board import Board, Tile, load_board
 from units import Region, UNIT_TYPES
 from unit_view import UnitRenderer
 from system_panel import SystemPanel
-from player import create_players
+from player import PlanetCard, create_players
 from player_panel import PlayerPanel
 
 ROOT = Path(__file__).resolve().parent
@@ -52,6 +52,7 @@ class TileSprite(arcade.Sprite):
 class BoardWindow(arcade.Window):
     def __init__(self, smoke=False, map_path=ROOT / 'maps/three_player.json'):
         super().__init__(1440, 960, 'Twilight Imperium IV — three-player board', resizable=True, vsync=True)
+        self.set_minimum_size(1120, 720)
         self.map_config, self.board = load_board(map_path)
         self.tile_sprites = {tile: TileSprite(tile) for tile in self.board.values()}
         self.labels = {}
@@ -75,7 +76,7 @@ class BoardWindow(arcade.Window):
 
     @property
     def sidebar(self):
-        return min(420, max(340, self.width * .29))
+        return min(340, max(320, self.width * .24))
 
     @property
     def viewport_center(self):
@@ -252,6 +253,21 @@ class BoardWindow(arcade.Window):
                     arcade.get_image().save(preview_dir / 'player-panel-hacan-preview.png')
                     click_control(('planet', 0))
                     click_control(('player', 0))
+                original_cards = panel.player.planets
+                panel.player.planets = [PlanetCard(p) for tile in self.board.values() for p in tile.planets][:15]
+                self.on_draw()
+                visible_cards = [c for c in panel.controls if c.action[0] == 'planet']
+                assert len(visible_cards) < len(panel.player.planets)
+                click_control(('cards', 1))
+                assert panel.card_offset == 1
+                control = next(c for c in panel.controls if c.action[0] == 'planet')
+                self.on_mouse_motion(control.left + 10, control.bottom + 10, 0, 0)
+                assert panel.hovered_planet == control.action[1]
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'player-panel-dense-preview.png')
+                panel.player.planets = original_cards
+                panel.hovered_planet = None
+                panel.card_offset = 0
             self.focus_view = False
             self.selected_units = ()
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
@@ -261,6 +277,7 @@ class BoardWindow(arcade.Window):
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):
+        self.player_panel.hover(x, y)
         self.hover = None if self.focus_view else self.pick(x, y)
         hit = self.unit_renderer.hit_test(x, y) if x < self.width - self.sidebar and self.player_panel.HEIGHT <= y < self.height - 80 else None
         inventory_hit = self.system_panel.hit_test(x, y)

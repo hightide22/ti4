@@ -63,14 +63,49 @@
       "sha": "558ddf6668117561315eea2a2caf04fa500cdd84"
     },
     {
+      "path": "planet_cards/pc_attribute_cultural.png",
+      "size": 3018,
+      "sha": "8b1493ed9b5da4d9f2278d0198b4f71cabf85d56"
+    },
+    {
+      "path": "planet_cards/pc_attribute_hazardous.png",
+      "size": 2793,
+      "sha": "32417b3ca21c04bb902b141ad22c00ec39de495b"
+    },
+    {
+      "path": "planet_cards/pc_attribute_industrial.png",
+      "size": 2452,
+      "sha": "e0a7c20437e2b456924cbed29e88d6fb249827e3"
+    },
+    {
+      "path": "planet_cards/pc_attribute_mr.png",
+      "size": 1173,
+      "sha": "ad93645d72b92bf129e08386a945c37fd9bb1132"
+    },
+    {
+      "path": "planet_cards/pc_attribute_none.png",
+      "size": 1862,
+      "sha": "f16002e0b9ffb854ffd1e7048c780a9aa072d2f7"
+    },
+    {
       "path": "planet_cards/pc_inf_exh.png",
       "size": 2099,
       "sha": "322b3083b1aef5dc0de62a73055c2d40c79f64d0"
     },
     {
+      "path": "planet_cards/pc_legendary_exh.png",
+      "size": 2440,
+      "sha": "b97e690ca92eefd34cc6a06d523c2ab741d9ca79"
+    },
+    {
       "path": "planet_cards/pc_inf_rdy.png",
       "size": 2128,
       "sha": "b552f76299517a0c2213d0cb04a3f2f16f67f0ea"
+    },
+    {
+      "path": "planet_cards/pc_legendary_rdy.png",
+      "size": 2385,
+      "sha": "a5bd392bf379481f92dd73f6acd2eead57b3012d"
     },
     {
       "path": "planet_cards/pc_res_exh.png",
@@ -81,6 +116,46 @@
       "path": "planet_cards/pc_res_rdy.png",
       "size": 2333,
       "sha": "711d2ef0670f5604092ae3a3cf837fce6555c910"
+    },
+    {
+      "path": "planet_cards/pc_tech_biotic_exh.png",
+      "size": 2169,
+      "sha": "8c161eb7d6e0e77ce91131b00378a281d3e2a72e"
+    },
+    {
+      "path": "planet_cards/pc_tech_biotic_rdy.png",
+      "size": 2209,
+      "sha": "197f85c6f603bb4040daeb732f80317ec1115c3d"
+    },
+    {
+      "path": "planet_cards/pc_tech_cybernetic_exh.png",
+      "size": 2210,
+      "sha": "ba7d35d2f4f755aec1051827a5190bf6ddce28f0"
+    },
+    {
+      "path": "planet_cards/pc_tech_cybernetic_rdy.png",
+      "size": 2209,
+      "sha": "491b612c1ffe6068bfbffa9bbffd64a818f8e5c9"
+    },
+    {
+      "path": "planet_cards/pc_tech_propulsion_exh.png",
+      "size": 2078,
+      "sha": "f28a645693868fae578a77e9234418ed36c17f8f"
+    },
+    {
+      "path": "planet_cards/pc_tech_propulsion_rdy.png",
+      "size": 2127,
+      "sha": "0692e52ddf9e7c0c52bd6f1a53c74d14b4afdeff"
+    },
+    {
+      "path": "planet_cards/pc_tech_warfare_exh.png",
+      "size": 2189,
+      "sha": "48f5e2c6491df29c2ead084284f5cbdd5fc52edc"
+    },
+    {
+      "path": "planet_cards/pc_tech_warfare_rdy.png",
+      "size": 2194,
+      "sha": "e0f4b8c83af1cfb858a1ac6d5da2cb784e776c1a"
     },
     {
       "path": "planets/0.0.0.json",
