@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import arcade
 
@@ -39,7 +41,10 @@ class UnitRenderer:
         self.elapsed += delta_time
 
     def placements(self, tile, detailed):
-        signature = tuple((u.unit_id, u.kind, u.owner, u.location) for u in tile.units)
+        # Layout runs on a worker while gameplay can move or destroy units. Give
+        # the worker a consistent snapshot instead of the live mutable tile.
+        units = tuple(replace(unit) for unit in tuple(tile.units))
+        signature = tuple((u.unit_id, u.kind, u.owner, u.location) for u in units)
         key = tile, detailed
         cached = self.layouts.get(key)
         if cached and cached[0] == signature:
@@ -58,7 +63,8 @@ class UnitRenderer:
             return placements
         if pending:
             pending[1].cancel()
-        future = self.layout_executor.submit(layout_units, tile, detailed)
+        layout_tile = SimpleNamespace(number=tile.number, planets=tile.planets, units=units)
+        future = self.layout_executor.submit(layout_units, layout_tile, detailed)
         self.pending_layouts[key] = signature, future
         if self.blocking_layouts:
             placements = future.result()

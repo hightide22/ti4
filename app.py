@@ -361,6 +361,8 @@ class BoardWindow(arcade.Window):
                 self.movement.activate(sol_player, target.position)
                 self.selected = target.position
                 self.on_draw()
+                assert all(self.labels[('action_status', index)].text == 'Wait' for index in (4, 5, 6, 7, 8, 9, 10, 11, 12, 13)), \
+                    {index: self.labels[('action_status', index)].text for index in range(14)}
                 source = self.movement.session.sources[home.position]
                 production_planet = target.planets[0]
                 target.units.append(Unit('smoke-production-base', 'spacedock', 'sol', sol_player.color_code,
@@ -399,7 +401,10 @@ class BoardWindow(arcade.Window):
                 step_statuses = [self.labels[('action_status', index)].text for index in range(14)]
                 assert step_statuses.count('Current') == 1
                 assert self.labels[('action_step', 12)].text == 'STEP 5 · PRODUCTION'
-                assert self.labels[('action_status', 12)].text == 'Skipped'
+                assert all(self.labels[('action_status', index)].text == 'Skipped' for index in (4, 5, 7))
+                assert self.labels[('action_status', 6)].text == 'In progress'
+                assert self.labels[('action_status', 8)].text == 'Current'
+                assert all(self.labels[('action_status', index)].text == 'Wait' for index in (9, 10, 11, 12, 13))
                 arcade.get_image().save(preview_dir / 'cargo-preview.png')
                 self.focus_view = False
                 self.on_draw()

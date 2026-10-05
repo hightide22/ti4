@@ -1,6 +1,8 @@
 import math
+import threading
 import unittest
 from collections import Counter
+from unittest.mock import patch
 
 from board import load_board
 from units import Region, Unit, UnitLocation, hex_clearance, layout_units, placed_outline, circle_overlap, polygons_overlap, system_inventory
@@ -66,6 +68,34 @@ class UnitTests(unittest.TestCase):
             self.assertEqual(len(carriers), 2)
             self.assertLess(math.dist((carriers[0].x, carriers[0].y),
                                       (carriers[1].x, carriers[1].y)), 80)
+
+    def test_background_layout_uses_a_stable_unit_snapshot(self):
+        from unit_view import UnitRenderer
+        import unit_view
+
+        tile = self.homes[16]
+        expected_ids = {unit.unit_id for unit in tile.units}
+        entered, release = threading.Event(), threading.Event()
+        real_layout = unit_view.layout_units
+
+        def delayed_layout(snapshot, detailed=False):
+            entered.set()
+            self.assertTrue(release.wait(2))
+            return real_layout(snapshot, detailed)
+
+        renderer = UnitRenderer()
+        try:
+            with patch('unit_view.layout_units', side_effect=delayed_layout):
+                renderer.placements(tile, True)
+                self.assertTrue(entered.wait(2))
+                tile.units.clear()
+                future = next(future for _, future in renderer.pending_layouts.values())
+                release.set()
+                placements = future.result(timeout=5)
+            self.assertEqual({unit.unit_id for placement in placements for unit in placement.units}, expected_ids)
+        finally:
+            release.set()
+            renderer.layout_executor.shutdown(wait=True, cancel_futures=True)
 
     def test_ground_stays_on_its_planet(self):
         for tile in self.homes.values():
