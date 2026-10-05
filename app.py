@@ -390,6 +390,10 @@ class BoardWindow(arcade.Window):
                            for unit in target.units)
                 self.focus_view = True
                 self.on_draw()
+                step_statuses = [self.labels[('action_status', index)].text for index in range(12)]
+                assert step_statuses.count('Current') == 1
+                assert self.labels[('action_step', 11)].text == 'STEP 5 · PRODUCTION'
+                assert self.labels[('action_status', 11)].text == 'Skipped'
                 arcade.get_image().save(preview_dir / 'cargo-preview.png')
                 self.focus_view = False
                 self.on_draw()
@@ -403,16 +407,13 @@ class BoardWindow(arcade.Window):
                 self.on_mouse_press((establish[1] + establish[2]) / 2,
                                     (establish[3] + establish[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
                 self.on_draw()
+                assert self.movement.session is None
                 assert target.planet_owners[planet_id] == 'sol'
                 assert next(card for card in sol_player.planets if card.planet.planet_id == planet_id).exhausted
                 self.focus_view = True
                 self.on_draw()
                 arcade.get_image().save(preview_dir / 'planet-control-preview.png')
                 self.focus_view = False
-                done = next(button for button in self.movement_panel.buttons if button[0] == ('done',))
-                self.on_mouse_press((done[1] + done[2]) / 2,
-                                    (done[3] + done[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
-                assert self.movement.session is None
                 self.on_draw()
                 arcade.get_image().save(preview_dir / 'system-control-preview.png')
                 self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
@@ -499,9 +500,8 @@ class BoardWindow(arcade.Window):
                             self.movement.cycle_landing(action[1])
                         elif action[0] == 'establish':
                             self.movement.establish_control()
-                        elif action[0] == 'done':
-                            self.movement.finish()
                             self.movement_panel.reset()
+                            self.selected_units = ()
                     except MovementError as error:
                         self.movement_error = str(error)
             return

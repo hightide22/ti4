@@ -256,6 +256,7 @@ class MovementController:
                                for _, pid in landed) + '. ' +
                                ('Captured: ' + ', '.join(captured) + '.' if captured else 'Control did not change.'))
         session.stage = 'complete'
+        self.finish()
 
     def finish(self):
         if self.session and self.session.stage == 'complete':

@@ -79,6 +79,7 @@ class MovementPanel:
             ('  Space Cannon Defense', 'Skipped'),
             ('  Ground Combat', 'Skipped'),
             ('  Establish Control', 'Done' if invasion_done and landing_assigned else 'Skipped'),
+            ('STEP 5 · PRODUCTION', 'Skipped'),
         )
         for index, (label, status) in enumerate(rows):
             current = status == 'Current'
@@ -149,10 +150,6 @@ class MovementPanel:
                     y -= 44
                 window.text('landing_help', 'Click a force to cycle through planets or keep it aboard.', x, y - 4, 10, MUTED, width)
                 y -= 25
-            else:
-                window.text('action_complete', 'TACTICAL ACTION COMPLETE', x, y, 12, ACCENT)
-                window.text('action_result', session.outcome, x, y - 27, 11, INK, width)
-                y -= 70
             self.scroll_max = max(0, start - (y - self.scroll) - (top - bottom) + 40)
             self.scroll_by(0)
         finally:
@@ -175,9 +172,6 @@ class MovementPanel:
         elif session.stage == 'invasion':
             landing_assigned = any(planet_id is not None for planet_id in session.landings.values())
             actions = (('establish', 'Land forces' if landing_assigned else 'Skip invasion', x, split - 6, (30, 88, 105)),
-                       ('cancel', 'Cancel', split, x + width, CARD))
-        elif session.stage == 'complete':
-            actions = (('done', 'Done', x, split - 6, (30, 88, 105)),
                        ('cancel', 'Cancel', split, x + width, CARD))
         else:
             actions = (('continue', 'Continue', x, split - 6, (30, 88, 105)),

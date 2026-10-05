@@ -39,7 +39,8 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(session.stage, 'invasion')
         self.controller.establish_control()
         self.assertEqual(session.stage, 'complete')
-        self.controller.finish()
+        self.assertIsNone(self.controller.session)
+        self.assertEqual(len(self.controller.history), 1)
         self.assertTrue(self.controller.undo())
         self.assertEqual(self.home.units, original_units)
         self.assertNotIn('sol', self.target.command_tokens)
@@ -69,7 +70,7 @@ class MovementTests(unittest.TestCase):
         captured_card = next(card for card in self.player.planets if card.planet.planet_id == planet.planet_id)
         self.assertTrue(captured_card.exhausted)
 
-        self.controller.finish()
+        self.assertIsNone(self.controller.session)
         self.assertTrue(self.controller.undo())
         self.assertNotIn(planet.planet_id, target.planet_owners)
         self.assertEqual(self.player.planets, original_cards)
