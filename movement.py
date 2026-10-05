@@ -4,7 +4,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from player import PlanetCard
-from units import Region, UnitLocation, UNIT_TYPES
+from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile, unit_profiles
 
 
 class MovementError(ValueError):
@@ -30,13 +30,19 @@ class Snapshot:
     tiles: list
     locations: list
     planet_cards: list
+    card_states: list
+    currencies: list
 
     @classmethod
     def capture(cls, board, player, players):
+        all_players = players or [player]
+        cards = [(other, list(other.planets)) for other in all_players]
         return cls(player, dict(player.command_pools),
                    [(tile, list(tile.units), set(tile.command_tokens), dict(tile.planet_owners)) for tile in board.values()],
                    [(unit, unit.location) for tile in board.values() for unit in tile.units],
-                   [(other, list(other.planets)) for other in players])
+                   cards,
+                   [(card, card.exhausted) for _, player_cards in cards for card in player_cards],
+                   [(other, other.trade_goods, other.commodities) for other in all_players])
 
     def restore(self):
         self.player.command_pools.clear()
@@ -51,6 +57,11 @@ class Snapshot:
             unit.location = location
         for player, cards in self.planet_cards:
             player.planets[:] = cards
+        for card, exhausted in self.card_states:
+            card.exhausted = exhausted
+        for player, trade_goods, commodities in self.currencies:
+            player.trade_goods = trade_goods
+            player.commodities = commodities
 
 
 @dataclass
@@ -64,6 +75,14 @@ class Session:
     landings: dict[str, str | None] = field(default_factory=dict)
     cannon_log: list[str] = field(default_factory=list)
     outcome: str = ''
+    overflow_required: int = 0
+    overflow_selected: set[str] = field(default_factory=set)
+    overflow_next_stage: str | None = None
+    production_limit: int = 0
+    production_sites: list[tuple[str, int]] = field(default_factory=list)
+    production_choices: dict[str, int] = field(default_factory=dict)
+    production_planets: set[str] = field(default_factory=set)
+    trade_goods_to_spend: int = 0
 
     @property
     def choices(self):
@@ -175,10 +194,6 @@ class MovementController:
             raise MovementError('No active movement')
         if session.stage != 'movement':
             raise MovementError('Ship movement has already been completed')
-        capital_count = sum(capital_ship(u) and u.owner == session.player.faction for u in session.target.units)
-        capital_count += sum(len(session.ships(s)) for s in session.sources.values())
-        if capital_count > session.player.command_pools['fleet']:
-            raise MovementError('The selected fleet exceeds your fleet reserve limit')
         transfers = []
         for source in session.sources.values():
             ships = session.ships(source)
@@ -201,11 +216,207 @@ class MovementController:
             origin.units.remove(unit)
             unit.location = location
             session.target.units.append(unit)
-        session.stage = 'invasion'
         session.cannon_log = []
         session.landings = ({unit.unit_id: None for unit in self.landing_forces(session)}
                             if session.target.planets else {})
+        self._check_fleet_limit(session, 'invasion')
         return len(transfers)
+
+    def fleet_ships(self, session):
+        return [unit for unit in session.target.units if unit.owner == session.player.faction and
+                unit.location.region == Region.SPACE and capital_ship(unit)]
+
+    def _check_fleet_limit(self, session, next_stage):
+        excess = max(0, len(self.fleet_ships(session)) - session.player.command_pools['fleet'])
+        if excess:
+            session.stage = 'fleet_overflow'
+            session.overflow_required = excess
+            session.overflow_selected.clear()
+            session.overflow_next_stage = next_stage
+        elif next_stage == 'invasion':
+            session.stage = 'invasion'
+        else:
+            session.stage = 'complete'
+            self.finish()
+
+    def toggle_overflow_ship(self, unit_id):
+        session = self.session
+        if not session or session.stage != 'fleet_overflow':
+            raise MovementError('Fleet supply is not being checked')
+        ships = {unit.unit_id for unit in self.fleet_ships(session)}
+        if unit_id not in ships:
+            raise MovementError('This ship cannot be removed from the fleet')
+        if unit_id in session.overflow_selected:
+            session.overflow_selected.remove(unit_id)
+        elif len(session.overflow_selected) < session.overflow_required:
+            session.overflow_selected.add(unit_id)
+
+    def resolve_fleet_overflow(self):
+        session = self.session
+        if not session or session.stage != 'fleet_overflow':
+            raise MovementError('Fleet supply is not being checked')
+        if len(session.overflow_selected) != session.overflow_required:
+            raise MovementError(f'Select exactly {session.overflow_required} ships to destroy')
+        destroyed = set(session.overflow_selected)
+        for unit in list(session.target.units):
+            if unit.unit_id in destroyed or (
+                    unit.location.region == Region.TRANSPORT and unit.location.carrier_id in destroyed):
+                session.target.units.remove(unit)
+        next_stage = session.overflow_next_stage
+        session.overflow_required = 0
+        session.overflow_selected.clear()
+        session.overflow_next_stage = None
+        if next_stage == 'invasion':
+            carried_ids = {unit.unit_id for unit in self.landing_forces(session)}
+            session.landings = {unit_id: planet_id for unit_id, planet_id in session.landings.items()
+                                if unit_id in carried_ids}
+            session.stage = 'invasion'
+        else:
+            session.stage = 'complete'
+            self.finish()
+
+    def production_sites(self, session):
+        sites = []
+        for unit in session.target.units:
+            if unit.owner != session.player.faction or unit.location.region != Region.PLANET:
+                continue
+            planet_id = unit.location.planet_id
+            planet = next((planet for planet in session.target.planets if planet.planet_id == planet_id), None)
+            if not planet or session.target.planet_owners.get(planet_id) != session.player.faction:
+                continue
+            value = unit_profile(unit).get('productionValue')
+            if value is None:
+                continue
+            if unit.kind == 'spacedock':
+                value_text = str(value)
+                production = planet.resources + int(value_text[1:]) if value_text.startswith('+') else int(value)
+            else:
+                production = int(value)
+            if production > 0:
+                sites.append((planet_id, production))
+        return sites
+
+    def unit_cost(self, kind, player):
+        costs = {'infantry': .5, 'fighter': .5, 'destroyer': 1, 'cruiser': 2,
+                 'carrier': 3, 'dreadnought': 4, 'mech': 2, 'pds': 2,
+                 'spacedock': 4, 'flagship': 8, 'warsun': 12}
+        definitions, factions = unit_profiles()
+        faction = factions.get(player.faction, {})
+        for profile_id in faction.get('units', []):
+            profile = definitions.get(profile_id, {})
+            if profile.get('baseType') == kind and profile.get('cost') is not None:
+                return float(profile['cost'])
+        profile = definitions.get(kind, {})
+        return float(profile['cost']) if profile.get('cost') is not None else costs[kind]
+
+    def prepare_production(self, session):
+        sites = self.production_sites(session)
+        if not sites:
+            self._check_fleet_limit(session, 'complete')
+            return False
+        session.production_sites = sites
+        session.production_limit = sum(value for _, value in sites)
+        session.production_choices.clear()
+        session.production_planets.clear()
+        session.trade_goods_to_spend = 0
+        session.stage = 'production'
+        return True
+
+    def production_total(self, session):
+        return sum(session.production_choices.values())
+
+    def production_cost(self, session):
+        return sum(self.unit_cost(kind, session.player) * count
+                   for kind, count in session.production_choices.items())
+
+    def production_payment(self, session):
+        card_resources = sum(card.planet.resources for card in session.player.planets
+                             if card.planet.planet_id in session.production_planets)
+        return card_resources + session.trade_goods_to_spend
+
+    def adjust_production(self, kind, delta):
+        session = self.session
+        if not session or session.stage != 'production':
+            raise MovementError('Production is not active')
+        current = session.production_choices.get(kind, 0)
+        if delta > 0:
+            remaining = session.production_limit - self.production_total(session)
+            addition = (2 if remaining >= 2 else 1) if kind in ('infantry', 'fighter') else 1
+            if addition > remaining:
+                return
+            session.production_choices[kind] = current + addition
+        elif current:
+            removal = (2 if current >= 2 else 1) if kind in ('infantry', 'fighter') else 1
+            updated = current - removal
+            if updated:
+                session.production_choices[kind] = updated
+            else:
+                session.production_choices.pop(kind, None)
+
+    def change_production_trade_goods(self, delta):
+        session = self.session
+        if not session or session.stage != 'production':
+            raise MovementError('Production is not active')
+        session.trade_goods_to_spend = max(0, min(session.player.trade_goods,
+                                                   session.trade_goods_to_spend + delta))
+
+    def toggle_production_planet(self, planet_id):
+        session = self.session
+        if not session or session.stage != 'production':
+            raise MovementError('Production is not active')
+        card = next((card for card in session.player.planets
+                     if card.planet.planet_id == planet_id), None)
+        if not card:
+            raise MovementError('This planet cannot pay for production')
+        if planet_id in session.production_planets:
+            session.production_planets.remove(planet_id)
+            card.exhausted = False
+        elif not card.exhausted:
+            session.production_planets.add(planet_id)
+            card.exhausted = True
+
+    def produce(self):
+        session = self.session
+        if not session or session.stage != 'production':
+            raise MovementError('Production is not active')
+        if not session.production_choices:
+            raise MovementError('Choose at least one unit or skip production')
+        if self.production_total(session) > session.production_limit:
+            raise MovementError('Production limit exceeded')
+        if self.production_payment(session) < self.production_cost(session):
+            raise MovementError('Not enough exhausted planet resources and trade goods')
+        for card in session.player.planets:
+            if card.planet.planet_id in session.production_planets:
+                card.exhausted = True
+        session.player.trade_goods -= session.trade_goods_to_spend
+        used_ids = {unit.unit_id for tile in self.board.values() for unit in tile.units}
+        next_id = 1
+        for kind, count in session.production_choices.items():
+            for _ in range(count):
+                while f'{session.player.faction}-built-{next_id}' in used_ids:
+                    next_id += 1
+                unit_id = f'{session.player.faction}-built-{next_id}'
+                used_ids.add(unit_id)
+                next_id += 1
+                if kind in ('infantry', 'mech', 'pds', 'spacedock'):
+                    planet_id = session.production_sites[0][0]
+                    location = UnitLocation(Region.PLANET, planet_id=planet_id)
+                else:
+                    location = UnitLocation(Region.SPACE)
+                session.target.units.append(Unit(unit_id, kind, session.player.faction,
+                                                 session.player.color_code, location))
+        session.stage = 'complete'
+        self._check_fleet_limit(session, 'complete')
+
+    def skip_production(self):
+        session = self.session
+        if not session or session.stage != 'production':
+            raise MovementError('Production is not active')
+        for card in session.player.planets:
+            if card.planet.planet_id in session.production_planets:
+                card.exhausted = False
+        session.stage = 'complete'
+        self._check_fleet_limit(session, 'complete')
 
     def landing_forces(self, session):
         return [unit for unit in session.target.units if unit.owner == session.player.faction and
@@ -255,8 +466,7 @@ class MovementController:
             session.outcome = ('Landed forces on ' + ', '.join(next(p.name for p in target.planets if p.planet_id == pid)
                                for _, pid in landed) + '. ' +
                                ('Captured: ' + ', '.join(captured) + '.' if captured else 'Control did not change.'))
-        session.stage = 'complete'
-        self.finish()
+        self.prepare_production(session)
 
     def finish(self):
         if self.session and self.session.stage == 'complete':

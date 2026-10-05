@@ -10,7 +10,7 @@ from pathlib import Path
 import arcade
 
 from board import Board, Tile, load_board
-from units import Region, UNIT_TYPES
+from units import Region, Unit, UnitLocation, UNIT_TYPES
 from unit_view import UnitRenderer
 from system_panel import SystemPanel
 from player import PlanetCard, create_players
@@ -359,6 +359,9 @@ class BoardWindow(arcade.Window):
                 self.selected = target.position
                 self.on_draw()
                 source = self.movement.session.sources[home.position]
+                production_planet = target.planets[0]
+                target.units.append(Unit('smoke-production-base', 'spacedock', 'sol', sol_player.color_code,
+                                         UnitLocation(Region.PLANET, planet_id=production_planet.planet_id)))
                 ship = source.ships[0]
                 row = next(hit for hit in self.movement_panel.hits if hit[0] == ('unit', ship.unit_id)
                            and self.movement_panel.hit_test((hit[1] + hit[2]) / 2,
@@ -390,10 +393,10 @@ class BoardWindow(arcade.Window):
                            for unit in target.units)
                 self.focus_view = True
                 self.on_draw()
-                step_statuses = [self.labels[('action_status', index)].text for index in range(12)]
+                step_statuses = [self.labels[('action_status', index)].text for index in range(14)]
                 assert step_statuses.count('Current') == 1
-                assert self.labels[('action_step', 11)].text == 'STEP 5 · PRODUCTION'
-                assert self.labels[('action_status', 11)].text == 'Skipped'
+                assert self.labels[('action_step', 12)].text == 'STEP 5 · PRODUCTION'
+                assert self.labels[('action_status', 12)].text == 'Skipped'
                 arcade.get_image().save(preview_dir / 'cargo-preview.png')
                 self.focus_view = False
                 self.on_draw()
@@ -407,9 +410,32 @@ class BoardWindow(arcade.Window):
                 self.on_mouse_press((establish[1] + establish[2]) / 2,
                                     (establish[3] + establish[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
                 self.on_draw()
-                assert self.movement.session is None
+                assert self.movement.session and self.movement.session.stage == 'production'
                 assert target.planet_owners[planet_id] == 'sol'
                 assert next(card for card in sol_player.planets if card.planet.planet_id == planet_id).exhausted
+                step_statuses = [self.labels[('action_status', index)].text for index in range(14)]
+                assert step_statuses.count('Current') == 1
+                assert self.labels[('action_step', 12)].text == 'STEP 5 · PRODUCTION'
+                assert self.labels[('action_status', 12)].text == 'In progress'
+                arcade.get_image().save(preview_dir / 'production-preview.png')
+                infantry_plus = next(hit for hit in self.movement_panel.hits
+                                     if hit[0] == ('production_unit', 'infantry', 1))
+                self.on_mouse_press((infantry_plus[1] + infantry_plus[2]) / 2,
+                                    (infantry_plus[3] + infantry_plus[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                home_card = next(control for control in self.player_panel.controls
+                                 if control.action[0] == 'planet' and
+                                 self.player_panel.player.planets[control.action[1]].planet.planet_id in
+                                 {unit.location.planet_id for unit in home.units if unit.location.region == Region.PLANET})
+                self.on_mouse_press(home_card.left + home_card.width / 2,
+                                    home_card.bottom + home_card.height / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'production-payment-preview.png')
+                produce = next(button for button in self.movement_panel.buttons if button[0] == ('produce',))
+                self.on_mouse_press((produce[1] + produce[2]) / 2,
+                                    (produce[3] + produce[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                assert self.movement.session is None
+                assert sum(unit.kind == 'infantry' and unit.location.region == Region.PLANET and
+                           unit.location.planet_id == production_planet.planet_id for unit in target.units) == 3
                 self.focus_view = True
                 self.on_draw()
                 arcade.get_image().save(preview_dir / 'planet-control-preview.png')
@@ -417,6 +443,8 @@ class BoardWindow(arcade.Window):
                 self.on_draw()
                 arcade.get_image().save(preview_dir / 'system-control-preview.png')
                 self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
+                assert sum(unit.kind == 'infantry' and unit.location.region == Region.PLANET and
+                           unit.location.planet_id == production_planet.planet_id for unit in target.units) == 0
                 assert home.units == before_units and ship not in target.units
                 assert 'sol' not in target.command_tokens
                 assert sol_player.command_pools['tactical'] == before_tactical
@@ -479,6 +507,13 @@ class BoardWindow(arcade.Window):
             self.token_context = None
         left = self.width - self.sidebar
         if self.movement.session:
+            if self.movement.session.stage == 'production' and y < self.player_panel.HEIGHT:
+                control = next((control for control in reversed(self.player_panel.controls)
+                                if control.contains(x, y) and control.action[0] == 'planet'), None)
+                if control:
+                    planet_id = self.player_panel.player.planets[control.action[1]].planet.planet_id
+                    self.movement.toggle_production_planet(planet_id)
+                    return
             if x >= left:
                 action = self.movement_panel.hit_test(x, y)
                 if action:
@@ -498,8 +533,25 @@ class BoardWindow(arcade.Window):
                             self.selected_units = ()
                         elif action[0] == 'landing':
                             self.movement.cycle_landing(action[1])
+                        elif action[0] == 'overflow':
+                            self.movement.toggle_overflow_ship(action[1])
+                        elif action[0] == 'resolve_overflow':
+                            self.movement.resolve_fleet_overflow()
+                            self.movement_panel.reset()
+                        elif action[0] == 'production_unit':
+                            self.movement.adjust_production(action[1], action[2])
+                        elif action[0] == 'production_trade_goods':
+                            self.movement.change_production_trade_goods(action[1])
                         elif action[0] == 'establish':
                             self.movement.establish_control()
+                            self.movement_panel.reset()
+                            self.selected_units = ()
+                        elif action[0] == 'produce':
+                            self.movement.produce()
+                            self.movement_panel.reset()
+                            self.selected_units = ()
+                        elif action[0] == 'skip_production':
+                            self.movement.skip_production()
                             self.movement_panel.reset()
                             self.selected_units = ()
                     except MovementError as error:

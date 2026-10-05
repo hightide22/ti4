@@ -9,6 +9,12 @@ INK = (223, 232, 244)
 MUTED = (132, 154, 180)
 ACCENT = (100, 207, 224)
 CARD = (23, 39, 57)
+PRODUCTION_ORDER = ('infantry', 'fighter', 'destroyer', 'cruiser', 'carrier', 'dreadnought',
+                    'mech', 'pds', 'spacedock', 'flagship', 'warsun')
+
+
+def amount(value):
+    return str(int(value)) if float(value).is_integer() else f'{value:g}'
 
 
 class MovementPanel:
@@ -67,19 +73,25 @@ class MovementPanel:
         landing_assigned = any(planet_id is not None for planet_id in session.landings.values())
         has_forces = bool(session.landings)
         invasion_current = stage == 'invasion'
+        overflow_current = stage == 'fleet_overflow'
+        production_current = stage == 'production'
+        overflow_after_move = overflow_current and session.overflow_next_stage == 'invasion'
+        has_production = bool(window.movement.production_sites(session))
         rows = (
             ('STEP 1 · ACTIVATION', 'Done'),
-            ('STEP 2 · MOVEMENT', 'Done' if movement_done else 'In progress'),
+            ('STEP 2 · MOVEMENT', 'In progress' if stage == 'movement' or overflow_after_move else 'Done' if movement_done else 'Waiting'),
             ('  Move Ships', ('Done' if ships_selected else 'Skipped') if movement_done else 'Current'),
+            ('  Fleet Supply', 'Current' if overflow_current else 'Done' if overflow_after_move else 'Skipped'),
             ('  Space Cannon Offense', 'Skipped'),
             ('STEP 3 · SPACE COMBAT', 'Skipped'),
-            ('STEP 4 · INVASION', 'Done' if invasion_done else ('In progress' if invasion_current and has_forces else ('Current' if invasion_current else 'Waiting'))),
+            ('STEP 4 · INVASION', 'Done' if stage in ('production', 'complete') or (overflow_current and session.overflow_next_stage == 'complete') else ('In progress' if invasion_current and has_forces else ('Current' if invasion_current else 'Waiting'))),
             ('  Bombardment', 'Skipped'),
-            ('  Commit Ground Forces', ('Done' if landing_assigned else 'Skipped') if invasion_done else ('Current' if invasion_current and has_forces else 'Skipped')),
+            ('  Commit Ground Forces', ('Done' if landing_assigned else 'Skipped') if stage in ('production', 'complete') else ('Current' if invasion_current and has_forces else 'Skipped')),
             ('  Space Cannon Defense', 'Skipped'),
             ('  Ground Combat', 'Skipped'),
-            ('  Establish Control', 'Done' if invasion_done and landing_assigned else 'Skipped'),
-            ('STEP 5 · PRODUCTION', 'Skipped'),
+            ('  Establish Control', 'Done' if stage in ('production', 'complete') and landing_assigned else 'Skipped'),
+            ('STEP 5 · PRODUCTION', 'In progress' if production_current or (overflow_current and session.overflow_next_stage == 'complete') else 'Waiting' if has_production else 'Skipped'),
+            ('  Produce Units', 'Done' if overflow_current and session.overflow_next_stage == 'complete' else 'Current' if production_current else 'Skipped'),
         )
         for index, (label, status) in enumerate(rows):
             current = status == 'Current'
@@ -150,6 +162,70 @@ class MovementPanel:
                     y -= 44
                 window.text('landing_help', 'Click a force to cycle through planets or keep it aboard.', x, y - 4, 10, MUTED, width)
                 y -= 25
+            elif session.stage == 'fleet_overflow':
+                ships = window.movement.fleet_ships(session)
+                window.text('fleet_overflow_title', 'FLEET SUPPLY', x, y, 11, ACCENT)
+                y -= 20
+                window.text('fleet_overflow_count',
+                            f'Destroy {session.overflow_required} of {len(ships)} non-fighter ships',
+                            x, y, 10, MUTED, width)
+                y -= 27
+                for unit in ships:
+                    top = y
+                    selected = unit.unit_id in session.overflow_selected
+                    arcade.draw_lrbt_rectangle_filled(x, x + width, top - 35, top,
+                                                       (32, 69, 82) if selected else CARD)
+                    window.player_panel.image(f'units/{unit.color_code}_{UNIT_TYPES[unit.kind]["sprite"]}.png',
+                                              x + 17, top - 17, 23)
+                    window.text(('overflow_ship', unit.unit_id),
+                                f'{UNIT_TYPES[unit.kind]["name"]} · {"Destroy" if selected else "Keep"}',
+                                x + 34, top - 12, 10, INK)
+                    self.hits.append((('overflow', unit.unit_id), x, x + width, top - 35, top))
+                    y -= 39
+                y -= 12
+            elif session.stage == 'production':
+                selected_cost = window.movement.production_cost(session)
+                paid = window.movement.production_payment(session)
+                produced = window.movement.production_total(session)
+                window.text('production_title', 'PRODUCTION', x, y, 11, ACCENT)
+                y -= 21
+                window.text('production_capacity', f'Production limit: {produced}/{session.production_limit}',
+                            x, y, 10, MUTED)
+                y -= 16
+                window.text('production_payment', f'Payment: {amount(paid)}/{amount(selected_cost)}',
+                            x, y, 10, INK)
+                y -= 23
+                arcade.draw_lrbt_rectangle_filled(x, x + width, y - 24, y, CARD)
+                window.text('production_trade_goods', f'Trade goods: {session.trade_goods_to_spend}',
+                            x + 8, y - 16, 10, INK)
+                for delta, left in ((-1, x + width - 57), (1, x + width - 29)):
+                    arcade.draw_lrbt_rectangle_filled(left, left + 23, y - 21, y - 3, (37, 65, 83))
+                    window.text(('production_tg_button', delta), '+' if delta > 0 else '−',
+                                left + 7, y - 18, 11, ACCENT)
+                    self.hits.append((('production_trade_goods', delta), left, left + 23, y - 21, y - 3))
+                y -= 32
+                for kind in PRODUCTION_ORDER:
+                    top = y
+                    count = session.production_choices.get(kind, 0)
+                    cost = window.movement.unit_cost(kind, session.player)
+                    arcade.draw_lrbt_rectangle_filled(x, x + width, top - 30, top, CARD)
+                    window.player_panel.image(f'units/{session.player.color_code}_{UNIT_TYPES[kind]["sprite"]}.png',
+                                              x + 15, top - 15, 20)
+                    pair_note = ' · 2 per click' if kind in ('infantry', 'fighter') else ''
+                    window.text(('production_unit', kind),
+                                f'{UNIT_TYPES[kind]["name"]} · {amount(cost)} each{pair_note}',
+                                x + 30, top - 11, 9, INK)
+                    window.text(('production_count', kind), str(count), x + width - 49, top - 11, 10, ACCENT)
+                    for delta, left in ((-1, x + width - 36), (1, x + width - 18)):
+                        arcade.draw_lrbt_rectangle_filled(left, left + 16, top - 26, top - 4,
+                                                          (37, 65, 83))
+                        window.text(('production_unit_button', kind, delta), '+' if delta > 0 else '−',
+                                    left + 4, top - 24, 10, ACCENT)
+                        self.hits.append((('production_unit', kind, delta), left, left + 16,
+                                          top - 26, top - 4))
+                    y -= 34
+                window.text('production_help', 'Click ready planet cards below to exhaust them for resources.',
+                            x, y, 9, MUTED, width)
             self.scroll_max = max(0, start - (y - self.scroll) - (top - bottom) + 40)
             self.scroll_by(0)
         finally:
@@ -163,6 +239,9 @@ class MovementPanel:
         cargo = sum(session.cargo_values(source)[0] for source in session.sources.values())
         landed = sum(planet_id is not None for planet_id in session.landings.values())
         summary = (f'{ships} ships · {cargo} passengers selected' if session.stage == 'movement' else
+                   f'{window.movement.production_total(session)} units · Cost {amount(window.movement.production_cost(session))}'
+                   if session.stage == 'production' else
+                   f'{session.overflow_required} ships to destroy' if session.stage == 'fleet_overflow' else
                    f'{landed} ground force{"s" if landed != 1 else ""} assigned to planet{"s" if landed != 1 else ""}')
         window.text('move_summary', summary, x, 118, 11, INK, width)
         split = x + width * .64
@@ -173,6 +252,16 @@ class MovementPanel:
             landing_assigned = any(planet_id is not None for planet_id in session.landings.values())
             actions = (('establish', 'Land forces' if landing_assigned else 'Skip invasion', x, split - 6, (30, 88, 105)),
                        ('cancel', 'Cancel', split, x + width, CARD))
+        elif session.stage == 'fleet_overflow':
+            ready = len(session.overflow_selected) == session.overflow_required
+            actions = (('resolve_overflow', f'Destroy {session.overflow_required} ships' if ready else
+                        f'Select {session.overflow_required} ships', x, split - 6, (30, 88, 105)),
+                       ('cancel', 'Cancel', split, x + width, CARD))
+        elif session.stage == 'production':
+            can_produce = bool(session.production_choices) and window.movement.production_payment(session) >= window.movement.production_cost(session)
+            label = 'Produce units' if can_produce else 'Add payment' if session.production_choices else 'Choose units'
+            actions = (('produce', label, x, split - 6, (30, 88, 105)),
+                       ('skip_production', 'Skip production', split, x + width, CARD))
         else:
             actions = (('continue', 'Continue', x, split - 6, (30, 88, 105)),
                        ('cancel', 'Cancel', split, x + width, CARD))
