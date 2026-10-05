@@ -44,6 +44,15 @@ class Unit:
     color_code: str
     location: UnitLocation
     damaged: bool = False
+    profile_id: str | None = None
+
+    @property
+    def move_value(self):
+        return unit_profile(self).get('moveValue', 0)
+
+    @property
+    def capacity(self):
+        return unit_profile(self).get('capacityValue', 0)
 
     @property
     def image_path(self) -> Path:
@@ -53,7 +62,7 @@ class Unit:
         if self.kind not in UNIT_TYPES:
             raise ValueError(f"Unknown unit: {self.kind}")
         ship = UNIT_TYPES[self.kind]["ship"]
-        if ship and self.location.region != Region.SPACE:
+        if ship and self.location.region != Region.SPACE and not (self.kind == 'fighter' and self.location.region == Region.TRANSPORT):
             raise ValueError("Ships must be in space")
         if not ship and self.location.region == Region.SPACE:
             raise ValueError("Ground units must be on a planet or a transport")
@@ -77,6 +86,28 @@ UNIT_TYPES = {
     "spacedock": {"sprite": "sd", "name": "Space dock", "ship": False, "size": 42},
 }
 STARTING_CODES = {"cv": "carrier", "cr": "cruiser", "dd": "destroyer", "dn": "dreadnought", "ff": "fighter", "inf": "infantry", "pds": "pds", "sd": "spacedock"}
+
+
+@lru_cache(maxsize=1)
+def unit_profiles():
+    definitions = {}
+    for filename in ('baseUnits.json', 'pok.json'):
+        for data in json.loads((RESOURCES / 'data/units' / filename).read_text(encoding='utf-8')):
+            if data.get('source') == 'base':
+                definitions[data['id']] = data
+    factions = {f['alias']: f for f in json.loads((RESOURCES / 'data/factions/base.json').read_text(encoding='utf-8'))}
+    return definitions, factions
+
+
+def unit_profile(unit):
+    definitions, factions = unit_profiles()
+    if unit.profile_id:
+        return definitions[unit.profile_id]
+    for profile_id in factions.get(unit.owner, {}).get('units', []):
+        profile = definitions.get(profile_id)
+        if profile and profile['baseType'] == unit.kind:
+            return profile
+    return definitions[unit.kind]
 
 
 def starting_units(tile: Tile, faction: dict, color_code: str) -> list[Unit]:

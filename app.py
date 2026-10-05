@@ -15,6 +15,8 @@ from unit_view import UnitRenderer
 from system_panel import SystemPanel
 from player import PlanetCard, create_players
 from player_panel import PlayerPanel
+from movement import MovementController, MovementError
+from movement_panel import MovementPanel
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -59,6 +61,9 @@ class BoardWindow(arcade.Window):
         self.unit_renderer = UnitRenderer()
         self.system_panel = SystemPanel()
         self.player_panel = PlayerPanel(create_players(self.board, self.map_config))
+        self.movement = MovementController(self.board)
+        self.movement_panel = MovementPanel()
+        self.movement_error = None
         self.selected_units = ()
         self.hovered_units = ()
         self.focus_view = False
@@ -122,6 +127,10 @@ class BoardWindow(arcade.Window):
         texture = self.tile_sprites[tile].texture
         arcade.draw_texture_rect(texture, arcade.XYWH(x, y, width, width * texture.height / texture.width))
         self.unit_renderer.draw(tile, x, y, width, detailed=detailed, selected=self.selected_units, hovered=self.hovered_units, interactive=interactive, scope=scope)
+        for index, player in enumerate(self.player_panel.players):
+            if player.faction in tile.command_tokens:
+                self.player_panel.image(f'command_token/command_{player.color_code}.png',
+                                        x + width * (.35 - index * .12), y + width * .35, width * .16)
 
     @property
     def planet_hover_system(self):
@@ -181,7 +190,15 @@ class BoardWindow(arcade.Window):
         self.text('zoom', f'{self.focus_zoom if self.focus_view else self.zoom:.1f}×', left - 62, self.height - 45, 13, ACCENT)
         arcade.draw_lrbt_rectangle_filled(left - 225, left - 85, self.height - 56, self.height - 24, (25, 45, 63))
         self.text('focus_button', 'Galaxy view' if self.focus_view else 'Detail view', left - 212, self.height - 46, 12, ACCENT)
-        self.system_panel.draw(self, self.board[self.selected], left)
+        if self.movement.session:
+            self.movement_panel.draw(self, self.movement.session, left)
+            if self.movement_error:
+                self.text('movement_error', self.movement_error, left + 18, 112, 10, (245, 142, 128), self.sidebar - 36)
+        else:
+            self.system_panel.draw(self, self.board[self.selected], left)
+            if self.movement_error:
+                self.text('movement_error', self.movement_error, left + 18, 34, 10,
+                          (245, 142, 128), self.sidebar - 36)
         self.player_panel.draw(self)
 
     def on_update(self, delta_time):
@@ -303,10 +320,41 @@ class BoardWindow(arcade.Window):
                 panel.card_offset = 0
             self.focus_view = False
             self.selected_units = ()
+            sol_player = next((player for player in self.player_panel.players if player.faction == 'sol'), None)
+            if sol_player:
+                self.player_panel.active = self.player_panel.players.index(sol_player)
+                home = next(tile for tile in self.board.values() if any(unit.owner == 'sol' for unit in tile.units))
+                target = next(tile for tile in self.board.neighbors(home.position)
+                              if any(self.movement.route(home, tile, unit, sol_player)
+                                     for unit in home.units if unit.owner == 'sol'))
+                before_units = list(home.units)
+                before_strategic = sol_player.command_pools['strategic']
+                self.movement.activate(sol_player, target.position)
+                self.selected = target.position
+                self.on_draw()
+                source = self.movement.session.sources[home.position]
+                ship = source.ships[0]
+                row = next(hit for hit in self.movement_panel.hits if hit[0] == ('unit', ship.unit_id)
+                           and self.movement_panel.hit_test((hit[1] + hit[2]) / 2,
+                                                            (hit[3] + hit[4]) / 2) == hit[0])
+                self.on_mouse_press((row[1] + row[2]) / 2, (row[3] + row[4]) / 2,
+                                    arcade.MOUSE_BUTTON_LEFT, 0)
+                self.on_draw()
+                confirm = next(button for button in self.movement_panel.buttons if button[0] == ('confirm',))
+                self.on_mouse_press((confirm[1] + confirm[2]) / 2,
+                                    (confirm[3] + confirm[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                assert self.movement.session is None and ship in target.units
+                self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
+                assert home.units == before_units and ship not in target.units
+                assert 'sol' not in target.command_tokens
+                assert sol_player.command_pools['strategic'] == before_strategic
+                self.selected = target.position
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'movement-preview.png')
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
             self.on_draw()
             arcade.get_image().save(preview_dir / 'board-preview.png')
-            print(f'PASS: {len(self.board)} independent tile objects and sprites; map interaction, planet cards, currency limits and command transfers checked')
+            print(f'PASS: {len(self.board)} tile objects; board, player panel and movement activation / undo checked')
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):
@@ -320,6 +368,27 @@ class BoardWindow(arcade.Window):
         if button != arcade.MOUSE_BUTTON_LEFT:
             return
         left = self.width - self.sidebar
+        if self.movement.session:
+            if x >= left:
+                action = self.movement_panel.hit_test(x, y)
+                if action:
+                    try:
+                        if action[0] == 'unit':
+                            self.movement.session.toggle(action[1])
+                            self.movement_error = None
+                        elif action[0] == 'confirm':
+                            self.movement.confirm()
+                            self.movement_error = None
+                            self.movement_panel.reset()
+                            self.selected_units = ()
+                        elif action[0] == 'cancel':
+                            self.movement.cancel()
+                            self.movement_error = None
+                            self.movement_panel.reset()
+                            self.selected_units = ()
+                    except MovementError as error:
+                        self.movement_error = str(error)
+            return
         if x < left and y < self.player_panel.HEIGHT:
             self.player_panel.handle_click(x, y)
             return
@@ -346,7 +415,12 @@ class BoardWindow(arcade.Window):
                 self.selected_units = ()
             now = time.monotonic()
             if self.last_click[0] == picked and now - self.last_click[1] < .33:
-                self.toggle_focus()
+                try:
+                    self.movement.activate(self.player_panel.player, picked)
+                    self.movement_panel.reset()
+                    self.movement_error = None
+                except MovementError as error:
+                    self.movement_error = str(error)
                 self.last_click = (None, 0.0)
             else:
                 self.last_click = (picked, now)
@@ -361,19 +435,31 @@ class BoardWindow(arcade.Window):
         if x < self.width - self.sidebar and y < self.player_panel.HEIGHT:
             return
         if x >= self.width - self.sidebar:
-            self.system_panel.scroll -= scroll_y * 40
-            self.system_panel.clamp()
+            if self.movement.session:
+                self.movement_panel.scroll_by(-scroll_y * 40)
+            else:
+                self.system_panel.scroll -= scroll_y * 40
+                self.system_panel.clamp()
         elif self.focus_view and x < self.width - self.sidebar:
             self.focus_zoom = max(.7, min(1.4, self.focus_zoom * 1.1 ** scroll_y))
         elif x < self.width - self.sidebar:
             self.target_zoom = min(3.5, max(.55, self.target_zoom * 1.15 ** scroll_y))
 
     def on_key_press(self, symbol, modifiers):
-        if symbol == arcade.key.SPACE:
+        if symbol == arcade.key.Z and modifiers & arcade.key.MOD_CTRL:
+            if self.movement.undo():
+                self.movement_error = None
+                self.movement_panel.reset()
+                self.selected_units = ()
+        elif symbol == arcade.key.SPACE and not self.movement.session:
             self.toggle_focus()
         elif symbol == arcade.key.ESCAPE:
+            if self.movement.session:
+                self.movement.cancel()
+                self.movement_panel.reset()
+                self.movement_error = None
             self.focus_view = False
-        elif symbol == arcade.key.F:
+        elif symbol == arcade.key.F and not self.movement.session:
             self.focus_view = False
             self.fit()
 

@@ -57,6 +57,7 @@ class Tile:
     color: tuple[int, int, int] = (100, 207, 224)
     kind: ClassVar[str] = "system"
     units: list[Unit] = field(default_factory=list)
+    command_tokens: set[str] = field(default_factory=set)
 
     @property
     def number(self) -> int:

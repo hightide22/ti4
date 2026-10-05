@@ -26,6 +26,7 @@ class PlayerState:
     commodities: int = 0
     command_pools: dict[str, int] = field(default_factory=lambda: {
         'tactical': 3, 'fleet': 3, 'strategic': 2})
+    technologies: frozenset[str] = frozenset()
 
     def change_currency(self, currency, amount):
         if currency not in ('trade_goods', 'commodities'):
@@ -60,5 +61,6 @@ def create_players(board, config):
             faction = factions[alias]
             tile = board[(entry['q'], entry['r'])]
             players.append(PlayerState(alias, faction['factionName'], entry['unit_color'],
-                                       faction['commodities'], [PlanetCard(p) for p in tile.planets]))
+                                       faction['commodities'], [PlanetCard(p) for p in tile.planets],
+                                       technologies=frozenset(faction['startingTech'])))
     return players
