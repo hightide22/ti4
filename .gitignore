@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+assets/source/
+references/
+board-preview.png
+
+unit-preview-*.png
+board-home-preview.png
+
+.idea/
+.env
+.env.*
+*.log

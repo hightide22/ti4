@@ -1,0 +1,981 @@
+{
+  "repository": "https://github.com/AsyncTI4/TI4_map_generator_bot",
+  "commit": "bd234c306286c00cc379f428558ac54152ebb0fe",
+  "files": [
+    {
+      "path": "data/factions/base.json",
+      "size": 27781,
+      "sha": "881892a384cce08d7a17360657d26662aa9d2243"
+    },
+    {
+      "path": "planets/0.0.0.json",
+      "size": 3057,
+      "sha": "10091fd982c804e532161230508f20e5f26ae02a"
+    },
+    {
+      "path": "planets/abyz.json",
+      "size": 2995,
+      "sha": "a171d15dfa0e38e4d122d6dea210d715ac505cda"
+    },
+    {
+      "path": "planets/archonren.json",
+      "size": 3112,
+      "sha": "df3139c175cb59bd2be454452faf97a3ac2ae4be"
+    },
+    {
+      "path": "planets/archontau.json",
+      "size": 3064,
+      "sha": "c932825ebb47f39b24738870938016ae6d63d8aa"
+    },
+    {
+      "path": "planets/arcprime.json",
+      "size": 3043,
+      "sha": "56cd0c8fbc5070de67f55fff38ba170585c2c77f"
+    },
+    {
+      "path": "planets/arnor.json",
+      "size": 3015,
+      "sha": "087987a1888a609a58911f2dc575c7f196925054"
+    },
+    {
+      "path": "planets/arinam.json",
+      "size": 2970,
+      "sha": "c779e5fa020b739e62908b3eb048c4d24789cad2"
+    },
+    {
+      "path": "planets/arretze.json",
+      "size": 2913,
+      "sha": "6722bffa6af82f8b98e15167a28d63309194bb6d"
+    },
+    {
+      "path": "planets/bereg.json",
+      "size": 2994,
+      "sha": "313d8d0dd709e187460e2e78bb39741d8f6da05f"
+    },
+    {
+      "path": "planets/centauri.json",
+      "size": 2995,
+      "sha": "48572ac43b95e1ab5afcc4ab77ac84e1b7edb1ab"
+    },
+    {
+      "path": "planets/corneeq.json",
+      "size": 2862,
+      "sha": "f616ac93cb016988527545c567134825432fcb59"
+    },
+    {
+      "path": "planets/creuss.json",
+      "size": 3151,
+      "sha": "e11e22568737facf3fa85ad9301f8a1dd6627a0a"
+    },
+    {
+      "path": "planets/dalbootha.json",
+      "size": 3120,
+      "sha": "16d59e3a0fa91678a20a6b2bcd1e98b1089cd2de"
+    },
+    {
+      "path": "planets/darien.json",
+      "size": 2079,
+      "sha": "423ebfc418e9ab6d4384b867d4b25ab305876073"
+    },
+    {
+      "path": "planets/druaa.json",
+      "size": 3022,
+      "sha": "990424545c142f5e483cd029237d551fa3c186fa"
+    },
+    {
+      "path": "planets/fria.json",
+      "size": 3023,
+      "sha": "0ed39b6d0edb7aebaf11c27cbe2c93aa60796d9b"
+    },
+    {
+      "path": "planets/gral.json",
+      "size": 3013,
+      "sha": "a46e345e5b8e7a22fc72778eb9b7841dbc6a7277"
+    },
+    {
+      "path": "planets/hercant.json",
+      "size": 1895,
+      "sha": "b576f2f8e505e3ae95912179f39c0c0e7d968135"
+    },
+    {
+      "path": "planets/jord.json",
+      "size": 3050,
+      "sha": "38026f2c09fe296fc7042d62aed38e5fed3d8189"
+    },
+    {
+      "path": "planets/jol.json",
+      "size": 2969,
+      "sha": "f861d23c9c3c99edbbb49c61927f14373341ca83"
+    },
+    {
+      "path": "planets/kamdorn.json",
+      "size": 2936,
+      "sha": "9bc75997012ea14e025dd1144345af18fe57a3a9"
+    },
+    {
+      "path": "planets/lazar.json",
+      "size": 2961,
+      "sha": "f8a8e310debca97649bc1ee2c473658810469d91"
+    },
+    {
+      "path": "planets/lirtaiv.json",
+      "size": 3108,
+      "sha": "4e0b271f15d8774e24cc9917f086914285f92700"
+    },
+    {
+      "path": "planets/lodor.json",
+      "size": 2925,
+      "sha": "b8997ae0a938fa935376f9346a44c83bc43b6814"
+    },
+    {
+      "path": "planets/lor.json",
+      "size": 2941,
+      "sha": "1dd9043feb83f8c9b6c2d2df4cfe6c5c58a125ef"
+    },
+    {
+      "path": "planets/lisisii.json",
+      "size": 3033,
+      "sha": "13375c7c709f8b835556dfd21d4d4347565613b3"
+    },
+    {
+      "path": "planets/maaluuk.json",
+      "size": 3003,
+      "sha": "67d739c237be72b9916c991f3f9b68f05bb931c2"
+    },
+    {
+      "path": "planets/meer.json",
+      "size": 3006,
+      "sha": "0af47befad1a1ac5915d49ac1d76ae2f13f8ceb0"
+    },
+    {
+      "path": "planets/meharxull.json",
+      "size": 3119,
+      "sha": "244bac1d7059bd250356cd4d16880e05ae868570"
+    },
+    {
+      "path": "planets/mellon.json",
+      "size": 2982,
+      "sha": "7300e6a569281ec4a10e42f6a51edb36057226bd"
+    },
+    {
+      "path": "planets/mollprimus.json",
+      "size": 3250,
+      "sha": "f114b180ddbf22ac7145a6757a635afb14e1061a"
+    },
+    {
+      "path": "planets/mr.json",
+      "size": 2960,
+      "sha": "2b18fa41f581a3725a20993a5ec06ea360e6cc52"
+    },
+    {
+      "path": "planets/muaat.json",
+      "size": 3073,
+      "sha": "e470ed6c1457f396186239f242e145496efa63fd"
+    },
+    {
+      "path": "planets/mordaiii.json",
+      "size": 3133,
+      "sha": "9f0995b12e5ade69ea4b8f733c8ee67c509b7a6c"
+    },
+    {
+      "path": "planets/nar.json",
+      "size": 2961,
+      "sha": "978067c4fd4fe5e9d91e09ef7437e3184ba25a39"
+    },
+    {
+      "path": "planets/nestphar.json",
+      "size": 3095,
+      "sha": "558a483fd02c0fbcee358438aa5fb16e184a0a91"
+    },
+    {
+      "path": "planets/newalbion.json",
+      "size": 3077,
+      "sha": "407d303b6ac0ba16cc17d2d7404ce9bc70664905"
+    },
+    {
+      "path": "planets/quann.json",
+      "size": 2994,
+      "sha": "07529332b192c588160e0506a48382c69f2aec5d"
+    },
+    {
+      "path": "planets/quinarra.json",
+      "size": 3030,
+      "sha": "940e15ec4eb439e432bbd60b19a36a1a695234b6"
+    },
+    {
+      "path": "planets/qucenn.json",
+      "size": 3066,
+      "sha": "77c487ad21c5ae356ad2c6f00d33d809c4a7316c"
+    },
+    {
+      "path": "planets/ragh.json",
+      "size": 2919,
+      "sha": "bdd25ce52fd616033f6f9b4f56e8f88ebb8dc0df"
+    },
+    {
+      "path": "planets/rarron.json",
+      "size": 2950,
+      "sha": "98186b8b476011a17e9e1bed62c87967452c2a3c"
+    },
+    {
+      "path": "planets/resculon.json",
+      "size": 3014,
+      "sha": "d10fdbd2009c84e297232b565ca34e3371710b21"
+    },
+    {
+      "path": "planets/retillion.json",
+      "size": 3064,
+      "sha": "c8e628fec0add8869a082a98f1ad70e4ad73a413"
+    },
+    {
+      "path": "planets/sakulag.json",
+      "size": 3028,
+      "sha": "e534242977965373374d40f55f04713dbc27ea10"
+    },
+    {
+      "path": "planets/saudor.json",
+      "size": 3039,
+      "sha": "f9238349c5345757b683335589ab11d879918b0a"
+    },
+    {
+      "path": "planets/shalloq.json",
+      "size": 3057,
+      "sha": "be70e9a5c4c85f66bf658f1f3692e952f5e78513"
+    },
+    {
+      "path": "planets/starpoint.json",
+      "size": 3018,
+      "sha": "18771fc838177738a7672067d502a4b5d48e5e1c"
+    },
+    {
+      "path": "planets/tarmann.json",
+      "size": 2924,
+      "sha": "09c14d7b2169a0593abdc774f72087873072cf12"
+    },
+    {
+      "path": "planets/tequran.json",
+      "size": 2929,
+      "sha": "5903abeec5662fa21cecf2033e8abf23e6fc97af"
+    },
+    {
+      "path": "planets/thibah.json",
+      "size": 3041,
+      "sha": "298eae194000e41ca54f75485504960352107d5c"
+    },
+    {
+      "path": "planets/torkan.json",
+      "size": 2954,
+      "sha": "183af7c661759e1d8d7241e9fbebe7af8e00f51e"
+    },
+    {
+      "path": "planets/trenlak.json",
+      "size": 2800,
+      "sha": "f89499097c54c788c15c7e0c9ecc333629ebbeae"
+    },
+    {
+      "path": "planets/vefutii.json",
+      "size": 3021,
+      "sha": "a06ea72c68638deca899ebace63f86669ac9c53c"
+    },
+    {
+      "path": "planets/wellon.json",
+      "size": 3015,
+      "sha": "767c4b55e5f9d42fb6fd4619f9a03011961b1a5b"
+    },
+    {
+      "path": "planets/winnu.json",
+      "size": 2972,
+      "sha": "84625f6517536c13f5c8d79b68ac24f362e5e60a"
+    },
+    {
+      "path": "planets/wrenterra.json",
+      "size": 3176,
+      "sha": "af05d4864004a677d0e473a2960381b5154031dd"
+    },
+    {
+      "path": "planets/zohbat.json",
+      "size": 2999,
+      "sha": "50ea5f181a4e514345292ea404029e5f14eaf7fa"
+    },
+    {
+      "path": "planets/xxehan.json",
+      "size": 2948,
+      "sha": "5fb822185371965dc6bc1870761b9819708343ea"
+    },
+    {
+      "path": "systems/01.json",
+      "size": 333,
+      "sha": "d9bf6cc24ac9c192bc3bed459992ea923fa6c9f0"
+    },
+    {
+      "path": "systems/02.json",
+      "size": 802,
+      "sha": "7033f233ed31bc2351606b2e9692e564503800ad"
+    },
+    {
+      "path": "systems/03.json",
+      "size": 820,
+      "sha": "4c29b12cab2659def8ab6ba168a5f7f430e56a22"
+    },
+    {
+      "path": "systems/05.json",
+      "size": 758,
+      "sha": "fbd85048a7e36c8829ea7f68ee3f4ceff8a727b9"
+    },
+    {
+      "path": "systems/04.json",
+      "size": 700,
+      "sha": "3ef710351032c9f719086f6c3be5c29b9a703be7"
+    },
+    {
+      "path": "systems/07.json",
+      "size": 646,
+      "sha": "208d3c1c73636d4e266f12764f08b404fee72ea0"
+    },
+    {
+      "path": "systems/08.json",
+      "size": 780,
+      "sha": "01e0bafba934bc4953b6e4b65d254dbaccbb1092"
+    },
+    {
+      "path": "systems/09.json",
+      "size": 858,
+      "sha": "1df850b81a35c0d8886dfc0871fc624a6ca970f0"
+    },
+    {
+      "path": "systems/06.json",
+      "size": 750,
+      "sha": "b1e084bee29b973eae96c0f6f8a055977c17c5c9"
+    },
+    {
+      "path": "systems/10.json",
+      "size": 934,
+      "sha": "540e5fa3d5abc7aa97b5984e047a7d4da6a06cdf"
+    },
+    {
+      "path": "systems/11.json",
+      "size": 961,
+      "sha": "2cc030a6197234f2c2c15aab4038292045c132ac"
+    },
+    {
+      "path": "systems/12.json",
+      "size": 768,
+      "sha": "bef7e384ecd0616fbb47e26a951f26e493340f84"
+    },
+    {
+      "path": "systems/13.json",
+      "size": 884,
+      "sha": "d3d589a32e4a4d794a2c172468f8a4bec38e6a8c"
+    },
+    {
+      "path": "systems/14.json",
+      "size": 980,
+      "sha": "2dc233c0e658897c602c97edb856381410ae2cfd"
+    },
+    {
+      "path": "systems/16.json",
+      "size": 1066,
+      "sha": "de835b5307d8489faffcd1e419ed31d6d917d3b5"
+    },
+    {
+      "path": "systems/15.json",
+      "size": 946,
+      "sha": "c7e4f6d53d6da9c1993f1f7a6728dafe13438bf0"
+    },
+    {
+      "path": "systems/17.json",
+      "size": 746,
+      "sha": "13bf662563be1ef59d6137a4fe91569a48a6a866"
+    },
+    {
+      "path": "systems/19.json",
+      "size": 610,
+      "sha": "bc349246fb695750c4f2680bb59962f67e06914b"
+    },
+    {
+      "path": "systems/20.json",
+      "size": 709,
+      "sha": "ea73872090bb434fbb1b8454cec9cf99168c45c5"
+    },
+    {
+      "path": "systems/21.json",
+      "size": 610,
+      "sha": "c70f623063929e58c454293c1d1da93957b5d1cf"
+    },
+    {
+      "path": "systems/18.json",
+      "size": 688,
+      "sha": "10dfda315d97d630f53549a92196a4d4898a0743"
+    },
+    {
+      "path": "systems/22.json",
+      "size": 652,
+      "sha": "ffe58e14dc26d2ac25d74d3a67db9e979b43dc2f"
+    },
+    {
+      "path": "systems/23.json",
+      "size": 608,
+      "sha": "b48e9e0f7310715287d0ae6fcb1e100c508d6d45"
+    },
+    {
+      "path": "systems/24.json",
+      "size": 683,
+      "sha": "da03ab826a316895fe8b72cd02156bb3fe6b5221"
+    },
+    {
+      "path": "systems/25.json",
+      "size": 703,
+      "sha": "a7bb7fd33cefa48e7a7ac16a53762664e950653e"
+    },
+    {
+      "path": "systems/28.json",
+      "size": 751,
+      "sha": "41cefdd0ba9a9b6cb6e0fd2843a2ffacab1a9874"
+    },
+    {
+      "path": "systems/27.json",
+      "size": 787,
+      "sha": "a898a9b906cc9d54334b84b1d5a9874fa6b20dc1"
+    },
+    {
+      "path": "systems/26.json",
+      "size": 718,
+      "sha": "dfa8675eb48db027c129ea0e243e530604704239"
+    },
+    {
+      "path": "systems/29.json",
+      "size": 813,
+      "sha": "a5318d8dd6550f011cbdb8c082d3d75f366f9264"
+    },
+    {
+      "path": "systems/31.json",
+      "size": 726,
+      "sha": "5a5b37c95ee011948b227dd6c8aa4544d3c9c3b8"
+    },
+    {
+      "path": "systems/30.json",
+      "size": 745,
+      "sha": "0854e83188a7a38be1f050d1b3c9683ea63ab77a"
+    },
+    {
+      "path": "systems/32.json",
+      "size": 811,
+      "sha": "34c825b41942fbf1f856321b7507e73b6a9c1d5c"
+    },
+    {
+      "path": "systems/34.json",
+      "size": 732,
+      "sha": "5532673998a5682d59db20818455ef57a8392f5a"
+    },
+    {
+      "path": "systems/35.json",
+      "size": 880,
+      "sha": "274c2b7b480fd649a300899cdd3d42b5312b627f"
+    },
+    {
+      "path": "systems/36.json",
+      "size": 706,
+      "sha": "775613f7f88e40ea4093dfa184c60d8a41fca54f"
+    },
+    {
+      "path": "systems/37.json",
+      "size": 730,
+      "sha": "f51288d9dd02b92fbc594d7222aca148f752295b"
+    },
+    {
+      "path": "systems/33.json",
+      "size": 695,
+      "sha": "0c3b7f932803e856e3a8590b4552ba45879d4fae"
+    },
+    {
+      "path": "systems/39.json",
+      "size": 744,
+      "sha": "38d3c0450323d56424f959552b7eda0d543d6c57"
+    },
+    {
+      "path": "systems/38.json",
+      "size": 719,
+      "sha": "a5eecda023c87b4e825b5d7dd5fa8dbf2c1f8ed1"
+    },
+    {
+      "path": "systems/40.json",
+      "size": 737,
+      "sha": "ee353cff7fc95ad01d6093952cf3ec34f9dbefa7"
+    },
+    {
+      "path": "systems/42.json",
+      "size": 659,
+      "sha": "ae66faaa2035c127dda26015d672b53c870ae000"
+    },
+    {
+      "path": "systems/43.json",
+      "size": 743,
+      "sha": "98d402474270fff34504145c9f86494d5a0928f8"
+    },
+    {
+      "path": "systems/44.json",
+      "size": 795,
+      "sha": "8ddea68fe795c7cdef167fe16c0092718e81afa7"
+    },
+    {
+      "path": "systems/45.json",
+      "size": 703,
+      "sha": "e97bc413645807f16f8ee05b94f443cc7c8d0fee"
+    },
+    {
+      "path": "systems/46.json",
+      "size": 756,
+      "sha": "0c20a2da2d9a23b116acef352af4fc4a81a8a42e"
+    },
+    {
+      "path": "systems/41.json",
+      "size": 715,
+      "sha": "a2ea4e32b6ea8891b3fb756e10ad4c8d3d1267a6"
+    },
+    {
+      "path": "systems/47.json",
+      "size": 684,
+      "sha": "9e2203e9cb6b295ed7f9684dfc2ac481735c4fc7"
+    },
+    {
+      "path": "systems/48.json",
+      "size": 684,
+      "sha": "056953ae124fd8f7116488e94ff10b704c794260"
+    },
+    {
+      "path": "systems/49.json",
+      "size": 684,
+      "sha": "33257939accba248472fbdfa252fad8a743be2cf"
+    },
+    {
+      "path": "systems/51.json",
+      "size": 708,
+      "sha": "713f3c123544c7a894a99eae55a537bedb2c62ec"
+    },
+    {
+      "path": "systems/50.json",
+      "size": 684,
+      "sha": "f38d247b2c099c130befe7ca527df883bc1b578e"
+    },
+    {
+      "path": "tiles/02_MollPrimus.png",
+      "size": 189820,
+      "sha": "fe28bd3ca30f7724c546f5221c19e8fb06a09e51"
+    },
+    {
+      "path": "tiles/05_Nestphar.png",
+      "size": 188218,
+      "sha": "cbea9e8159673faf821bb53e33d2af77f48b4667"
+    },
+    {
+      "path": "tiles/06_000.png",
+      "size": 190318,
+      "sha": "3737d4190212bda35cef9b42c14f19691fae2e8e"
+    },
+    {
+      "path": "tiles/07_Winnu.png",
+      "size": 188847,
+      "sha": "959fe446697ac94f1e885ad364ea63ceb21510a7"
+    },
+    {
+      "path": "tiles/01_Jord.png",
+      "size": 184600,
+      "sha": "9da6511cdd5f6d7e831bc422b7ed69f249fc778e"
+    },
+    {
+      "path": "tiles/03_Darien.png",
+      "size": 182979,
+      "sha": "c89cb5578e7d7bf10fe75bd1aaddb62c94574666"
+    },
+    {
+      "path": "tiles/08_MordaiII.png",
+      "size": 186072,
+      "sha": "e4f114872b770f032b4db2bc25b4a67391785275"
+    },
+    {
+      "path": "tiles/09_Maaluuk.png",
+      "size": 197372,
+      "sha": "4f603e4e460fb3ca293f42528bf7d164155cadd1"
+    },
+    {
+      "path": "tiles/04_Muaat.png",
+      "size": 184046,
+      "sha": "ee22540cccc0aaf8e13a5c659860356f3a2972f7"
+    },
+    {
+      "path": "tiles/10_ArcPime.png",
+      "size": 193438,
+      "sha": "59a006d83854c8f6200f4c646af9dcd13920563f"
+    },
+    {
+      "path": "tiles/13_Trenlak.png",
+      "size": 193104,
+      "sha": "909b00baeedd8f30d60e4b6e7da144e514bee63e"
+    },
+    {
+      "path": "tiles/16_Arretze.png",
+      "size": 198239,
+      "sha": "169e54b719a802b661e12749b7f986d66aff73cf"
+    },
+    {
+      "path": "tiles/15_Retillion.png",
+      "size": 201110,
+      "sha": "17c09025328437a6e8692c5c8f1a7018005cef82"
+    },
+    {
+      "path": "tiles/17_DeltaWH.png",
+      "size": 195642,
+      "sha": "af8624a7a2215bca235b17de0c5a08569bc2ef53"
+    },
+    {
+      "path": "tiles/18_MR.png",
+      "size": 192805,
+      "sha": "eff7023f90d654b5edf32cb3327b47a5667c8b10"
+    },
+    {
+      "path": "tiles/12_Nar.png",
+      "size": 194531,
+      "sha": "ca5ed7f73da9ea957327b72911da2c916670e592"
+    },
+    {
+      "path": "tiles/14_ArchonRen.png",
+      "size": 195368,
+      "sha": "a657c80a52fe3dbf54ea59836d85a8d325ebc88e"
+    },
+    {
+      "path": "tiles/11_LisisII.png",
+      "size": 195657,
+      "sha": "f9964cb98abee560fc20bcffde948b5807e14790"
+    },
+    {
+      "path": "tiles/20_VefutII.png",
+      "size": 188994,
+      "sha": "f75b29728819f8bffdc7bc280b3650870beef228"
+    },
+    {
+      "path": "tiles/19_Wellon.png",
+      "size": 187194,
+      "sha": "98d809efdd0de072f30d54c14a3560e5330a5986"
+    },
+    {
+      "path": "tiles/23_Saudor.png",
+      "size": 184052,
+      "sha": "efd5afbb601a71b3d5782cc469e2a6e802a75c12"
+    },
+    {
+      "path": "tiles/21_Thibah.png",
+      "size": 180818,
+      "sha": "6746e4140cac58f9b6b6f77a28d9bc55b5eed60b"
+    },
+    {
+      "path": "tiles/24_MeharXull.png",
+      "size": 179590,
+      "sha": "9f4ea8b67b0e7369ab69dee1d90724e536d567bf"
+    },
+    {
+      "path": "tiles/22_Tarmann.png",
+      "size": 184939,
+      "sha": "72b2b4544ef8c8f8e759a5dcd40ff7dd57f46b9f"
+    },
+    {
+      "path": "tiles/25_Quann.png",
+      "size": 189061,
+      "sha": "fb992a74f710bb8d426b290dedd15230981b2248"
+    },
+    {
+      "path": "tiles/27_NewAlbion.png",
+      "size": 194884,
+      "sha": "3e50f1e1105e6762fa5d45ec3453b8c42d94b7a1"
+    },
+    {
+      "path": "tiles/26_Lodor.png",
+      "size": 191216,
+      "sha": "79a7227c389407a97d82690df8d0a1e0f5799d11"
+    },
+    {
+      "path": "tiles/31_Lazar.png",
+      "size": 194029,
+      "sha": "16bb6a5a8095a43531005bc141fb34c6138ac444"
+    },
+    {
+      "path": "tiles/29_Qucenn.png",
+      "size": 193567,
+      "sha": "077dddbf4f0c32fe868690e5eba8a690b6900731"
+    },
+    {
+      "path": "tiles/28_Tequran.png",
+      "size": 193003,
+      "sha": "943e30090dbd990063060f4822548904082561e0"
+    },
+    {
+      "path": "tiles/34_Centauri.png",
+      "size": 189469,
+      "sha": "edc703461940447c50cdd7b500881c981103b594"
+    },
+    {
+      "path": "tiles/32_DalBootha.png",
+      "size": 194236,
+      "sha": "25c40f93c0d86c217e74e6c2f6585bf1b1abfc6a"
+    },
+    {
+      "path": "tiles/30_Mellon.png",
+      "size": 192765,
+      "sha": "78e78da336367517c48d96ab77fb47841c7dbb4f"
+    },
+    {
+      "path": "tiles/35_Bereg.png",
+      "size": 195073,
+      "sha": "7efcd20fb559e0abe386f9b567d0607d20ea991a"
+    },
+    {
+      "path": "tiles/33_Corneeq.png",
+      "size": 194505,
+      "sha": "b060bac7d84ec2fe915d441a3a990a2549c02cf9"
+    },
+    {
+      "path": "tiles/36_Arnor.png",
+      "size": 192743,
+      "sha": "512aec20e37a4f8ede63e863db87c1cca0393706"
+    },
+    {
+      "path": "tiles/37_Arinam.png",
+      "size": 189858,
+      "sha": "685d1d6882ecf63d8d6c66fd2c5cb976b184284f"
+    },
+    {
+      "path": "tiles/38_Abyz.png",
+      "size": 193556,
+      "sha": "b191c4f14bd45beace26c1fb2214199fb7fde720"
+    },
+    {
+      "path": "tiles/39_AlphaWH.png",
+      "size": 183537,
+      "sha": "1bab7be1670a866aafdb130c0e06760d7181a54d"
+    },
+    {
+      "path": "tiles/41_GravityRift.png",
+      "size": 184777,
+      "sha": "36090afd800d936a296d1d8fe444a8b0c5112dad"
+    },
+    {
+      "path": "tiles/42_Nebula.png",
+      "size": 192204,
+      "sha": "a8695c95fe0771551b5fdf61094e5542a8e454e2"
+    },
+    {
+      "path": "tiles/40_BetaWH.png",
+      "size": 181754,
+      "sha": "0bfbe397f2c6dfb045aa52903eac7cfd8b423173"
+    },
+    {
+      "path": "tiles/44_Asteroids.png",
+      "size": 192182,
+      "sha": "b251d0de1154441f8306dbcbc781ebdba3c05489"
+    },
+    {
+      "path": "tiles/45_Asteroids.png",
+      "size": 190225,
+      "sha": "7e0060dee1b422d2006390b54abe8908dd7acb55"
+    },
+    {
+      "path": "tiles/47_Void.png",
+      "size": 174242,
+      "sha": "4578a4f467b9db34876f4e9a9f8da6358be83d10"
+    },
+    {
+      "path": "tiles/49_Void.png",
+      "size": 174487,
+      "sha": "2d12c9e525a1a3a8a5ac996169c638b1f61a5f43"
+    },
+    {
+      "path": "tiles/46_Void.png",
+      "size": 164937,
+      "sha": "9bbb36585501f971344e300da6d3cdaffff9e0b2"
+    },
+    {
+      "path": "tiles/48_Void.png",
+      "size": 174005,
+      "sha": "57b4d624e402b86329ab4637eb88d898b76f9ad8"
+    },
+    {
+      "path": "tiles/43_Supernova.png",
+      "size": 189861,
+      "sha": "de293abac9ce925ce5bb6661ccb218bf4e20ce7a"
+    },
+    {
+      "path": "tiles/50_Void.png",
+      "size": 170226,
+      "sha": "7999aa63c5632457f23b892370dd9c55a84c6cc5"
+    },
+    {
+      "path": "tiles/51_Creuss.png",
+      "size": 243965,
+      "sha": "abd1baa78f1d06bfca50e1232150fa537b17b358"
+    },
+    {
+      "path": "units/blu_ca.png",
+      "size": 9478,
+      "sha": "6585b9015d1b1a2eb3e01c2bcc61f6c57555cbb7"
+    },
+    {
+      "path": "units/blu_cv.png",
+      "size": 10691,
+      "sha": "a98ad11be467e3035a2c98f5cf3c8e687c4b23b3"
+    },
+    {
+      "path": "units/blu_dd.png",
+      "size": 8243,
+      "sha": "08ca6e2c4d41c437d275d95e3fc972c55161a838"
+    },
+    {
+      "path": "units/blu_dn.png",
+      "size": 12116,
+      "sha": "8049d81410ad6a2f73e80b06607339517a3246f9"
+    },
+    {
+      "path": "units/blu_ff.png",
+      "size": 5270,
+      "sha": "077f61263fef17f138810e40954470dd1f6665ae"
+    },
+    {
+      "path": "units/blu_fs.png",
+      "size": 13233,
+      "sha": "8d37c34e1fe8fcfed9d00e74d6e358630366e388"
+    },
+    {
+      "path": "units/blu_gf.png",
+      "size": 5939,
+      "sha": "3efb00a07c9461c227400e97bba4500378b3b6ae"
+    },
+    {
+      "path": "units/blu_pd.png",
+      "size": 5229,
+      "sha": "e1091dd0e6fbdf7c870a86cd8e718fc0fee53bcc"
+    },
+    {
+      "path": "units/blu_sd.png",
+      "size": 6877,
+      "sha": "ae70fc877b55c482827a5557ce379847245fd49a"
+    },
+    {
+      "path": "units/blu_mf.png",
+      "size": 6858,
+      "sha": "5242eee93ba6e8b21038236c248f5c790aa691b2"
+    },
+    {
+      "path": "units/blu_ws.png",
+      "size": 10001,
+      "sha": "8b131802a6c4ab8b1ee2f7a9cb4298dfee4fc0c1"
+    },
+    {
+      "path": "units/ppl_ca.png",
+      "size": 8971,
+      "sha": "319b2546554247af21ea8f9df0dd0437da281360"
+    },
+    {
+      "path": "units/ppl_cv.png",
+      "size": 10091,
+      "sha": "c593ba617e192908009d890a0dc7d65297c42a6a"
+    },
+    {
+      "path": "units/ppl_dd.png",
+      "size": 7739,
+      "sha": "aad1c55f1d9680e2f77fe69a8437136798f5e5c6"
+    },
+    {
+      "path": "units/ppl_dn.png",
+      "size": 11269,
+      "sha": "16ed4b9355d41fce3852f9fe1b60705acc630409"
+    },
+    {
+      "path": "units/ppl_gf.png",
+      "size": 5785,
+      "sha": "1297f06f6ae40777bc4b88dbbd889d2fe9c0041f"
+    },
+    {
+      "path": "units/ppl_ff.png",
+      "size": 5161,
+      "sha": "24cba6d3bb41c07687c15307804654a9549a45a2"
+    },
+    {
+      "path": "units/ppl_mf.png",
+      "size": 6889,
+      "sha": "62c1680214f83ee1095cf5906496ca8399667c20"
+    },
+    {
+      "path": "units/ppl_fs.png",
+      "size": 12048,
+      "sha": "8d6026d16d817de39e4401df3650f847aa5a46ed"
+    },
+    {
+      "path": "units/ppl_pd.png",
+      "size": 5113,
+      "sha": "39759b146b4bb3b689032ec340dd4398eb7cd45e"
+    },
+    {
+      "path": "units/ppl_sd.png",
+      "size": 6458,
+      "sha": "21f0d6e6fda9bb7542477eeb38db519356ef43b3"
+    },
+    {
+      "path": "units/ppl_ws.png",
+      "size": 9314,
+      "sha": "34d73c03c2af6aa74bda3e81d247b64e9e61e429"
+    },
+    {
+      "path": "units/ylw_ca.png",
+      "size": 9155,
+      "sha": "930b48980dd30aa2be01c3e466f628095005e8ff"
+    },
+    {
+      "path": "units/ylw_cv.png",
+      "size": 10294,
+      "sha": "c163f6fe1821f40a3be6bdf72b3051112ebdd5cb"
+    },
+    {
+      "path": "units/ylw_dd.png",
+      "size": 7907,
+      "sha": "c85b13aac91e0bfcaacf3db9b076978ff011967c"
+    },
+    {
+      "path": "units/ylw_dn.png",
+      "size": 11468,
+      "sha": "8cada72a33e0aa29ff8d778655684aa0533ec8b6"
+    },
+    {
+      "path": "units/ylw_ff.png",
+      "size": 5155,
+      "sha": "944e1657d26de6b7aefd35abdc74d815c3240ce8"
+    },
+    {
+      "path": "units/ylw_fs.png",
+      "size": 12468,
+      "sha": "f35f4d96dcadb23ad5ac20efe5b47a25a640718a"
+    },
+    {
+      "path": "units/ylw_gf.png",
+      "size": 5815,
+      "sha": "28aaa21b84f1583e6dc51ba5fed3c4b067ece681"
+    },
+    {
+      "path": "units/ylw_mf.png",
+      "size": 6929,
+      "sha": "a6e90b107f8706778097214190f5b7395739730c"
+    },
+    {
+      "path": "units/ylw_sd.png",
+      "size": 6579,
+      "sha": "8892a116188ef3b7f87bf3d9d83dbd8117d7e373"
+    },
+    {
+      "path": "units/ylw_pd.png",
+      "size": 5137,
+      "sha": "8dd678489a2ad5869479c4479b34eae96820315f"
+    },
+    {
+      "path": "units/ylw_ws.png",
+      "size": 9516,
+      "sha": "eb9059f442c8f627c3bd7658723a6cff90d3ed83"
+    }
+  ]
+}
