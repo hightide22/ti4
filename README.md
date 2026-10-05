@@ -18,7 +18,7 @@ Validation:
 .\.venv\Scripts\python.exe app.py --smoke-test
 ```
 
-The board opens in a large, centered window that leaves a small margin around the desktop. Fleet layouts are computed in the background so the board appears without waiting for every starting system to finish arranging its units. Players can activate systems and move ships and carried units. Assets are loaded from assets/source/asyncti4/src/main/resources. The upstream directory also contains homebrew content; the current map uses base-game systems only.
+The board opens in a maximized desktop window with its normal title bar and window controls. Fleet layouts are computed in the background so the board appears without waiting for every starting system to finish arranging its units. Players can activate systems and move ships and carried units. Assets are loaded from assets/source/asyncti4/src/main/resources. The upstream directory also contains homebrew content; the current map uses base-game systems only.
 
 
 ## Tile objects and custom maps

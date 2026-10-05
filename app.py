@@ -54,11 +54,10 @@ class TileSprite(arcade.Sprite):
 class BoardWindow(arcade.Window):
     def __init__(self, smoke=False, map_path=ROOT / 'maps/three_player.json'):
         display_width, display_height = arcade.get_display_size()
-        window_width = min(display_width, max(min(1120, display_width), int(display_width * .94)))
-        window_height = min(display_height, max(min(720, display_height), int(display_height * .90)))
-        super().__init__(window_width, window_height, 'Twilight Imperium IV — three-player board', resizable=True, vsync=True)
+        super().__init__(min(1440, display_width), min(960, display_height),
+                         'Twilight Imperium IV — three-player board', resizable=True, vsync=True)
         self.set_minimum_size(min(1120, display_width), min(720, display_height))
-        self.set_location((display_width - window_width) // 2, (display_height - window_height) // 2)
+        self.maximize()
         self.map_config, self.board = load_board(map_path)
         self.tile_sprites = {tile: TileSprite(tile) for tile in self.board.values()}
         self.labels = {}
