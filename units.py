@@ -149,6 +149,7 @@ class UnitPlacement:
     y: float
     size: float
     angle: float = 0
+    badge_count: int | None = None
 
     @property
     def kind(self):
@@ -189,6 +190,7 @@ def silhouette(image_path, size):
         return convex_hull(points)
 
 
+@lru_cache(maxsize=512)
 def rotated_silhouette(image_path, size, angle):
     theta = math.radians(angle)
     cosine, sine = math.cos(theta), math.sin(theta)
@@ -239,32 +241,37 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
     fleet = []
     for (region, planet_id, owner, kind), members in groups.items():
         size = UNIT_TYPES[kind]["size"]
-        visible = [tuple([u]) for u in members] if len(members) < GROUP_THRESHOLD else [tuple(members)]
-        if region == Region.PLANET:
-            ground[planet_id].extend((part, min(size, 42)) for part in visible)
+        if kind in ('infantry', 'fighter') and len(members) >= 3:
+            visible = [(tuple([unit]), None) for unit in members[:2]] + [(tuple(members[2:]), len(members))]
+        elif len(members) < GROUP_THRESHOLD:
+            visible = [(tuple([unit]), None) for unit in members]
         else:
-            fleet.extend((part, size) for part in visible)
+            visible = [(tuple(members), len(members))]
+        if region == Region.PLANET:
+            ground[planet_id].extend((part, min(size, 42), badge_count) for part, badge_count in visible)
+        else:
+            fleet.extend((part, size, badge_count) for part, badge_count in visible)
     placements = []
     for planet_id, entries in ground.items():
         planet = next(p for p in tile.planets if p.planet_id == planet_id)
         cx, cy = planet.center
         if len(entries) > 9:
             consolidated = defaultdict(list)
-            for members, _ in entries:
+            for members, _, _ in entries:
                 consolidated[(members[0].owner, members[0].kind)].extend(members)
-            entries = [(tuple(members), min(UNIT_TYPES[members[0].kind]["size"], 42)) for members in consolidated.values()]
+            entries = [(tuple(members), min(UNIT_TYPES[members[0].kind]["size"], 42), len(members) if members[0].kind in ('infantry', 'fighter') and len(members) >= 3 else None) for members in consolidated.values()]
         count = len(entries)
         columns = min(3, count)
         rows = math.ceil(count / columns)
-        for index, (members, size) in enumerate(entries):
+        for index, (members, size, badge_count) in enumerate(entries):
             row, col = divmod(index, columns)
             row_count = min(columns, count - row * columns)
-            placements.append(UnitPlacement(members, cx + (col - (row_count - 1) / 2) * 36, cy + (row - (rows - 1) / 2) * 36 - 2, size))
+            placements.append(UnitPlacement(members, cx + (col - (row_count - 1) / 2) * 36, cy + (row - (rows - 1) / 2) * 36 - 2, size, badge_count=badge_count))
     fleet.sort(key=lambda item: (-item[1], item[0][0].owner))
     occupied = []
     same_kind = {}
     labels = protected_labels(tile)
-    for members, size in fleet:
+    for members, size, badge_count in fleet:
         key = members[0].owner, members[0].kind
         candidates = []
         # Rotate only when a repeated ship cannot stay near its formation.
@@ -301,7 +308,7 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
         _, x, y, polygon, angle = max(candidates, key=lambda c: c[0])
         occupied.append(polygon)
         same_kind.setdefault(key, (x, y))
-        placements.append(UnitPlacement(members, x, y, size, angle))
+        placements.append(UnitPlacement(members, x, y, size, angle, badge_count))
     return placements
 
 

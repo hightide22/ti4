@@ -79,8 +79,9 @@ class SystemPanel:
         name = tile.name.split(' - ')[0]
         text('system_name', name, px, window.height - 62, 14, INK, width)
         text('system_id', f'Tile {tile.system_id} · {len(tile.units)} units in system', px, window.height - 88, 11, MUTED)
-        if tile.player:
-            text('owner', tile.player, px, window.height - 111, 11, tuple(tile.color))
+        system_owners = list(dict.fromkeys(tile.planet_owners.values()))
+        owner_text = ', '.join(faction.upper() for faction in system_owners) if system_owners else 'None'
+        text('owner', f'SYSTEM CONTROL: {owner_text}', px, window.height - 111, 10, tuple(tile.color) if tile.player else MUTED, width)
         token_players = [player for player in window.player_panel.players if player.faction in tile.command_tokens]
         if token_players:
             text('token_info_title', 'COMMAND TOKENS', px, window.height - 143, 9, MUTED)
@@ -127,8 +128,10 @@ class SystemPanel:
                 text((planet.planet_id, 'name'), planet.name, px, y - 17, 15, INK)
                 label = PLANET_TYPES.get(planet.planet_type, planet.planet_type or '')
                 text((planet.planet_id, 'type'), label, px + width - 92, y - 17, 10, MUTED)
-                text((planet.planet_id, 'values'), f'Resources: {planet.resources}   Influence: {planet.influence}', px, y - 37, 11, ACCENT)
-                y = self.draw_counts(window, planet.planet_id, inventory['planets'][planet.planet_id], px, y - 47, width) - 10
+                owner = tile.planet_owners.get(planet.planet_id)
+                text((planet.planet_id, 'owner'), f'Owner: {owner.upper() if owner else "None"}', px, y - 37, 10, ACCENT if owner else MUTED)
+                text((planet.planet_id, 'values'), f'Resources: {planet.resources}   Influence: {planet.influence}', px, y - 55, 11, ACCENT)
+                y = self.draw_counts(window, planet.planet_id, inventory['planets'][planet.planet_id], px, y - 65, width) - 10
             if not tile.planets:
                 text('no_planets', 'No planets in this system', px, y - 18, 13, MUTED)
                 y -= 45

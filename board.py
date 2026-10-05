@@ -58,6 +58,7 @@ class Tile:
     kind: ClassVar[str] = "system"
     units: list[Unit] = field(default_factory=list)
     command_tokens: set[str] = field(default_factory=set)
+    planet_owners: dict[str, str] = field(default_factory=dict)
 
     @property
     def number(self) -> int:

@@ -44,8 +44,10 @@ class UnitTests(unittest.TestCase):
             tile = TILES.create(50, (0, 0))
             tile.units = [Unit(str(i), "fighter", "sol", "blu", UnitLocation(Region.SPACE)) for i in range(count)]
             placements = layout_units(tile, True)
-            self.assertEqual(len(placements), count if count < 5 else 1)
+            self.assertEqual(len(placements), count if count < 3 else 3)
             self.assertEqual(sum(len(p.units) for p in placements), count)
+            if count >= 3:
+                self.assertEqual(placements[-1].badge_count, count)
             self.assertEqual(len(system_inventory(tile)["fleet"]["fighter"]), count)
 
     def test_inventory_separates_planet_garrisons(self):

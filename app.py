@@ -53,15 +53,20 @@ class TileSprite(arcade.Sprite):
 
 class BoardWindow(arcade.Window):
     def __init__(self, smoke=False, map_path=ROOT / 'maps/three_player.json'):
-        super().__init__(1440, 960, 'Twilight Imperium IV — three-player board', resizable=True, vsync=True)
-        self.set_minimum_size(1120, 720)
+        display_width, display_height = arcade.get_display_size()
+        window_width = min(display_width, max(min(1120, display_width), int(display_width * .94)))
+        window_height = min(display_height, max(min(720, display_height), int(display_height * .90)))
+        super().__init__(window_width, window_height, 'Twilight Imperium IV — three-player board', resizable=True, vsync=True)
+        self.set_minimum_size(min(1120, display_width), min(720, display_height))
+        self.set_location((display_width - window_width) // 2, (display_height - window_height) // 2)
         self.map_config, self.board = load_board(map_path)
         self.tile_sprites = {tile: TileSprite(tile) for tile in self.board.values()}
         self.labels = {}
         self.unit_renderer = UnitRenderer()
+        self.unit_renderer.blocking_layouts = smoke
         self.system_panel = SystemPanel()
         self.player_panel = PlayerPanel(create_players(self.board, self.map_config))
-        self.movement = MovementController(self.board)
+        self.movement = MovementController(self.board, self.player_panel.players)
         self.movement_panel = MovementPanel()
         self.movement_error = None
         self.token_hits = []
@@ -129,6 +134,17 @@ class BoardWindow(arcade.Window):
         texture = self.tile_sprites[tile].texture
         arcade.draw_texture_rect(texture, arcade.XYWH(x, y, width, width * texture.height / texture.width))
         self.unit_renderer.draw(tile, x, y, width, detailed=detailed, selected=self.selected_units, hovered=self.hovered_units, interactive=interactive, scope=scope)
+        scale = width / 345
+        tile_left, tile_top = x - width / 2, y + width * 299 / 345 / 2
+        for planet in tile.planets:
+            faction = tile.planet_owners.get(planet.planet_id)
+            owner = next((player for player in self.player_panel.players if player.faction == faction), None)
+            if owner:
+                px = tile_left + (planet.center[0] + planet.radius * .78) * scale
+                py = tile_top - (planet.center[1] - planet.radius * .78) * scale
+                marker_size = max(8, width * .06)
+                self.player_panel.image(f'command_token/control_{owner.color_code}.png', px, py, marker_size)
+                self.player_panel.image(f'factions/{owner.faction}.png', px, py, marker_size * .52)
         players = [player for player in self.player_panel.players if player.faction in tile.command_tokens]
         token_size = width * .18
         spacing = token_size + max(2, width * .012)
@@ -190,6 +206,9 @@ class BoardWindow(arcade.Window):
             if self.hover is not None and self.hover != self.selected:
                 self.outline(self.hover, (170, 185, 207), 2)
             self.outline(self.selected, ACCENT, 3)
+        if self.unit_renderer.is_loading:
+            self.text('unit_layout_loading', 'Preparing fleet layouts…',
+                      (self.width - self.sidebar) / 2, self.height * .55, 13, MUTED)
         left = self.width - self.sidebar
         arcade.draw_lrbt_rectangle_filled(left, self.width, 0, self.height, PANEL)
         arcade.draw_lrbt_rectangle_filled(0, left, self.height - 80, self.height, (10, 17, 29))
@@ -333,7 +352,7 @@ class BoardWindow(arcade.Window):
                 self.player_panel.active = self.player_panel.players.index(sol_player)
                 home = next(tile for tile in self.board.values() if any(unit.owner == 'sol' for unit in tile.units))
                 target = next(tile for tile in self.board.neighbors(home.position)
-                              if any(self.movement.route(home, tile, unit, sol_player)
+                              if tile.planets and any(self.movement.route(home, tile, unit, sol_player)
                                      for unit in home.units if unit.owner == 'sol'))
                 before_units = list(home.units)
                 before_tactical = sol_player.command_pools['tactical']
@@ -348,10 +367,49 @@ class BoardWindow(arcade.Window):
                 self.on_mouse_press((row[1] + row[2]) / 2, (row[3] + row[4]) / 2,
                                     arcade.MOUSE_BUTTON_LEFT, 0)
                 self.on_draw()
+                infantry = next(unit for unit in source.passengers if unit.kind == 'infantry')
+                passenger_row = next(hit for hit in self.movement_panel.hits
+                                     if hit[0] == ('unit', infantry.unit_id))
+                for _ in range(10):
+                    if self.movement_panel.hit_test((passenger_row[1] + passenger_row[2]) / 2,
+                                                    (passenger_row[3] + passenger_row[4]) / 2) == passenger_row[0]:
+                        break
+                    self.movement_panel.scroll_by(80)
+                    self.on_draw()
+                    passenger_row = next(hit for hit in self.movement_panel.hits
+                                         if hit[0] == ('unit', infantry.unit_id))
+                assert self.movement_panel.hit_test((passenger_row[1] + passenger_row[2]) / 2,
+                                                    (passenger_row[3] + passenger_row[4]) / 2) == passenger_row[0]
+                self.on_mouse_press((passenger_row[1] + passenger_row[2]) / 2,
+                                    (passenger_row[3] + passenger_row[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                self.on_draw()
                 confirm = next(button for button in self.movement_panel.buttons if button[0] == ('confirm',))
                 self.on_mouse_press((confirm[1] + confirm[2]) / 2,
                                     (confirm[3] + confirm[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
-                assert self.movement.session is None and ship in target.units
+                assert self.movement.session and self.movement.session.stage == 'invasion' and ship in target.units
+                self.on_draw()
+                landing_row = next(hit for hit in self.movement_panel.hits if hit[0] == ('landing', infantry.unit_id))
+                self.on_mouse_press((landing_row[1] + landing_row[2]) / 2,
+                                    (landing_row[3] + landing_row[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                self.on_draw()
+                planet_id = target.planets[0].planet_id
+                assert self.movement.session.landings[infantry.unit_id] == planet_id
+                establish = next(button for button in self.movement_panel.buttons if button[0] == ('establish',))
+                self.on_mouse_press((establish[1] + establish[2]) / 2,
+                                    (establish[3] + establish[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                self.on_draw()
+                assert target.planet_owners[planet_id] == 'sol'
+                assert next(card for card in sol_player.planets if card.planet.planet_id == planet_id).exhausted
+                self.focus_view = True
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'planet-control-preview.png')
+                self.focus_view = False
+                done = next(button for button in self.movement_panel.buttons if button[0] == ('done',))
+                self.on_mouse_press((done[1] + done[2]) / 2,
+                                    (done[3] + done[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                assert self.movement.session is None
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'system-control-preview.png')
                 self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
                 assert home.units == before_units and ship not in target.units
                 assert 'sol' not in target.command_tokens
@@ -432,6 +490,13 @@ class BoardWindow(arcade.Window):
                             self.movement_error = None
                             self.movement_panel.reset()
                             self.selected_units = ()
+                        elif action[0] == 'landing':
+                            self.movement.cycle_landing(action[1])
+                        elif action[0] == 'establish':
+                            self.movement.establish_control()
+                        elif action[0] == 'done':
+                            self.movement.finish()
+                            self.movement_panel.reset()
                     except MovementError as error:
                         self.movement_error = str(error)
             return

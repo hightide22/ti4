@@ -3,6 +3,21 @@
   "commit": "bd234c306286c00cc379f428558ac54152ebb0fe",
   "files": [
     {
+      "path": "command_token/control_blu.png",
+      "size": 2947,
+      "sha": "a8cc3989ef535c5045b3b9978c2074fda1d694ce"
+    },
+    {
+      "path": "command_token/control_ppl.png",
+      "size": 3086,
+      "sha": "1deb3bc85954d67ecb88c88e77452f3b5c4fe404"
+    },
+    {
+      "path": "command_token/control_ylw.png",
+      "size": 2850,
+      "sha": "2797ff8703c8248832375356b0790cc92b64014a"
+    },
+    {
       "path": "command_token/command_blu.png",
       "size": 6302,
       "sha": "8de4569bcde16e057a52e9cf8748b1c2e253a93d"

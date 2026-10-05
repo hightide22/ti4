@@ -60,6 +60,7 @@ def create_players(board, config):
         if alias:
             faction = factions[alias]
             tile = board[(entry['q'], entry['r'])]
+            tile.planet_owners.update({planet.planet_id: alias for planet in tile.planets})
             players.append(PlayerState(alias, faction['factionName'], entry['unit_color'],
                                        faction['commodities'], [PlanetCard(p) for p in tile.planets],
                                        technologies=frozenset(faction['startingTech'])))

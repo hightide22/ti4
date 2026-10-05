@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 
+from player import PlanetCard
 from units import Region, UnitLocation, UNIT_TYPES
 
 
@@ -28,22 +29,28 @@ class Snapshot:
     pools: dict
     tiles: list
     locations: list
+    planet_cards: list
 
     @classmethod
-    def capture(cls, board, player):
+    def capture(cls, board, player, players):
         return cls(player, dict(player.command_pools),
-                   [(tile, list(tile.units), set(tile.command_tokens)) for tile in board.values()],
-                   [(unit, unit.location) for tile in board.values() for unit in tile.units])
+                   [(tile, list(tile.units), set(tile.command_tokens), dict(tile.planet_owners)) for tile in board.values()],
+                   [(unit, unit.location) for tile in board.values() for unit in tile.units],
+                   [(other, list(other.planets)) for other in players])
 
     def restore(self):
         self.player.command_pools.clear()
         self.player.command_pools.update(self.pools)
-        for tile, units, tokens in self.tiles:
+        for tile, units, tokens, owners in self.tiles:
             tile.units[:] = units
             tile.command_tokens.clear()
             tile.command_tokens.update(tokens)
+            tile.planet_owners.clear()
+            tile.planet_owners.update(owners)
         for unit, location in self.locations:
             unit.location = location
+        for player, cards in self.planet_cards:
+            player.planets[:] = cards
 
 
 @dataclass
@@ -53,6 +60,10 @@ class Session:
     sources: dict
     snapshot: Snapshot
     selected: set[str] = field(default_factory=set)
+    stage: str = 'movement'
+    landings: dict[str, str | None] = field(default_factory=dict)
+    cannon_log: list[str] = field(default_factory=list)
+    outcome: str = ''
 
     @property
     def choices(self):
@@ -87,8 +98,9 @@ class Session:
 
 
 class MovementController:
-    def __init__(self, board):
+    def __init__(self, board, players=()):
         self.board = board
+        self.players = list(players)
         self.session = None
         self.history = []
 
@@ -151,7 +163,7 @@ class MovementController:
                               ((u.kind == 'fighter' and u.location.region == Region.SPACE) or
                                (u.kind in ('infantry', 'mech') and u.location.region == Region.PLANET))]
                 sources[origin.position] = Source(origin, ships, passengers, routes)
-        snapshot = Snapshot.capture(self.board, player)
+        snapshot = Snapshot.capture(self.board, player, self.players or [player])
         player.command_pools['tactical'] -= 1
         target.command_tokens.add(player.faction)
         self.session = Session(player, target, sources, snapshot)
@@ -161,6 +173,8 @@ class MovementController:
         session = self.session
         if not session:
             raise MovementError('No active movement')
+        if session.stage != 'movement':
+            raise MovementError('Ship movement has already been completed')
         capital_count = sum(capital_ship(u) and u.owner == session.player.faction for u in session.target.units)
         capital_count += sum(len(session.ships(s)) for s in session.sources.values())
         if capital_count > session.player.command_pools['fleet']:
@@ -187,9 +201,68 @@ class MovementController:
             origin.units.remove(unit)
             unit.location = location
             session.target.units.append(unit)
-        self.history.append(session.snapshot)
-        self.session = None
+        session.stage = 'invasion'
+        session.cannon_log = []
+        session.landings = ({unit.unit_id: None for unit in self.landing_forces(session)}
+                            if session.target.planets else {})
         return len(transfers)
+
+    def landing_forces(self, session):
+        return [unit for unit in session.target.units if unit.owner == session.player.faction and
+                unit.kind in ('infantry', 'mech') and unit.location.region == Region.TRANSPORT]
+
+    def cycle_landing(self, unit_id):
+        session = self.session
+        if not session or session.stage != 'invasion' or unit_id not in session.landings:
+            raise MovementError('This ground force cannot be landed')
+        planets = list(session.target.planets)
+        choices = [None, *(planet.planet_id for planet in planets)]
+        current = session.landings[unit_id]
+        session.landings[unit_id] = choices[(choices.index(current) + 1) % len(choices)]
+
+    def establish_control(self):
+        session = self.session
+        if not session or session.stage != 'invasion':
+            raise MovementError('Invasion is not active')
+        target, player = session.target, session.player
+        landed = []
+        for unit in self.landing_forces(session):
+            planet_id = session.landings.get(unit.unit_id)
+            if planet_id is None:
+                continue
+            unit.location = UnitLocation(Region.PLANET, planet_id=planet_id)
+            landed.append((unit, planet_id))
+        captured = []
+        for _, planet_id in landed:
+            if target.planet_owners.get(planet_id) == player.faction:
+                continue
+            if any(u.location.region == Region.PLANET and u.location.planet_id == planet_id and
+                   u.owner != player.faction and u.kind in ('infantry', 'mech') for u in target.units):
+                continue
+            target.planet_owners[planet_id] = player.faction
+            for unit in list(target.units):
+                if unit.owner != player.faction and unit.location.region == Region.PLANET and \
+                        unit.location.planet_id == planet_id and unit.kind in ('pds', 'spacedock'):
+                    target.units.remove(unit)
+            for other in self.players:
+                other.planets[:] = [card for card in other.planets if card.planet.planet_id != planet_id]
+            planet = next(planet for planet in target.planets if planet.planet_id == planet_id)
+            player.planets.append(PlanetCard(planet, exhausted=True))
+            captured.append(planet.name)
+        if not landed:
+            session.outcome = 'No ground forces landed. No planets changed control.'
+        else:
+            session.outcome = ('Landed forces on ' + ', '.join(next(p.name for p in target.planets if p.planet_id == pid)
+                               for _, pid in landed) + '. ' +
+                               ('Captured: ' + ', '.join(captured) + '.' if captured else 'Control did not change.'))
+        session.stage = 'complete'
+
+    def finish(self):
+        if self.session and self.session.stage == 'complete':
+            self.history.append(self.session.snapshot)
+            self.session = None
+            return True
+        return False
 
     def cancel(self):
         if self.session:

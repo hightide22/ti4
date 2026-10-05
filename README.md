@@ -18,7 +18,7 @@ Validation:
 .\.venv\Scripts\python.exe app.py --smoke-test
 ```
 
-The board displays the galaxy, component information and starting fleets. Players can activate systems and move ships and carried units. Assets are loaded from assets/source/asyncti4/src/main/resources. The upstream directory also contains homebrew content; the current map uses base-game systems only.
+The board opens in a large, centered window that leaves a small margin around the desktop. Fleet layouts are computed in the background so the board appears without waiting for every starting system to finish arranging its units. Players can activate systems and move ships and carried units. Assets are loaded from assets/source/asyncti4/src/main/resources. The upstream directory also contains homebrew content; the current map uses base-game systems only.
 
 
 ## Tile objects and custom maps
@@ -38,21 +38,21 @@ Each entry specifies `id`, `q`, `r`, and optionally `player` and `color`. Images
 
 `TILES.by_number` stores base-game tile definitions by integer number. `TILES[18]` describes Mecatol Rex; `TILES.create(18, (0, 0))` creates a placed tile object. Definitions and planets are shared component descriptions, while each placed tile has independent coordinates, player and sprite. The catalog selects `HomeSystemTile`, `PlanetaryTile`, `AnomalyTile`, or `EmptySpaceTile`, all derived from `Tile`.
 
-Each `Planet` has `name`, `planet_type`, `resources`, `influence`, `tech_specialties`, faction homeworld and legendary ability fields. Future ownership/exhaustion state should be stored separately from these component descriptions.
+Each `Planet` has `name`, `planet_type`, `resources`, `influence`, `tech_specialties`, faction homeworld and legendary ability fields. Ownership is tracked per placed tile so shared component definitions remain unchanged.
 
 
 ## Units and system detail view
 
 The default map now initializes the Sol, Hacan and Jol-Nar starting fleets from AsyncTI4 faction data. `units.py` defines individual units, space/planet/transport locations, and an automatic layout. `unit_view.py` renders the original colored sprites with shadows, count badges and selection highlights.
 
-Select a system and press **Space** or click **Detail view** to inspect it. Larger figures show up to four units individually; groups of five or more use a count badge. Ships of the same type form nearby groups, while ground units stay on their planets. The sidebar includes the original system tile image and lists fleet counts by type and separate planet cards with resources, influence and garrisons. Click an inventory row to select its units; scroll over the panel to see longer lists. **Escape** returns to the galaxy. Mouse wheel over the map changes zoom, right/middle drag pans the galaxy, **F** fits the whole board.
+Select a system and press **Space** or click **Detail view** to inspect it. Infantry and fighters show three sprites and a total count badge when a group has at least three units; other groups of five or more use a count badge. Ships of the same type form nearby groups, while ground units stay on their planets. The sidebar includes the original system tile image and lists fleet counts by type and separate planet cards with resources, influence and garrisons. Click an inventory row to select its units; scroll over the panel to see longer lists. **Escape** returns to the galaxy. Mouse wheel over the map changes zoom, right/middle drag pans the galaxy, **F** fits the whole board.
 
-Double-click a system to activate it for the player selected in the bottom dashboard. The activation spends one tactical command token and places that player's faction-marked triangle at the center of the system. Multiple factions' tokens can share a system. The sidebar lists the tokens in the selected system and friendly ships that can reach it, along with eligible infantry, mechs and fighters in each source system. Select ships and passengers, then choose **Move**; carried units travel with their selected carrier. Transport capacity is checked while selecting. **Cancel** or **Ctrl+Z** restores the activation and its tactical token. After a move, **Ctrl+Z** also restores the prior board state. Right-click a board token to reveal a debug button that removes it and returns it to its owner's tactical reserve. Each map entry can specify `faction` and `unit_color`; `setup: starting_fleets` enables starting units. Omitting this setup leaves a board without units.
+Double-click a system to activate it for the player selected in the bottom dashboard. The activation spends one tactical command token and places that player's faction-marked triangle at the center of the system. Multiple factions' tokens can share a system. The sidebar lists tokens in the selected system and friendly ships that can reach it, along with eligible infantry, mechs and fighters in each source system. Select ships and passengers, then choose **Move**; carried units travel with their selected carrier. Transport capacity is checked while selecting. The action then skips all combat steps and lets you assign transported ground forces to planets. Confirming the landing transfers control of empty or friendly-cleared planets, adds exhausted planet cards to the player dashboard and marks owned planets with small rectangular faction tokens. The selected system panel lists system and planet owners. **Cancel** or **Ctrl+Z** restores the full tactical action. Right-click an activation token to reveal a debug button that removes it and returns it to its owner's tactical reserve. Each map entry can specify `faction` and `unit_color`; `setup: starting_fleets` enables starting units. Omitting this setup leaves a board without units.
 
 
 ## Asset source
 
-`assets/resources.lock.json` pins the 225 resources needed by this build to AsyncTI4 commit `bd234c306286c00cc379f428558ac54152ebb0fe`. The restore script downloads about 10 MB and verifies each file against its Git blob hash. Downloaded artwork, virtual environments, local IDE settings and generated previews are excluded from Git. Original TI4 artwork remains third-party material; this repository does not grant a license to that artwork.
+`assets/resources.lock.json` pins the 228 resources needed by this build to AsyncTI4 commit `bd234c306286c00cc379f428558ac54152ebb0fe`. The restore script downloads about 10 MB and verifies each file against its Git blob hash. Downloaded artwork, virtual environments, local IDE settings and generated previews are excluded from Git. Original TI4 artwork remains third-party material; this repository does not grant a license to that artwork.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/fetch_assets.py --check

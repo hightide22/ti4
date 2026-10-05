@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import arcade
@@ -26,6 +27,13 @@ class UnitRenderer:
         self.labels = {}
         self.hits = []
         self.elapsed = 0.0
+        self.layout_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='unit-layout')
+        self.pending_layouts = {}
+        self.blocking_layouts = False
+
+    @property
+    def is_loading(self):
+        return any(not future.done() for _, future in self.pending_layouts.values())
 
     def update(self, delta_time):
         self.elapsed += delta_time
@@ -33,9 +41,31 @@ class UnitRenderer:
     def placements(self, tile, detailed):
         signature = tuple((u.unit_id, u.kind, u.owner, u.location) for u in tile.units)
         key = tile, detailed
-        if key not in self.layouts or self.layouts[key][0] != signature:
-            self.layouts[key] = signature, layout_units(tile, detailed)
-        return self.layouts[key][1]
+        cached = self.layouts.get(key)
+        if cached and cached[0] == signature:
+            return cached[1]
+        pending = self.pending_layouts.get(key)
+        if pending and pending[0] == signature:
+            future = pending[1]
+            if self.blocking_layouts:
+                placements = future.result()
+            elif not future.done():
+                return ()
+            else:
+                placements = future.result()
+            self.layouts[key] = signature, placements
+            self.pending_layouts.pop(key, None)
+            return placements
+        if pending:
+            pending[1].cancel()
+        future = self.layout_executor.submit(layout_units, tile, detailed)
+        self.pending_layouts[key] = signature, future
+        if self.blocking_layouts:
+            placements = future.result()
+            self.layouts[key] = signature, placements
+            self.pending_layouts.pop(key, None)
+            return placements
+        return ()
 
     def label(self, key, text, x, y, size=10, color=(235, 242, 255)):
         if key not in self.labels:
@@ -75,12 +105,12 @@ class UnitRenderer:
             th = pixel_size * texture.height / max(texture.width, texture.height)
             arcade.draw_texture_rect(texture, arcade.XYWH(cx + max(1, scale), cy - max(1.5, scale), tw, th), color=arcade.types.Color(0, 0, 0, 145), angle=placement.angle)
             arcade.draw_texture_rect(texture, arcade.XYWH(cx, cy, tw, th), angle=placement.angle)
-            if len(placement.units) > 1:
+            if placement.badge_count is not None or len(placement.units) > 1:
                 badge = max(8, min(13, 6 + 3 * scale))
                 bx, by = cx + tw * .42, cy - th * .38
                 arcade.draw_circle_filled(bx, by, badge, (9, 16, 28, 245))
                 arcade.draw_circle_outline(bx, by, badge, (*color, 220), 1)
-                self.label((scope, ids, 'count'), str(len(placement.units)), bx, by, min(13, max(10, 8 + scale)))
+                self.label((scope, ids, 'count'), str(placement.badge_count or len(placement.units)), bx, by, min(13, max(10, 8 + scale)))
             if unit.damaged:
                 arcade.draw_line(cx - tw / 2, cy + th / 2, cx + tw / 2, cy - th / 2, (245, 110, 100), 2)
             cargo = [u for u in tile.units if u.location.region == Region.TRANSPORT and u.location.carrier_id in ids]
