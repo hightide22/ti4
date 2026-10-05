@@ -73,8 +73,8 @@ class UnitRenderer:
             texture = self.textures[unit.image_path]
             tw = pixel_size * texture.width / max(texture.width, texture.height)
             th = pixel_size * texture.height / max(texture.width, texture.height)
-            arcade.draw_texture_rect(texture, arcade.XYWH(cx + max(1, scale), cy - max(1.5, scale), tw, th), color=arcade.types.Color(0, 0, 0, 145))
-            arcade.draw_texture_rect(texture, arcade.XYWH(cx, cy, tw, th))
+            arcade.draw_texture_rect(texture, arcade.XYWH(cx + max(1, scale), cy - max(1.5, scale), tw, th), color=arcade.types.Color(0, 0, 0, 145), angle=placement.angle)
+            arcade.draw_texture_rect(texture, arcade.XYWH(cx, cy, tw, th), angle=placement.angle)
             if len(placement.units) > 1:
                 badge = max(8, min(13, 6 + 3 * scale))
                 bx, by = cx + tw * .42, cy - th * .38

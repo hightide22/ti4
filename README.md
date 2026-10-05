@@ -69,3 +69,5 @@ Click a planet card to switch between ready and exhausted sides. Ready resource 
 The board and dashboard render live. Smoke-test screenshots are written to the ignored `previews/` directory and are not used by the game.
 
 The player tray is 160 px tall. Planet cards paginate as the collection grows; the system sidebar uses compact inventory rows and a small original tile thumbnail.
+
+Hovering a planet card raises and highlights it and softly outlines its containing system on the galaxy map. The selected-system panel shows a larger original tile image. Ships may rotate slightly when needed to fit a formation into a crowded system.

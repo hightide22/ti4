@@ -75,25 +75,23 @@ class SystemPanel:
         text = window.text
         text('system_label', 'SELECTED SYSTEM', px, window.height - 26, 10, MUTED)
         name = tile.name.split(' - ')[0]
-        if len(name) > 21 and len(tile.planets) > 1:
-            name = f"{name.split('/')[0]} + {len(tile.planets) - 1} planets"
-        text('system_name', name, px, window.height - 62, 14, INK, width - 115)
+        text('system_name', name, px, window.height - 62, 14, INK, width)
         text('system_id', f'Tile {tile.system_id} · {len(tile.units)} units in system', px, window.height - 88, 11, MUTED)
         if tile.player:
             text('owner', tile.player, px, window.height - 124, 11, tuple(tile.color))
         inventory = system_inventory(tile)
         texture = window.tile_sprites[tile].texture
-        preview_width = 100
+        preview_width = min(250, width)
         preview_height = preview_width * texture.height / texture.width
-        arcade.draw_texture_rect(texture, arcade.XYWH(px + width - 50, window.height - 61,
+        arcade.draw_texture_rect(texture, arcade.XYWH(px + width / 2, window.height - 133 - preview_height / 2,
                                                      preview_width, preview_height))
-        top, bottom = window.height - 140, 100
+        top, bottom = window.height - 151 - preview_height, 100
         self.viewport = (int(left), bottom, int(window.sidebar), max(1, int(top - bottom)))
         self.hits.clear()
         previous_scissor = window.ctx.scissor
         window.ctx.scissor = self.viewport
         try:
-            start = window.height - 161
+            start = top - 21
             y = start + self.scroll
             text('fleet_title', 'SPACE FLEET', px, y, 12, ACCENT)
             y = self.draw_counts(window, 'fleet', inventory['fleet'], px, y - 15, width) - 10

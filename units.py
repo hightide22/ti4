@@ -64,13 +64,13 @@ class Unit:
 
 
 UNIT_TYPES = {
-    "carrier": {"sprite": "cv", "name": "Carrier", "ship": True, "size": 47},
-    "cruiser": {"sprite": "ca", "name": "Cruiser", "ship": True, "size": 48},
-    "destroyer": {"sprite": "dd", "name": "Destroyer", "ship": True, "size": 43},
-    "dreadnought": {"sprite": "dn", "name": "Dreadnought", "ship": True, "size": 64},
-    "fighter": {"sprite": "ff", "name": "Fighter", "ship": True, "size": 31},
-    "flagship": {"sprite": "fs", "name": "Flagship", "ship": True, "size": 70},
-    "warsun": {"sprite": "ws", "name": "War sun", "ship": True, "size": 67},
+    "carrier": {"sprite": "cv", "name": "Carrier", "ship": True, "size": 54.05},
+    "cruiser": {"sprite": "ca", "name": "Cruiser", "ship": True, "size": 55.2},
+    "destroyer": {"sprite": "dd", "name": "Destroyer", "ship": True, "size": 49.45},
+    "dreadnought": {"sprite": "dn", "name": "Dreadnought", "ship": True, "size": 73.6},
+    "fighter": {"sprite": "ff", "name": "Fighter", "ship": True, "size": 35.65},
+    "flagship": {"sprite": "fs", "name": "Flagship", "ship": True, "size": 80.5},
+    "warsun": {"sprite": "ws", "name": "War sun", "ship": True, "size": 77.05},
     "infantry": {"sprite": "gf", "name": "Infantry", "ship": False, "size": 37},
     "mech": {"sprite": "mf", "name": "Mech", "ship": False, "size": 42},
     "pds": {"sprite": "pd", "name": "PDS", "ship": False, "size": 38},
@@ -117,6 +117,7 @@ class UnitPlacement:
     x: float
     y: float
     size: float
+    angle: float = 0
 
     @property
     def kind(self):
@@ -157,8 +158,16 @@ def silhouette(image_path, size):
         return convex_hull(points)
 
 
+def rotated_silhouette(image_path, size, angle):
+    theta = math.radians(angle)
+    cosine, sine = math.cos(theta), math.sin(theta)
+    return tuple((x * cosine - y * sine, x * sine + y * cosine)
+                 for x, y in silhouette(image_path, size))
+
+
 def placed_outline(placement):
-    return tuple((placement.x + x, placement.y + y) for x, y in silhouette(placement.units[0].image_path, placement.size))
+    return tuple((placement.x + x, placement.y + y) for x, y in
+                 rotated_silhouette(placement.units[0].image_path, placement.size, placement.angle))
 
 
 def polygons_overlap(a, b):
@@ -225,35 +234,43 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
     same_kind = {}
     labels = protected_labels(tile)
     for members, size in fleet:
-        outline = silhouette(members[0].image_path, size)
         key = members[0].owner, members[0].kind
         candidates = []
-        for x in range(20, 326, 6):
-            for y in range(18, 283, 6):
-                polygon = tuple((x + dx, y + dy) for dx, dy in outline)
-                edge_clearance = min(hex_clearance(px, py) for px, py in polygon)
-                if edge_clearance < 3:
-                    continue
-                if any(circle_overlap(polygon, planet.center, planet.radius + 2) for planet in tile.planets):
-                    continue
-                if any(polygons_overlap(polygon, label) for label in labels):
-                    continue
-                if circle_overlap(polygon, (104, 274), 29):
-                    continue
-                expanded = tuple((x + dx * 1.12, y + dy * 1.12) for dx, dy in outline)
-                if any(polygons_overlap(expanded, other) for other in occupied):
-                    continue
-                planet_clearance = min((math.hypot(x - p.center[0], y - p.center[1]) - p.radius for p in tile.planets), default=100)
-                score = min(edge_clearance, planet_clearance)
-                if key in same_kind:
-                    score -= math.dist((x, y), same_kind[key]) * .7
-                candidates.append((score, x, y, polygon))
+        # Rotate only when a repeated ship cannot stay near its formation.
+        for angle in (0, -15, 15, -30, 30, -45, 45, -60, 60, 90):
+            if angle and key not in same_kind and candidates:
+                break
+            if angle and candidates:
+                best = max(candidates, key=lambda c: c[0])
+                if key in same_kind and math.dist(best[1:3], same_kind[key]) <= size * 1.5:
+                    break
+            outline = rotated_silhouette(members[0].image_path, size, angle)
+            for x in range(20, 326, 6):
+                for y in range(18, 283, 6):
+                    polygon = tuple((x + dx, y + dy) for dx, dy in outline)
+                    edge_clearance = min(hex_clearance(px, py) for px, py in polygon)
+                    if edge_clearance < 3:
+                        continue
+                    if any(circle_overlap(polygon, planet.center, planet.radius + 2) for planet in tile.planets):
+                        continue
+                    if any(polygons_overlap(polygon, label) for label in labels):
+                        continue
+                    if circle_overlap(polygon, (104, 274), 29):
+                        continue
+                    expanded = tuple((x + dx * 1.12, y + dy * 1.12) for dx, dy in outline)
+                    if any(polygons_overlap(expanded, other) for other in occupied):
+                        continue
+                    planet_clearance = min((math.hypot(x - p.center[0], y - p.center[1]) - p.radius for p in tile.planets), default=100)
+                    score = min(edge_clearance, planet_clearance)
+                    if key in same_kind:
+                        score -= math.dist((x, y), same_kind[key]) * .7
+                    candidates.append((score - abs(angle) * .015, x, y, polygon, angle))
         if not candidates:
             raise ValueError(f"No free display position for {members[0].kind} in tile {tile.number}")
-        _, x, y, polygon = max(candidates, key=lambda c: c[0])
+        _, x, y, polygon, angle = max(candidates, key=lambda c: c[0])
         occupied.append(polygon)
         same_kind.setdefault(key, (x, y))
-        placements.append(UnitPlacement(members, x, y, size))
+        placements.append(UnitPlacement(members, x, y, size, angle))
     return placements
 
 

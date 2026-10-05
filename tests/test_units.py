@@ -58,6 +58,13 @@ class UnitTests(unittest.TestCase):
                 self.assertTrue(all(u.location.planet_id == planet_id for u in members))
         self.assertEqual(sum(len(us) for groups in inventory["planets"].values() for us in groups.values()), 5)
 
+    def test_starting_carrier_pairs_stay_together(self):
+        for tile in self.homes.values():
+            carriers = [p for p in layout_units(tile, True) if p.kind == "carrier"]
+            self.assertEqual(len(carriers), 2)
+            self.assertLess(math.dist((carriers[0].x, carriers[0].y),
+                                      (carriers[1].x, carriers[1].y)), 80)
+
     def test_ground_stays_on_its_planet(self):
         for tile in self.homes.values():
             for p in layout_units(tile, True):

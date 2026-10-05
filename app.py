@@ -123,6 +123,24 @@ class BoardWindow(arcade.Window):
         arcade.draw_texture_rect(texture, arcade.XYWH(x, y, width, width * texture.height / texture.width))
         self.unit_renderer.draw(tile, x, y, width, detailed=detailed, selected=self.selected_units, hovered=self.hovered_units, interactive=interactive, scope=scope)
 
+    @property
+    def planet_hover_system(self):
+        planet_id = self.player_panel.hovered_planet_id
+        if planet_id is None:
+            return None
+        return next((tile.position for tile in self.board.values()
+                     if any(p.planet_id == planet_id for p in tile.planets)), None)
+
+    def highlight_system(self, x, y, width):
+        radius = width * .49
+        def vertices(factor):
+            return [(x + radius * factor * math.cos(math.pi * i / 3),
+                     y + radius * factor * math.sin(math.pi * i / 3)) for i in range(6)]
+        arcade.draw_polygon_filled(vertices(1), (*ACCENT, 13))
+        arcade.draw_polygon_outline(vertices(1.025), (*ACCENT, 24), 6)
+        arcade.draw_polygon_outline(vertices(1.01), (*ACCENT, 65), 3)
+        arcade.draw_polygon_outline(vertices(1), (*ACCENT, 155), 1.5)
+
     def toggle_focus(self):
         self.focus_view = not self.focus_view
         self.focus_zoom = 1.0
@@ -142,10 +160,14 @@ class BoardWindow(arcade.Window):
             cx, cy = self.viewport_center
             width = min(self.width - self.sidebar - 90, (self.height - 200 - self.player_panel.HEIGHT) * 345 / 299) * self.focus_zoom
             self.draw_tile(tile, cx, cy + 15, width, detailed=True)
+            if self.planet_hover_system == tile.position:
+                self.highlight_system(cx, cy + 15, width)
         else:
             for position, tile in self.board.items():
                 x, y = self.screen(position)
                 self.draw_tile(tile, x, y, radius * 2)
+                if self.planet_hover_system == position:
+                    self.highlight_system(x, y, radius * 2)
                 if tile.player is not None:
                     self.outline(position, tuple(tile.color), 2)
             if self.hover is not None and self.hover != self.selected:
@@ -251,6 +273,17 @@ class BoardWindow(arcade.Window):
                     click_control(('planet', 0))
                     self.on_draw()
                     arcade.get_image().save(preview_dir / 'player-panel-hacan-preview.png')
+                    control = next(c for c in panel.controls if c.action == ('planet', 0))
+                    previous_selection = self.selected
+                    self.on_mouse_motion(control.left + 10, control.bottom + 10, 0, 0)
+                    home = next(tile for tile in self.board.home_tiles if any(p.planet_id == panel.hovered_planet_id for p in tile.planets))
+                    assert self.planet_hover_system == home.position
+                    assert self.selected == previous_selection
+                    self.on_draw()
+                    assert next(c for c in panel.controls if c.action == ('planet', 0)).bottom == control.bottom
+                    arcade.get_image().save(preview_dir / 'planet-hover-preview.png')
+                    self.on_mouse_motion(100, self.height - 20, 0, 0)
+                    assert panel.hovered_planet_id is None and self.planet_hover_system is None
                     click_control(('planet', 0))
                     click_control(('player', 0))
                 original_cards = panel.player.planets

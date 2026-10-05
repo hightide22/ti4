@@ -88,6 +88,12 @@ class PlayerPanel:
         control = next((c for c in self.controls if c.action[0] == 'planet' and c.contains(x, y)), None)
         self.hovered_planet = control.action[1] if control else None
 
+    @property
+    def hovered_planet_id(self):
+        if self.player and self.hovered_planet is not None and 0 <= self.hovered_planet < len(self.player.planets):
+            return self.player.planets[self.hovered_planet].planet.planet_id
+        return None
+
     def draw(self, window):
         self.controls.clear()
         width = window.width - window.sidebar
@@ -163,9 +169,15 @@ class PlayerPanel:
         card = self.player.planets[index]
         planet = card.planet
         exhausted = card.exhausted
-        arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + height, (19, 29, 43) if exhausted else CARD)
+        hit_y = y
+        hovered = index == self.hovered_planet
+        if hovered:
+            y += 3
+            arcade.draw_lrbt_rectangle_filled(x - 3, x + width + 3, y - 3, y + height + 3, (*ACCENT, 24))
+        background = (29, 53, 68) if hovered else (19, 29, 43) if exhausted else CARD
+        arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + height, background)
         arcade.draw_lrbt_rectangle_outline(x, x + width, y, y + height,
-                                          (64, 74, 90) if exhausted else (67, 133, 154), 1)
+                                          ACCENT if hovered else (64, 74, 90) if exhausted else (67, 133, 154), 2 if hovered else 1)
         window.text(('planet_name', index), planet.name, x + 8, y + height - 19, 12, INK, width - 16)
         tint = (140, 150, 164, 170) if exhausted else None
         self.image(self.trait_image(planet), x + 21, y + 43, 25, tint)
@@ -180,7 +192,7 @@ class PlayerPanel:
             self.image(f'planet_cards/pc_tech_{planet.tech_specialties[0].lower()}_{suffix}.png', x + width - 12, y + 59, 13)
         if planet.legendary_ability_name:
             self.image(f'planet_cards/pc_legendary_{suffix}.png', x + width - 12, y + 58, 14)
-        self.controls.append(Control(('planet', index), x, y, width, height))
+        self.controls.append(Control(('planet', index), x, hit_y, width, height))
 
     def draw_details(self, window):
         card = self.player.planets[self.hovered_planet]
