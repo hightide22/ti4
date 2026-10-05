@@ -386,6 +386,12 @@ class BoardWindow(arcade.Window):
                 self.on_mouse_press((confirm[1] + confirm[2]) / 2,
                                     (confirm[3] + confirm[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
                 assert self.movement.session and self.movement.session.stage == 'invasion' and ship in target.units
+                assert any(unit.location.region == Region.TRANSPORT and unit.location.carrier_id == ship.unit_id
+                           for unit in target.units)
+                self.focus_view = True
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'cargo-preview.png')
+                self.focus_view = False
                 self.on_draw()
                 landing_row = next(hit for hit in self.movement_panel.hits if hit[0] == ('landing', infantry.unit_id))
                 self.on_mouse_press((landing_row[1] + landing_row[2]) / 2,
