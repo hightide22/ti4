@@ -1141,6 +1141,146 @@
       "path": "units/ylw_ws.png",
       "size": 9516,
       "sha": "eb9059f442c8f627c3bd7658723a6cff90d3ed83"
+    },
+    {
+      "path": "data/abilities/base.json",
+      "size": 11762,
+      "sha": "d2a594a370fc987031e66ddcd8ef0bf5d3b02151"
+    },
+    {
+      "path": "data/technologies/pok.json",
+      "size": 52752,
+      "sha": "3a522a4923e2c5b84ddfdefcf7d1af8987b05dab"
+    },
+    {
+      "path": "emojis/cards/SC1.png",
+      "size": 22166,
+      "sha": "3e1c7fcacc63bd0481ba0e9478e552a48ac39043"
+    },
+    {
+      "path": "emojis/cards/SC1Back.png",
+      "size": 7488,
+      "sha": "818ba7df2c33347a758554a9eee322e654fed18a"
+    },
+    {
+      "path": "emojis/cards/SC2.png",
+      "size": 26819,
+      "sha": "bf613ee31e771bb8c1ec7ed907f6db05dba5307f"
+    },
+    {
+      "path": "emojis/cards/SC2Back.png",
+      "size": 8688,
+      "sha": "6badcbff86eb06ff8468516bc2cce9a41a3e48fe"
+    },
+    {
+      "path": "emojis/cards/SC3.png",
+      "size": 23145,
+      "sha": "09592e8a58fb08c70c2771f64cf5e3cb1dbfe03b"
+    },
+    {
+      "path": "emojis/cards/SC3Back.png",
+      "size": 8554,
+      "sha": "d0d5aaf1034cf9f85e3fcbed61ad5f6c73359d34"
+    },
+    {
+      "path": "emojis/cards/SC4.png",
+      "size": 24693,
+      "sha": "00f0ae5c51921a765fa1d889a754a5799f044731"
+    },
+    {
+      "path": "emojis/cards/SC4Back.png",
+      "size": 8468,
+      "sha": "37ae2a293942fc25d4f872f3346e55472efae7d0"
+    },
+    {
+      "path": "emojis/cards/SC5.png",
+      "size": 23104,
+      "sha": "a836ff5317cd2b04925ecf4903bb0c126e426f1a"
+    },
+    {
+      "path": "emojis/cards/SC5Back.png",
+      "size": 7604,
+      "sha": "cbbc31968c7ed6875872c6962159cdc53ec4aea4"
+    },
+    {
+      "path": "emojis/cards/SC6.png",
+      "size": 24373,
+      "sha": "0790cbdedcb91aab083de1257caabc57daaae36f"
+    },
+    {
+      "path": "emojis/cards/SC6Back.png",
+      "size": 7992,
+      "sha": "3b27836a6156df2b89fb562039514afc06354942"
+    },
+    {
+      "path": "emojis/cards/SC7.png",
+      "size": 20773,
+      "sha": "d9ba1a263701c520efa80f08c99749777cdee87d"
+    },
+    {
+      "path": "emojis/cards/SC7Back.png",
+      "size": 7042,
+      "sha": "d0835d26344d33119931418faa9efd9d85baf0ac"
+    },
+    {
+      "path": "emojis/cards/SC8.png",
+      "size": 22647,
+      "sha": "c5b24eb130753d2efef77e51dacbca9bc54563f6"
+    },
+    {
+      "path": "emojis/cards/SC8Back.png",
+      "size": 7760,
+      "sha": "699affeea078bd71d769c15bf5f690bc603b3790"
+    },
+    {
+      "path": "strat_cards/base_game_1.png",
+      "size": 139773,
+      "sha": "4fa9c11508b785173f35e18bd7e8fa48eeaadba2"
+    },
+    {
+      "path": "strat_cards/base_game_2.png",
+      "size": 174768,
+      "sha": "88fda8ff871878a2cc0acd986264bd98629604f1"
+    },
+    {
+      "path": "strat_cards/base_game_3.png",
+      "size": 162578,
+      "sha": "1c4db7b3d9ccd625d539eb84b93e56aa2d7c3d86"
+    },
+    {
+      "path": "strat_cards/base_game_4.png",
+      "size": 151840,
+      "sha": "9a22f2114f2af47266a955673bfa1f449f52d4ac"
+    },
+    {
+      "path": "strat_cards/base_game_5.png",
+      "size": 150130,
+      "sha": "12c49326e649f6f1fa85ce47899faf1e2ab0ca56"
+    },
+    {
+      "path": "strat_cards/base_game_6.png",
+      "size": 159333,
+      "sha": "e9fe522bf0a1d4addbe029bb7f58913e8bbfbb4c"
+    },
+    {
+      "path": "strat_cards/base_game_7.png",
+      "size": 132118,
+      "sha": "9cd96fadbd3150903dd317192c8916ca0c932bd6"
+    },
+    {
+      "path": "strat_cards/base_game_8.png",
+      "size": 146927,
+      "sha": "8140a05349085796a357ca7183b713fe2e0ae07d"
+    },
+    {
+      "path": "strat_cards/pok_2.png",
+      "size": 240165,
+      "sha": "a73fe22c37fd766b673412cb5bb9bad2c22ad39f"
+    },
+    {
+      "path": "tokens/token_speaker.png",
+      "size": 39864,
+      "sha": "c858a58226b7c1c6f73ed9f4c12277854704e351"
     }
   ]
 }

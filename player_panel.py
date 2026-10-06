@@ -112,10 +112,8 @@ class PlayerPanel:
         if not self.player:
             window.text('no_player', 'No player factions in this map', 16, height - 30, 13, MUTED)
             return
-        for index, player in enumerate(self.players):
-            label = 'JOL-NAR' if player.faction == 'jolnar' else player.faction.upper()
-            self.button(window, ('player', index), label, 16 + index * 79,
-                        height - 32, 72, height=24, selected=index == self.active)
+        window.text('dashboard_player', f'{self.player.faction.upper()} · PLAYER DASHBOARD',
+                    16, height - 25, 11, ACCENT)
         resources, influence = self.player.available_values
         self.image('planet_cards/pc_res_rdy.png', 267, height - 20, 16)
         self.image('planet_cards/pc_inf_rdy.png', 311, height - 20, 16)
@@ -125,7 +123,11 @@ class PlayerPanel:
         reserve_width = 328
         self.draw_currencies(window, reserve_left, height - 17, reserve_width)
         self.draw_reserves(window, reserve_left, 32, reserve_width)
-        window.text('planet_help', 'PLANETS  ·  Exhaust to pay for production / hover for details', 16, 108, 11, MUTED)
+        leadership = window.strategy.session and window.strategy.session.stage == 'leadership'
+        help_text = ('PLANETS · Click to pay influence' if leadership else
+                     'PLANETS · Click to pay resources' if window.movement.session and window.movement.session.stage == 'production'
+                     else 'PLANETS · Hover for details')
+        window.text('planet_help', help_text, 16, 108, 11, MUTED)
         card_width, gap = 112, 8
         slots = max(1, int((reserve_left - 28) // (card_width + gap)))
         self.card_offset = min(self.card_offset, max(0, len(self.player.planets) - slots))
@@ -170,12 +172,13 @@ class PlayerPanel:
                                               (34, 72, 88) if selected_pending else (23, 39, 57))
             arcade.draw_lrbt_rectangle_outline(x, x + width, pending_bottom, pending_bottom + pending_height,
                                                (75, 164, 152) if selected_pending else (54, 75, 97), 1)
+            instruction = 'choose a pool' if window.strategy.session else 'click to allocate to a pool'
             window.text('pending_command_help',
-                        f'New commands: {self.player.pending_commands} · click to allocate to a pool',
+                        f'New commands: {self.player.pending_commands} · {instruction}',
                         x + 8, pending_bottom + 7, 10, ACCENT if selected_pending else INK, width - 16)
             self.controls.append(Control(('pending',), x, pending_bottom, width, pending_height))
         else:
-            hint = 'Choose destination' if self.source_pool else 'Commands: source → destination'
+            hint = ('Choose destination' if self.source_pool else 'Commands: source → destination') if window.turn_order.command_allocation else 'Command pools'
             window.text('pool_help', hint, x, 13, 11, MUTED)
 
     def trait_image(self, planet):

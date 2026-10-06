@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+"""Central strategy-card draft and resolution dialogs."""
 import arcade
 
 INK = (223, 232, 244)
@@ -7,167 +6,197 @@ MUTED = (132, 154, 180)
 ACCENT = (100, 207, 224)
 CARD = (23, 39, 57)
 GOLD = (245, 194, 103)
-
 STRATEGY_CARDS = {
-    1: ('Leadership', 'Gain 3 command tokens; buy more for influence.'),
-    2: ('Diplomacy', 'Place opponents’ tokens in a controlled system; ready 2 planets.'),
-    3: ('Politics', 'Choose the next Speaker. Action-card draws are skipped.'),
-    4: ('Construction', 'Place a PDS or Space Dock, then another PDS.'),
-    5: ('Trade', 'Gain 3 trade goods; replenish commodities.'),
-    6: ('Warfare', 'Remove one of your command tokens and redistribute it.'),
-    7: ('Technology', 'Primary and secondary abilities are not implemented yet.'),
-    8: ('Imperial', 'Primary and secondary abilities are not implemented yet.'),
+    1: ('Leadership', 'Buy command tokens for 3 influence each.'),
+    2: ('Diplomacy', 'Ready up to 2 exhausted planets.'),
+    3: ('Politics', 'Action-card draws are not implemented yet.'),
+    4: ('Construction', 'Place a PDS or Space Dock on a controlled planet.'),
+    5: ('Trade', 'Replenish your commodities.'),
+    6: ('Warfare', 'Produce at one Space Dock in your home system.'),
+    7: ('Technology', 'Not implemented yet.'),
+    8: ('Imperial', 'Not implemented yet.'),
 }
+
+
+def strategy_image(card, small=False, used=False):
+    if small or used:
+        return f'emojis/cards/SC{card}{"Back" if used else ""}.png'
+    return f'strat_cards/{"pok_2" if card == 2 else f"base_game_{card}"}.png'
 
 
 class StrategyPanel:
     def __init__(self):
         self.hits = []
+        self.page = 0
+        self.page_key = None
+        self.bounds = None
 
     def hit_test(self, x, y):
-        return next((action for action, left, right, bottom, top in reversed(self.hits)
-                     if left <= x <= right and bottom <= y <= top), None)
+        return next((a for a, l, r, b, t in reversed(self.hits) if l <= x <= r and b <= y <= t), None)
 
-    def draw(self, window, turn, left):
+    def button(self, w, action, label, x, y, width, enabled=True, selected=False):
+        arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + 32,
+                                         (37, 85, 89) if selected else CARD if enabled else (28, 33, 43))
+        arcade.draw_lrbt_rectangle_outline(x, x + width, y, y + 32,
+                                          ACCENT if selected else (58, 86, 104), 1)
+        w.text(('strategy_button', action), label, x + 9, y + 10, 10, INK if enabled else MUTED)
+        if enabled:
+            self.hits.append((action, x, x + width, y, y + 32))
+
+    def options(self, w, options, x, y, width, size=5):
+        self.page = min(self.page, max(0, (len(options) - 1) // size))
+        for i, (action, label, selected) in enumerate(options[self.page * size:(self.page + 1) * size]):
+            self.button(w, action, label, x, y - i * 39, width, selected=selected)
+        if len(options) > size:
+            self.button(w, ('page', -1), '<', x, y - size * 39, 40, self.page > 0)
+            self.button(w, ('page', 1), '>', x + width - 40, y - size * 39, 40,
+                        (self.page + 1) * size < len(options))
+
+    def draw(self, w, turn, left=None):
         self.hits.clear()
-        x, width = left + 18, window.sidebar - 36
-        y = window.height - 26
-        if turn.strategy_selection:
-            player = turn.active_player
-            speaker = turn.speaker
-            picks_per_player = 2 if len(turn.players) in (3, 4) else 1
-            chosen = len(turn.strategy_assignments[player.faction])
-            window.text('strategy_phase_title', 'STRATEGY PHASE', x, y, 12, ACCENT)
-            y -= 28
-            window.text('strategy_speaker', f'Speaker: {speaker.name}', x, y, 10, GOLD, width)
-            y -= 22
-            window.text('strategy_picker', f'{player.name} · choose card {chosen + 1} of {picks_per_player}',
-                        x, y, 10, INK, width)
-            y -= 29
-            for card in turn.available_strategy_cards:
-                name, detail = STRATEGY_CARDS[card]
-                top = y
-                arcade.draw_lrbt_rectangle_filled(x, x + width, top - 62, top, CARD)
-                arcade.draw_lrbt_rectangle_outline(x, x + width, top - 62, top, (67, 111, 139), 1)
-                arcade.draw_lrbt_rectangle_filled(x + 8, x + 39, top - 53, top - 8, (76, 45, 42))
-                window.text(('strategy_number', card), str(card), x + 19, top - 37, 17, GOLD)
-                window.text(('strategy_name', card), name.upper(), x + 48, top - 21, 10, ACCENT)
-                window.text(('strategy_detail', card), detail, x + 48, top - 43, 8, MUTED, width - 57)
-                self.hits.append((('choose_strategy', card), x, x + width, top - 62, top))
-                y -= 68
-            window.text('strategy_order_hint', 'Pick order follows the Speaker clockwise.', x, 118, 9, MUTED, width)
+        s = w.strategy.session
+        draft = turn.strategy_selection
+        width = min(1060 if draft else 830, w.width - 48)
+        height = min(730, w.height - 48) if draft else min(555, w.height - w.player_panel.HEIGHT - 48)
+        x = (w.width - width) / 2
+        bottom = (w.height - height) / 2 if draft else w.player_panel.HEIGHT + (w.height - w.player_panel.HEIGHT - height) / 2
+        top = bottom + height
+        self.bounds = (x, x + width, bottom, top)
+        arcade.draw_lrbt_rectangle_filled(0, w.width, w.player_panel.HEIGHT if not draft else 0, w.height, (4, 9, 18, 205))
+        arcade.draw_lrbt_rectangle_filled(x, x + width, bottom, top, (14, 25, 41))
+        arcade.draw_lrbt_rectangle_outline(x, x + width, bottom, top, (78, 138, 156), 2)
+        if draft:
+            self.draw_draft(w, turn, x, bottom, width, height)
             return
+        if not s:
+            self.draw_owned(w, turn, x, bottom, width, height)
+            return
+        key = (s.card, s.player.faction, s.stage, s.builds_left)
+        if key != self.page_key:
+            self.page, self.page_key = 0, key
+        w.text('strategy_modal_title', f'{s.card} · {STRATEGY_CARDS[s.card][0].upper()}',
+               x + 22, top - 31, 17, ACCENT)
+        kind = 'PRIMARY' if s.primary else 'SECONDARY'
+        w.text('strategy_actor', f'{s.player.name} · {kind}', x + 22, top - 57, 11, GOLD)
+        w.player_panel.image(strategy_image(s.card), x + 111, top - 204, 234)
+        w.text('strategy_queue', f'Turn owner: {s.owner.faction.upper()}\nResponders left: {len(s.remaining)}',
+               x + 24, bottom + 95, 10, MUTED, 177)
+        rx, rw, y = x + 229, width - 251, top - 101
+        self.draw_stage(w, s, rx, y, rw, bottom)
+        if w.movement_error:
+            w.text('strategy_error', w.movement_error, x + 22, bottom + 18, 10, (248, 151, 130), width - 44)
 
-        pending = getattr(window, 'strategy_pending', None)
-        if pending and pending[0] == 'leadership':
-            _, player, purchases = pending
-            window.text('leadership_title', 'LEADERSHIP', x, y, 12, ACCENT)
-            y -= 30
-            influence = sum(c.planet.influence for c in player.planets if not c.exhausted)
-            reinforcements = max(0, 16 - sum(player.command_pools.values()) - player.pending_commands -
-                                 sum(player.faction in t.command_tokens for t in window.board.values()))
-            max_buy = min((influence + player.trade_goods) // 3, max(0, reinforcements - 3))
-            window.text('leadership_base', 'Base gain: 3 command tokens', x, y, 10, INK)
-            y -= 25
-            window.text('leadership_buy_count', f'Buy extra: {purchases} · cost {purchases * 3} influence',
-                        x, y, 10, GOLD)
-            y -= 34
-            for label, action, enabled in (('-', 'leadership_minus', purchases > 0),
-                                           ('+', 'leadership_plus', purchases < max_buy)):
-                bx = x + (0 if label == '-' else 48)
-                arcade.draw_lrbt_rectangle_filled(bx, bx + 38, y - 2, y + 27,
-                                                   (38, 62, 78) if enabled else (29, 36, 47))
-                window.text(('leadership_control', label), label, bx + 14, y + 6, 12,
-                            INK if enabled else MUTED)
-                if enabled:
-                    self.hits.append(((action,), bx, bx + 38, y - 2, y + 27))
-            y -= 44
-            bx, by, bh = x, y - 5, 30
-            arcade.draw_lrbt_rectangle_filled(bx, bx + width, by, by + bh, (28, 70, 75))
-            window.text('leadership_confirm', 'CONFIRM LEADERSHIP', bx + 8, by + 9, 9, INK)
-            self.hits.append((('leadership_confirm',), bx, bx + width, by, by + bh))
-            return
-        if pending and pending[0] == 'trade':
-            _, owner, selected = pending
-            window.text('trade_secondary_title', 'TRADE · FREE SECONDARIES', x, y, 11, ACCENT)
-            y -= 27
-            for candidate in turn.players:
-                if candidate is owner:
-                    continue
-                chosen = candidate.faction in selected
-                top = y
-                arcade.draw_lrbt_rectangle_filled(x, x + width, top - 34, top,
-                                                   (43, 82, 69) if chosen else CARD)
-                window.text(('trade_secondary_player', candidate.faction),
-                            f'{"✓ " if chosen else ""}{candidate.name}', x + 9, top - 22, 9, INK)
-                self.hits.append((('trade_toggle', candidate.faction), x, x + width,
-                                  top - 34, top))
-                y -= 42
-            bx, by, bh = x, max(42, y - 4), 30
-            arcade.draw_lrbt_rectangle_filled(bx, bx + width, by, by + bh, (28, 70, 75))
-            window.text('trade_confirm', 'CONFIRM TRADE', bx + 8, by + 9, 9, INK)
-            self.hits.append((('trade_confirm',), bx, bx + width, by, by + bh))
-            return
-        if pending and pending[0] == 'speaker':
-            _, card, owner = pending
-            window.text('speaker_pick_title', 'CHOOSE THE NEXT SPEAKER', x, y, 12, ACCENT)
-            y -= 35
-            for candidate in turn.players:
-                if candidate is turn.speaker:
-                    continue
-                top = y
-                arcade.draw_lrbt_rectangle_filled(x, x + width, top - 38, top, CARD)
-                arcade.draw_lrbt_rectangle_outline(x, x + width, top - 38, top, (67, 111, 139), 1)
-                window.text(('speaker_candidate', candidate.faction), candidate.name, x + 10, top - 25, 10, INK)
-                self.hits.append((('speaker_pick', candidate.faction), x, x + width, top - 38, top))
-                y -= 45
-            return
-
+    def draw_draft(self, w, turn, x, bottom, width, height):
+        top = bottom + height
         player = turn.active_player
-        window.text('strategy_action_title', 'STRATEGY CARDS', x, y, 12, ACCENT)
-        y -= 27
-        speaker_name = turn.speaker.name if turn.speaker else 'None'
-        window.text('strategy_current_speaker', f'Speaker: {speaker_name}', x, y, 9, GOLD, width)
-        y -= 24
-        cards = turn.strategy_assignments.get(player.faction, [])
-        if not cards:
-            window.text('strategy_no_cards', f'{player.name} has no strategy cards.', x, y, 10, MUTED, width)
-            return
-        window.text('strategy_owned_title', f'{player.name} · primary actions', x, y, 10, INK, width)
-        y -= 27
-        used = turn.strategy_used.get(player.faction, set())
-        for card in cards:
-            name, detail = STRATEGY_CARDS[card]
-            top = y
-            ready = card not in used
-            arcade.draw_lrbt_rectangle_filled(x, x + width, top - 69, top,
-                                               (28, 62, 75) if ready else (30, 38, 49))
-            arcade.draw_lrbt_rectangle_outline(x, x + width, top - 69, top,
-                                               (68, 133, 158) if ready else (48, 61, 77), 1)
-            window.text(('strategy_owned_number', card), f'{card}', x + 14, top - 28, 18,
-                        GOLD if ready else MUTED)
-            window.text(('strategy_owned_name', card), f'{name.upper()} · {"READY" if ready else "USED"}',
-                        x + 42, top - 19, 9, ACCENT if ready else MUTED)
-            window.text(('strategy_owned_detail', card), detail, x + 42, top - 39, 8, INK, width - 51)
+        picks = 2 if len(turn.players) in (3, 4) else 1
+        w.text('strategy_draft_title', 'CHOOSE A STRATEGY CARD', x + 24, top - 34, 19, ACCENT)
+        w.text('strategy_draft_actor', f'{player.name} · pick {len(turn.strategy_assignments[player.faction]) + 1}/{picks}',
+               x + 24, top - 61, 12, INK)
+        cell_w = (width - 60) / 4
+        cell_h = (height - 115) / 2
+        for card in range(1, 9):
+            col, row = (card - 1) % 4, (card - 1) // 4
+            cx, cy = x + 30 + (col + .5) * cell_w, top - 87 - (row + .5) * cell_h
+            ready = card in turn.available_strategy_cards
+            size = min(cell_h - 14, (cell_w - 12) * 1.25)
+            w.player_panel.image(strategy_image(card), cx, cy, size,
+                                 None if ready else (93, 100, 115, 160))
+            bounds = (cx - size * .4, cx + size * .4, cy - size / 2, cy + size / 2)
             if ready:
-                self.hits.append((('strategy_primary', card), x, x + width, top - 69, top))
-            y -= 75
-        secondary_cards = [card for card in range(1, 9) if turn.can_use_secondary(player, card)]
-        if secondary_cards:
-            y -= 4
-            window.text('strategy_secondaries_title', 'AVAILABLE SECONDARIES', x, y, 9, GOLD)
-            y -= 24
-            for card in secondary_cards:
-                name = STRATEGY_CARDS[card][0]
-                arcade.draw_lrbt_rectangle_filled(x, x + width, y - 25, y + 3, (42, 54, 67))
-                window.text(('strategy_secondary_label', card), f'{card} · {name}  SECONDARY',
-                            x + 8, y - 16, 8, INK)
-                self.hits.append((('strategy_secondary', card), x, x + width, y - 25, y + 3))
-                y -= 32
-        if turn.has_unused_strategy(player):
-            window.text('strategy_pass_rule', 'Use every selected strategy card before passing.',
-                        x, 118, 9, GOLD, width)
-        bx, by, bh = x, 66, 30
-        arcade.draw_lrbt_rectangle_filled(bx, bx + width, by, by + bh, (28, 47, 65))
-        window.text('strategy_return_system', 'SYSTEM INFO', bx + 9, by + 9, 9, ACCENT)
-        self.hits.append((('strategy_show_system',), bx, bx + width, by, by + bh))
+                self.hits.append((('choose_strategy', card), *bounds))
+            else:
+                owner = next(p for p in turn.players if card in turn.strategy_assignments[p.faction])
+                w.text(('strategy_taken', card), owner.faction.upper(), bounds[0] + 8, cy, 12, GOLD)
+        w.text('strategy_draft_speaker', f'Speaker: {turn.speaker.name} · clockwise selection',
+               x + 24, bottom + 15, 10, MUTED)
+
+    def draw_owned(self, w, turn, x, bottom, width, height):
+        player = turn.active_player
+        top = bottom + height
+        w.text('strategy_owned_title', f'{player.faction.upper()} · STRATEGY CARDS', x + 22, top - 35, 16, ACCENT)
+        cards = turn.strategy_assignments[player.faction]
+        for i, card in enumerate(cards):
+            cx = x + width * (i + 1) / (len(cards) + 1)
+            size = min(310, height - 130)
+            used = card in turn.strategy_used[player.faction]
+            w.player_panel.image(strategy_image(card, used=used), cx, bottom + height / 2, size)
+            self.button(w, ('start', card), f'{card} · {"USED" if used else "PLAY CARD"}',
+                        cx - 85, bottom + 54, 170,
+                        not used and not turn.action_used and not player.pending_commands and not turn.command_allocation)
+        self.button(w, ('close',), 'CLOSE', x + width - 118, top - 43, 96)
+
+    def draw_stage(self, w, s, x, y, width, bottom):
+        ctl = w.strategy
+        foot = bottom + 53
+        rows = max(2, min(5, int((y - foot - 80) // 39)))
+        if s.stage == 'offer':
+            w.text('strategy_offer', STRATEGY_CARDS[s.card][1], x, y, 13, INK, width)
+            cost = ctl.secondary_cost()
+            reason = ctl.secondary_unavailable()
+            w.text('secondary_cost', f'Strategy token cost: {cost}', x, y - 67, 12, GOLD)
+            if reason:
+                w.text('secondary_reason', reason, x, y - 105, 11, MUTED, width)
+            self.button(w, ('accept',), 'USE SECONDARY', x, foot, width / 2 - 5, not reason)
+            self.button(w, ('decline',), 'SKIP', x + width / 2 + 5, foot, width / 2 - 5)
+        elif s.stage == 'leadership':
+            w.text('leadership_base', f'Free tokens: {s.base_gain} · Extra tokens: {s.purchases}', x, y, 13, INK)
+            self.button(w, ('buy', -1), '−', x, y - 46, 38, s.purchases > 0)
+            self.button(w, ('buy', 1), '+', x + 48, y - 46, 38)
+            w.text('leadership_payment', f'Influence paid: {ctl.payment()}/{s.purchases * 3}', x, y - 81, 16, GOLD)
+            w.text('leadership_help', 'Click ready planets below to pay their influence.\nClick again to undo payment.',
+                   x, y - 117, 11, INK, width)
+            w.text('leadership_goods', f'Trade goods: {s.trade_goods}/{s.player.trade_goods}', x, y - 176, 12, INK)
+            self.button(w, ('goods', -1), '−', x, y - 224, 38, s.trade_goods > 0)
+            self.button(w, ('goods', 1), '+', x + 48, y - 224, 38, s.trade_goods < s.player.trade_goods)
+            self.button(w, ('pay',), 'CONFIRM PAYMENT', x, foot, width, ctl.payment() >= s.purchases * 3)
+        elif s.stage in ('allocate', 'warfare_allocate'):
+            w.text('strategy_allocate', f'Tokens to allocate: {s.player.pending_commands}', x, y, 16, GOLD)
+            for i, pool in enumerate(('tactical', 'fleet', 'strategic')):
+                self.button(w, ('allocate', pool), f'{pool.title()}: {s.player.command_pools[pool]}',
+                            x, y - 54 - i * 42, width, selected=s.pool_source == pool)
+            w.text('strategy_allocate_help', 'Choose a pool for each new token.' if s.stage == 'allocate' else
+                   'Allocate the returned token, then redistribute\nby selecting a source pool and a destination.',
+                   x, y - 213, 11, INK, width)
+            if s.stage == 'warfare_allocate':
+                self.button(w, ('continue',), 'FINISH REDISTRIBUTION', x, foot, width, not s.player.pending_commands)
+        elif s.stage in ('diplomacy_system', 'warfare_system'):
+            if s.stage == 'diplomacy_system':
+                tiles = [t for t in w.board.values() if s.player.faction in t.planet_owners.values() and t.number != 18]
+            else:
+                tiles = [t for t in w.board.values() if s.player.faction in t.command_tokens]
+            self.options(w, [(('system', t.position), t.name, False) for t in tiles], x, y - 19, width, rows)
+            if not tiles:
+                w.text('strategy_no_system', 'No eligible systems.', x, y, 12, MUTED)
+                self.button(w, ('continue',), 'CONTINUE', x, foot, width)
+        elif s.stage == 'ready_planets':
+            options = [(('ready_planet', c.planet.planet_id), c.planet.name, c.planet.planet_id in s.ready_planets)
+                       for c in s.player.planets if c.exhausted]
+            w.text('strategy_ready_title', f'Ready up to 2 planets · selected {len(s.ready_planets)}/2', x, y, 12, GOLD)
+            self.options(w, options, x, y - 47, width, rows)
+            self.button(w, ('ready_confirm',), 'CONFIRM PLANETS', x, foot, width)
+        elif s.stage == 'speaker':
+            self.options(w, [(('speaker', p.faction), p.name, False) for p in w.turn_order.players
+                             if p is not w.turn_order.speaker], x, y - 20, width, rows)
+        elif s.stage == 'trade':
+            w.text('strategy_trade_title', 'Select players for free secondary abilities:', x, y, 12, INK, width)
+            self.options(w, [(('trade_toggle', p.faction), p.name, p.faction in s.free_trade)
+                             for p in w.turn_order.players if p is not s.owner], x, y - 47, width, rows)
+            self.button(w, ('trade_confirm',), 'CONFIRM TRADE', x, foot, width)
+        elif s.stage == 'construction':
+            w.text('strategy_build_count', f'Placements remaining: {s.builds_left}', x, y, 12, GOLD)
+            for i, kind in enumerate(('spacedock', 'pds')):
+                self.button(w, ('structure', kind), 'SPACE DOCK' if i == 0 else 'PDS',
+                            x + i * (width / 2 + 4), y - 44, width / 2 - 4,
+                            not (s.primary and s.builds_left == 1 and kind == 'spacedock'), s.structure == kind)
+            self.options(w, [(('build', c.planet.planet_id), c.planet.name, False) for c in s.player.planets],
+                         x, y - 87, width, max(2, rows - 1))
+            self.button(w, ('continue',), 'SKIP REMAINING PLACEMENTS', x, foot, width)
+        elif s.stage == 'production_site':
+            options = [(('produce_at', u.unit_id), next(p.name for p in t.planets if p.planet_id == u.location.planet_id), False)
+                       for t, u in ctl.home_docks()]
+            w.text('strategy_dock_title', 'Choose one home-system Space Dock:', x, y, 12, INK)
+            self.options(w, options, x, y - 45, width, rows)
+        elif s.stage == 'placeholder':
+            w.text('strategy_placeholder', 'This card has no implemented effect yet.', x, y, 12, MUTED, width)
+            self.button(w, ('continue',), 'CONTINUE', x, foot, width)

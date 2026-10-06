@@ -123,6 +123,7 @@ class Session:
     target: object
     sources: dict
     snapshot: Snapshot
+    strategic_production: bool = False
     selected: set[str] = field(default_factory=set)
     stage: str = 'movement'
     landings: dict[str, str | None] = field(default_factory=dict)
@@ -796,6 +797,21 @@ class MovementController:
         session.stage = 'production'
         return True
 
+    def start_strategy_production(self, player, target, dock):
+        if self.session:
+            raise MovementError('Finish the current action first.')
+        session = Session(player, target, {}, Snapshot.capture(self.board, player, self.players),
+                          strategic_production=True)
+        planet = next(p for p in target.planets if p.planet_id == dock.location.planet_id)
+        value = str(unit_profile(dock).get('productionValue', '+2'))
+        limit = planet.resources + int(value[1:]) if value.startswith('+') else int(value)
+        session.production_sites = [(planet.planet_id, limit)]
+        session.production_limit = limit
+        session.stage = 'production'
+        session.production_checkpoint = SessionCheckpoint.capture(self, session, 'production')
+        self.session = session
+        return session
+
     def production_total(self, session):
         return sum(session.production_choices.values())
 
@@ -1027,6 +1043,9 @@ class MovementController:
     def finish(self):
         if self.session and self.session.stage == 'complete':
             session = self.session
+            if session.strategic_production:
+                self.session = None
+                return True
             checkpoint = None
             if session.rolled_any_dice:
                 checkpoint = (session.production_checkpoint or session.invasion_checkpoint or

@@ -113,12 +113,14 @@ class MovementPanel:
         self.buttons.clear()
         x, width = left + 18, window.sidebar - 36
         target = session.target
-        window.text('move_header', 'ACTIVATED SYSTEM', x, window.height - 26, 10, ACCENT)
+        window.text('move_header', 'WARFARE · SECONDARY PRODUCTION' if session.strategic_production else
+                    'ACTIVATED SYSTEM', x, window.height - 26, 10, ACCENT)
         window.text('move_target', target.name, x, window.height - 62, 14, INK, width)
-        window.text('move_token', f'{session.player.faction.upper()} · Tactical reserve: {session.player.command_pools["tactical"]}',
+        pool = 'strategic' if session.strategic_production else 'tactical'
+        window.text('move_token', f'{session.player.faction.upper()} · {pool.title()} reserve: {session.player.command_pools[pool]}',
                     x, window.height - 90, 11, MUTED)
-        top, bottom = window.height - 250, 144
-        content_y = self.timeline(window, session, x, window.height - 119, width)
+        top, bottom = window.height - (122 if session.strategic_production else 250), 144
+        content_y = top - 18 if session.strategic_production else self.timeline(window, session, x, window.height - 119, width)
         self.viewport = (int(left), bottom, int(window.sidebar), max(1, int(top - bottom)))
         old_scissor = window.ctx.scissor
         window.ctx.scissor = self.viewport
@@ -326,4 +328,5 @@ class MovementPanel:
             arcade.draw_lrbt_rectangle_filled(lo, hi, 65, 100, color)
             window.text(('move_button', action), label, lo + 10, 77, 12, INK)
             self.buttons.append(((action,), lo, hi, 65, 100))
-        window.text('move_help', 'Ctrl+Z cancels the full tactical action', x, 29, 10, MUTED, width)
+        window.text('move_help', 'Finish production to continue secondary abilities' if session.strategic_production else
+                    'Ctrl+Z cancels the full tactical action', x, 29, 10, MUTED, width)

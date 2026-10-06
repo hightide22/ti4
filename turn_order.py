@@ -12,6 +12,7 @@ class TurnOrder:
         self.passed_indices: set[int] = set()
         self.command_allocation = False
         self.strategy_enabled = strategy_enabled
+        self.strategy_resolution = None
         self.speaker_index = next((i for i, p in enumerate(self.players)
                                    if getattr(p, 'faction', None) == 'sol'), 0)
         self.strategy_selection = False
@@ -93,13 +94,10 @@ class TurnOrder:
         return any(card not in self.strategy_used.get(key, set()) for card in cards)
 
     def can_use_secondary(self, player, card):
-        if card in (3, 7, 8):
-            return False
-        owner = next((p for p in self.players if card in self.strategy_assignments.get(self._key(p), ())), None)
-        return (owner is not None and owner is not player and
-                card in self.strategy_used.get(self._key(owner), set()) and
-                card not in self.strategy_secondary_used.get(self._key(player), set()) and
-                (card in self.strategy_free_secondary or card not in (7, 8)))
+        s = self.strategy_resolution
+        return bool(s and s.stage == 'offer' and not s.primary and
+                    s.player is player and s.card == card and card not in (3, 7, 8) and
+                    card not in self.strategy_secondary_used[self._key(player)])
 
     def mark_secondary_used(self, player, card):
         if not self.can_use_secondary(player, card):
@@ -120,6 +118,8 @@ class TurnOrder:
     def end_turn(self):
         if not self.players:
             return False
+        if self.strategy_resolution or self.strategy_selection:
+            raise ValueError('Finish resolving the strategy card first.')
         if self.command_allocation:
             raise ValueError('Finish command allocation before taking a turn')
         if getattr(self.active_player, 'pending_commands', 0):

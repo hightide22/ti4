@@ -39,7 +39,7 @@ class TurnOrderTests(unittest.TestCase):
         self.assertFalse(turns.end_turn())
         self.assertIs(turns.active_player, players[1])
 
-    def test_secondary_is_available_after_primary_and_once_per_round(self):
+    def test_secondary_cannot_be_taken_later_in_a_normal_turn(self):
         players = [type('Player', (), {'faction': faction, 'pending_commands': 0})()
                    for faction in ('sol', 'hacan', 'jolnar')]
         turns = TurnOrder(players, strategy_enabled=True)
@@ -47,9 +47,9 @@ class TurnOrderTests(unittest.TestCase):
             turns.choose_strategy_card(card)
         self.assertFalse(turns.can_use_secondary(players[1], 1))
         turns.mark_strategy_used(players[0], 1)
-        self.assertTrue(turns.can_use_secondary(players[1], 1))
-        turns.mark_secondary_used(players[1], 1)
         self.assertFalse(turns.can_use_secondary(players[1], 1))
+        with self.assertRaises(ValueError):
+            turns.mark_secondary_used(players[1], 1)
 
     def test_players_take_turns_in_order_and_cycle(self):
         players = [object(), object(), object()]
