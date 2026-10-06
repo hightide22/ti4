@@ -281,10 +281,8 @@ class BoardWindow(arcade.Window):
             self.turn_order.mark_strategy_used(player, card)
             self.movement_error = 'Construction placed the available base structures.'
         elif card == 5:
-            player.trade_goods += 3
-            player.commodities = player.commodity_limit
-            self.turn_order.mark_strategy_used(player, card)
-            self.movement_error = 'Trade: gained 3 trade goods and replenished commodities.'
+            self.strategy_pending = ('trade', player, set())
+            self.movement_error = 'Choose which opponents may use Trade secondary for free.'
         elif card == 6:
             self.strategy_pending = ('system', card, player)
             self.movement_error = 'Choose a system containing one of your command tokens.'
@@ -364,7 +362,9 @@ class BoardWindow(arcade.Window):
         player = self.turn_order.active_player
         if not self.turn_order.can_use_secondary(player, card):
             return False
-        if card in (1, 2, 4, 5, 6) and not player.command_pools['strategic']:
+        free_trade_secondary = (card == 5 and
+                                self.turn_order._key(player) in self.turn_order.strategy_free_secondary.get(5, set()))
+        if card in (1, 2, 4, 5, 6) and not free_trade_secondary and not player.command_pools['strategic']:
             self.movement_error = 'A strategy command token is required.'
             return False
         if card == 1:
@@ -417,8 +417,10 @@ class BoardWindow(arcade.Window):
             self.movement_error = f'Construction secondary placed a {kind.upper()} on {planet.name}.'
         elif card == 5:
             player.commodities = player.commodity_limit
-            player.command_pools['strategic'] -= 1
-            self.movement_error = 'Trade secondary replenished commodities.'
+            if not free_trade_secondary:
+                player.command_pools['strategic'] -= 1
+            self.movement_error = ('Trade secondary replenished commodities for free.' if free_trade_secondary
+                                   else 'Trade secondary replenished commodities.')
         elif card == 6:
             home = next((t for t in self.board.values() if t.player == player.faction), None)
             if not home or not any(u.kind == 'spacedock' and u.owner == player.faction
@@ -440,6 +442,7 @@ class BoardWindow(arcade.Window):
         else:
             return False
         self.turn_order.mark_secondary_used(player, card)
+        self.turn_order.strategy_free_secondary.get(card, set()).discard(self.turn_order._key(player))
         return True
 
     def pass_turn(self):
@@ -1173,6 +1176,22 @@ class BoardWindow(arcade.Window):
                 self.strategy_pending = ('leadership', player, max(0, purchases - 1))
             elif action and action[0] == 'leadership_confirm':
                 self.finish_leadership()
+            elif action and action[0] == 'trade_toggle' and self.strategy_pending:
+                _, owner, selected = self.strategy_pending
+                faction = action[1]
+                selected = set(selected)
+                selected.symmetric_difference_update((faction,))
+                self.strategy_pending = ('trade', owner, selected)
+            elif action and action[0] == 'trade_confirm' and self.strategy_pending:
+                _, owner, selected = self.strategy_pending
+                owner.trade_goods += 3
+                owner.commodities = owner.commodity_limit
+                self.turn_order.mark_strategy_used(owner, 5)
+                self.turn_order.strategy_free_secondary[5] = {
+                    self.turn_order._key(p) for p in self.turn_order.players
+                    if p.faction in selected}
+                self.strategy_pending = None
+                self.movement_error = 'Trade: gained 3 trade goods and replenished commodities.'
             elif action and action[0] == 'speaker_pick' and self.strategy_pending:
                 candidate = next((p for p in self.turn_order.players if p.faction == action[1]), None)
                 try:

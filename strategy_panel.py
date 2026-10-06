@@ -87,6 +87,27 @@ class StrategyPanel:
             window.text('leadership_confirm', 'CONFIRM LEADERSHIP', bx + 8, by + 9, 9, INK)
             self.hits.append((('leadership_confirm',), bx, bx + width, by, by + bh))
             return
+        if pending and pending[0] == 'trade':
+            _, owner, selected = pending
+            window.text('trade_secondary_title', 'TRADE · FREE SECONDARIES', x, y, 11, ACCENT)
+            y -= 27
+            for candidate in turn.players:
+                if candidate is owner:
+                    continue
+                chosen = candidate.faction in selected
+                top = y
+                arcade.draw_lrbt_rectangle_filled(x, x + width, top - 34, top,
+                                                   (43, 82, 69) if chosen else CARD)
+                window.text(('trade_secondary_player', candidate.faction),
+                            f'{"✓ " if chosen else ""}{candidate.name}', x + 9, top - 22, 9, INK)
+                self.hits.append((('trade_toggle', candidate.faction), x, x + width,
+                                  top - 34, top))
+                y -= 42
+            bx, by, bh = x, max(42, y - 4), 30
+            arcade.draw_lrbt_rectangle_filled(bx, bx + width, by, by + bh, (28, 70, 75))
+            window.text('trade_confirm', 'CONFIRM TRADE', bx + 8, by + 9, 9, INK)
+            self.hits.append((('trade_confirm',), bx, bx + width, by, by + bh))
+            return
         if pending and pending[0] == 'speaker':
             _, card, owner = pending
             window.text('speaker_pick_title', 'CHOOSE THE NEXT SPEAKER', x, y, 12, ACCENT)

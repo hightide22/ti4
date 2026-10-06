@@ -20,6 +20,7 @@ class TurnOrder:
         self.strategy_assignments = {self._key(p): [] for p in self.players}
         self.strategy_used = {self._key(p): set() for p in self.players}
         self.strategy_secondary_used = {self._key(p): set() for p in self.players}
+        self.strategy_free_secondary = {5: set()}
         self.strategy_initiative = list(range(len(self.players)))
         if strategy_enabled:
             self.begin_strategy_phase()
@@ -51,6 +52,7 @@ class TurnOrder:
         self.strategy_assignments = {self._key(p): [] for p in self.players}
         self.strategy_used = {self._key(p): set() for p in self.players}
         self.strategy_secondary_used = {self._key(p): set() for p in self.players}
+        self.strategy_free_secondary = {5: set()}
         speaker_order = [(self.speaker_index + offset) % len(self.players)
                          for offset in range(len(self.players))]
         picks_per_player = 2 if len(self.players) in (3, 4) else 1
@@ -96,7 +98,8 @@ class TurnOrder:
         owner = next((p for p in self.players if card in self.strategy_assignments.get(self._key(p), ())), None)
         return (owner is not None and owner is not player and
                 card in self.strategy_used.get(self._key(owner), set()) and
-                card not in self.strategy_secondary_used.get(self._key(player), set()))
+                card not in self.strategy_secondary_used.get(self._key(player), set()) and
+                (card in self.strategy_free_secondary or card not in (7, 8)))
 
     def mark_secondary_used(self, player, card):
         if not self.can_use_secondary(player, card):
