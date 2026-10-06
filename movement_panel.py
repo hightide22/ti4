@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import arcade
 
-from units import UNIT_TYPES, Region
+from units import UNIT_TYPES, Region, unit_profile
 
 INK = (223, 232, 244)
 MUTED = (132, 154, 180)
@@ -79,21 +79,20 @@ class MovementPanel:
         overflow_after_move = overflow_current and session.overflow_next_stage == 'invasion'
         overflow_after_production = overflow_current and session.overflow_next_stage == 'complete'
         has_production = bool(window.movement.production_sites(session))
-        combat_current = stage == 'space_combat'
+        combat_current = stage in ('space_combat', 'retreat_selection')
         combat_resolved = session.space_combat_resolved
-        movement_reached = movement_done or overflow_after_move
-        invasion_reached = invasion_current or ground_current or production_current or stage == 'complete' or overflow_after_production
+        invasion_reached = stage in ('bombardment', 'invasion', 'ground_combat', 'production', 'complete') or overflow_after_production
         production_reached = production_current or stage == 'complete' or overflow_after_production
         rows = (
             ('STEP 1 · ACTIVATION', 'Done'),
             ('STEP 2 · MOVEMENT', 'In progress' if stage == 'movement' or overflow_after_move else 'Done' if movement_done else 'Waiting'),
             ('  Move Ships', ('Done' if ships_selected else 'Skipped') if movement_done else 'Current'),
-            ('  Space Cannon Offense', 'Skipped' if movement_done else 'Wait'),
+            ('  Space Cannon Offense', 'Done' if session.cannon_log else 'Skipped' if session.cannon_checked else 'Wait'),
             ('STEP 3 · SPACE COMBAT', 'In progress' if combat_current else 'Done' if combat_resolved else 'Skipped' if movement_done else 'Wait'),
-            ('STEP 4 · INVASION', 'Done' if production_reached else ('In progress' if ground_current or (invasion_current and has_forces) else ('Current' if invasion_current else 'Wait'))),
-            ('  Bombardment', 'Skipped' if invasion_reached else 'Wait'),
+            ('STEP 4 · INVASION', 'Done' if production_reached else 'In progress' if stage in ('bombardment', 'ground_combat') or (invasion_current and has_forces) else 'Current' if invasion_current else 'Wait'),
+            ('  Bombardment', 'Current' if stage == 'bombardment' else 'Done' if session.bombardment_resolved and session.bombard_log and not session.bombardment_cancelled else 'Skipped' if invasion_reached else 'Wait'),
             ('  Commit Ground Forces', ('Done' if landing_assigned else 'Skipped') if production_reached or ground_current else ('Current' if invasion_current and has_forces else 'Skipped' if invasion_current else 'Wait')),
-            ('  Space Cannon Defense', 'Skipped' if ground_current or production_reached else 'Wait' if not invasion_reached or (invasion_current and has_forces) else 'Skipped'),
+            ('  Space Cannon Defense', 'Done' if session.defense_checked and session.defense_log else 'Skipped' if session.defense_checked else 'Wait'),
             ('  Ground Combat', 'In progress' if ground_current else 'Done' if session.ground_planets and production_reached else 'Wait' if not invasion_reached or (invasion_current and has_forces) else 'Skipped'),
             ('  Establish Control', ('Done' if landing_assigned else 'Skipped') if production_reached else 'Wait' if ground_current else 'Current' if invasion_current and not has_forces else 'Wait'),
             ('STEP 5 · PRODUCTION', 'In progress' if production_current or overflow_after_production else 'Done' if stage == 'complete' else 'Skipped' if production_reached and not has_production else 'Wait'),
@@ -126,6 +125,22 @@ class MovementPanel:
         start = min(top - 18, content_y)
         y = start + self.scroll
         try:
+            notices = []
+            if session.cannon_log:
+                notices.append(('SPACE CANNON', session.cannon_log[-1]))
+            if session.afb_log:
+                notices.append(('ANTI-FIGHTER BARRAGE', session.afb_log[-1]))
+            if session.retreat_log:
+                notices.append(('RETREAT', session.retreat_log))
+            if session.bombard_log:
+                notices.append(('BOMBARDMENT', session.bombard_log[-1]))
+            if session.defense_log:
+                notices.append(('PLANETARY DEFENSE', session.defense_log[-1]))
+            for index, (label, detail) in enumerate(notices[-3:]):
+                window.text(('action_result_label', index), label, x, y, 8, ACCENT, width)
+                y -= 12
+                window.text(('action_result_detail', index), detail, x, y, 9, INK, width)
+                y -= 20
             if session.stage == 'movement':
                 window.text('move_sources', f'SOURCES FOR THIS ACTIVATION · {len(session.sources)}', x, y, 11, ACCENT)
                 y -= 28
@@ -149,6 +164,30 @@ class MovementPanel:
                         y -= 26
                     y -= 23
                     arcade.draw_line(x, y + 12, x + width, y + 12, (41, 60, 80), 1)
+            elif session.stage == 'bombardment':
+                window.text('bombardment_title', 'BOMBARDMENT TARGETS', x, y, 11, ACCENT)
+                y -= 23
+                for unit_id, planet_id in session.bombard_targets.items():
+                    ship = next((unit for unit in target.units if unit.unit_id == unit_id), None)
+                    if ship is None:
+                        continue
+                    planet = next((planet for planet in target.planets if planet.planet_id == planet_id), None)
+                    label = planet.name if planet else 'Skip'
+                    top = y
+                    arcade.draw_lrbt_rectangle_filled(x, x + width, top - 38, top, CARD)
+                    window.player_panel.image(
+                        f'units/{ship.color_code}_{UNIT_TYPES[ship.kind]["sprite"]}.png', x + 18, top - 19, 24)
+                    profile = unit_profile(ship)
+                    dice = int(profile.get('bombardDieCount') or 1)
+                    hits_on = int(profile.get('bombardHitsOn') or 10)
+                    window.text(('bombard_ship', unit_id), f'{UNIT_TYPES[ship.kind]["name"]} · {dice} die(s) · {hits_on}+',
+                                x + 36, top - 13, 9, INK)
+                    window.text(('bombard_target', unit_id), f'Target: {label}  ›', x + 36, top - 29, 9, ACCENT)
+                    self.hits.append((('bombard', unit_id), x, x + width, top - 38, top))
+                    y -= 44
+                window.text('bombardment_help', 'Click a ship to cycle target planets, or leave it on Skip.',
+                            x, y, 9, MUTED, width)
+                y -= 22
             elif session.stage == 'invasion':
                 forces = window.movement.landing_forces(session)
                 window.text('landing_title', 'COMMIT GROUND FORCES', x, y, 11, ACCENT)
@@ -255,6 +294,7 @@ class MovementPanel:
         summary = (f'{ships} ships · {cargo} passengers selected' if session.stage == 'movement' else
                    f'{window.movement.production_total(session)} units · Cost {amount(window.movement.production_cost(session))}'
                    if session.stage == 'production' else
+                   f'{len(session.bombard_targets)} ships assigned to bombard' if session.stage == 'bombardment' else
                    f'{session.overflow_required} ships to destroy' if session.stage == 'fleet_overflow' else
                    f'{landed} ground force{"s" if landed != 1 else ""} assigned to planet{"s" if landed != 1 else ""}')
         window.text('move_summary', summary, x, 118, 11, INK, width)
@@ -265,6 +305,9 @@ class MovementPanel:
         elif session.stage == 'invasion':
             landing_assigned = any(planet_id is not None for planet_id in session.landings.values())
             actions = (('establish', 'Land forces' if landing_assigned else 'Skip invasion', x, split - 6, (30, 88, 105)),
+                       ('cancel', 'Cancel', split, x + width, CARD))
+        elif session.stage == 'bombardment':
+            actions = (('resolve_bombardment', 'Resolve bombardment', x, split - 6, (30, 88, 105)),
                        ('cancel', 'Cancel', split, x + width, CARD))
         elif session.stage == 'fleet_overflow':
             ready = len(session.overflow_selected) == session.overflow_required

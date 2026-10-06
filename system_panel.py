@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import arcade
 
-from units import UNIT_TYPES, Unit, system_inventory
+from units import UNIT_TYPES, Unit, system_inventory, unit_profile
 
 INK = (223, 232, 244)
 MUTED = (130, 151, 177)
@@ -80,7 +80,11 @@ class SystemPanel:
         text('system_label', 'SELECTED SYSTEM', px, window.height - 26, 10, MUTED)
         name = tile.name.split(' - ')[0]
         text('system_name', name, px, window.height - 62, 14, INK, width)
-        text('system_id', f'Tile {tile.system_id} · {len(tile.units)} units in system', px, window.height - 88, 11, MUTED)
+        shields = list(dict.fromkeys(unit.owner.upper() for unit in tile.units if unit.kind == 'pds' and
+                                     unit_profile(unit).get('planetaryShield')))
+        shield_text = f' · PLANETARY SHIELD: {", ".join(shields)}' if shields else ''
+        text('system_id', f'Tile {tile.system_id} · {len(tile.units)} units in system{shield_text}',
+             px, window.height - 88, 10, MUTED, width)
         system_owners = list(dict.fromkeys(tile.planet_owners.values()))
         owner_text = ', '.join(faction.upper() for faction in system_owners) if system_owners else 'None'
         text('owner', f'SYSTEM CONTROL: {owner_text}', px, window.height - 111, 10, tuple(tile.color) if tile.player else MUTED, width)

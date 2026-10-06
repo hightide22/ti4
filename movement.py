@@ -82,6 +82,19 @@ class Session:
     stage: str = 'movement'
     landings: dict[str, str | None] = field(default_factory=dict)
     cannon_log: list[str] = field(default_factory=list)
+    cannon_checked: bool = False
+    afb_rolls: dict[str, list[dict]] = field(default_factory=dict)
+    afb_log: list[str] = field(default_factory=list)
+    afb_resolved: bool = False
+    retreat_announced: str | None = None
+    retreat_log: str = ''
+    bombard_targets: dict[str, str | None] = field(default_factory=dict)
+    bombard_rolls: list[dict] = field(default_factory=list)
+    bombard_log: list[str] = field(default_factory=list)
+    bombardment_resolved: bool = False
+    bombardment_cancelled: bool = False
+    defense_checked: bool = False
+    defense_log: list[str] = field(default_factory=list)
     outcome: str = ''
     overflow_required: int = 0
     overflow_selected: set[str] = field(default_factory=set)
@@ -285,19 +298,232 @@ class MovementController:
             session.overflow_required = excess
             session.overflow_selected.clear()
             session.overflow_next_stage = next_stage
-        elif next_stage == 'invasion':
-            session.stage = 'invasion'
-        elif next_stage == 'space_combat':
-            self.start_combat(session)
+        elif next_stage in ('invasion', 'space_combat'):
+            self.continue_after_movement(session, next_stage)
         else:
             session.stage = 'complete'
             self.finish()
 
     def continue_after_movement(self, session, next_stage):
-        if next_stage == 'space_combat':
+        self.resolve_space_cannon(session)
+        if next_stage == 'space_combat' and self.hostile_space_factions(
+                session.target, session.player.faction) and self.combat_units(session, session.player.faction):
             self.start_combat(session)
         else:
-            session.stage = 'invasion'
+            if next_stage == 'space_combat':
+                session.space_combat_resolved = True
+            self.prepare_invasion(session)
+
+    def resolve_space_cannon(self, session):
+        if session.cannon_checked:
+            return
+        session.cannon_checked = True
+        active_faction = session.player.faction
+        active_ships = [unit for unit in session.target.units if unit.owner == active_faction and
+                        unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+        if not active_ships:
+            return
+        shooters = []
+        for source in (session.target, *self.neighbors(session.target)):
+            for unit in source.units:
+                profile = unit_profile(unit)
+                if unit.kind != 'pds' or unit.owner == active_faction or not profile.get('spaceCannonHitsOn'):
+                    continue
+                if source is not session.target and not profile.get('deepSpaceCannon'):
+                    continue
+                shooters.append((source, unit, profile))
+        if not shooters:
+            return
+        for source, cannon, profile in shooters:
+            dice = [random.randint(1, 10) for _ in range(int(profile.get('spaceCannonDieCount') or 1))]
+            hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
+            session.cannon_log.append(
+                f'{cannon.owner.upper()} PDS in tile {source.system_id}: {dice} → {hits} hit(s)')
+            for _ in range(hits):
+                candidates = [unit for unit in active_ships if unit in session.target.units]
+                if not candidates:
+                    break
+                target = self.apply_hit(session.target, candidates)
+                session.cannon_log.append(
+                    f'{target.kind.title()} {"damaged" if target.damaged else "destroyed"}')
+
+    @staticmethod
+    def apply_hit(tile, candidates):
+        target = sorted(candidates, key=lambda unit: (
+            not (unit_profile(unit).get('sustainDamage') and not unit.damaged), unit.unit_id))[0]
+        if unit_profile(target).get('sustainDamage') and not target.damaged:
+            target.damaged = True
+        else:
+            tile.units.remove(target)
+            if UNIT_TYPES[target.kind]['ship']:
+                for cargo in list(tile.units):
+                    if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == target.unit_id:
+                        tile.units.remove(cargo)
+        return target
+
+    def resolve_anti_fighter_barrage(self, session):
+        session.afb_rolls.clear()
+        session.afb_log.clear()
+        factions = session.combat_factions
+        for faction in factions:
+            enemies = [unit for enemy in factions if enemy != faction
+                       for unit in self.combat_units(session, enemy) if unit.kind == 'fighter']
+            if not enemies:
+                continue
+            rolls = []
+            for ship in self.combat_units(session, faction):
+                profile = unit_profile(ship)
+                if not profile.get('afbHitsOn'):
+                    continue
+                for _ in range(int(profile.get('afbDieCount') or 1)):
+                    value = random.randint(1, 10)
+                    rolls.append({'unit_id': ship.unit_id, 'kind': ship.kind, 'value': value,
+                                  'hit': value >= int(profile['afbHitsOn'])})
+            session.afb_rolls[faction] = rolls
+            hits = sum(roll['hit'] for roll in rolls)
+            destroyed = []
+            for enemy in enemies:
+                if not hits:
+                    break
+                if enemy in session.target.units:
+                    session.target.units.remove(enemy)
+                    destroyed.append(enemy.owner.upper())
+                    hits -= 1
+            session.afb_log.append(
+                f'{faction.upper()} anti-fighter barrage: {sum(r["hit"] for r in rolls)} hit(s); '
+                f'{len(destroyed)} fighter(s) destroyed')
+        session.afb_resolved = True
+
+    def retreat_options(self, session, faction):
+        fleet = self.combat_units(session, faction)
+        if not fleet:
+            return []
+        options = []
+        for tile in self.neighbors(session.target):
+            hostile_fleet = any(unit.owner != faction and unit.location.region == Region.SPACE and
+                                UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
+            has_friendly = any(unit.owner == faction and unit.location.region == Region.SPACE and
+                               UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
+            # A fleet may retreat into a system that already carries its faction's
+            # command token.  Retreat does not spend another token.
+            if not hostile_fleet and has_friendly:
+                options.append(tile)
+        return options
+
+    def announce_retreat(self):
+        session = self.session
+        if not session or session.stage != 'space_combat' or session.combat_needs_resolution:
+            raise MovementError('Retreat can only be announced before combat rolls')
+        faction = session.player.faction
+        if session.retreat_announced:
+            raise MovementError('A retreat has already been announced')
+        if not self.retreat_options(session, faction):
+            raise MovementError('No adjacent system with your ships is available for retreat')
+        session.retreat_announced = faction
+
+    def resolve_retreat(self, position):
+        session = self.session
+        if not session or session.stage != 'retreat_selection' or not session.retreat_announced:
+            raise MovementError('No retreat destination is being selected')
+        destination = self.board[position]
+        if destination not in self.retreat_options(session, session.retreat_announced):
+            raise MovementError('This system is not a valid retreat destination')
+        ships = [unit for unit in session.target.units if unit.owner == session.retreat_announced and
+                 unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+        ship_ids = {unit.unit_id for unit in ships}
+        retreating = ships + [unit for unit in session.target.units if unit.location.region == Region.TRANSPORT and
+                              unit.location.carrier_id in ship_ids]
+        for unit in retreating:
+            session.target.units.remove(unit)
+            destination.units.append(unit)
+        if session.retreat_announced not in destination.command_tokens:
+            destination.command_tokens.add(session.retreat_announced)
+        session.retreat_log = f'{session.retreat_announced.upper()} retreated to tile {destination.system_id}.'
+        session.space_combat_resolved = True
+        self.prepare_invasion(session)
+
+    def has_planetary_shield(self, tile):
+        return any(unit.kind == 'pds' and unit_profile(unit).get('planetaryShield')
+                   for unit in tile.units)
+
+    def prepare_invasion(self, session):
+        faction = session.player.faction
+        hostile_ground = {unit.location.planet_id for unit in session.target.units
+                          if unit.owner != faction and unit.location.region == Region.PLANET and
+                          unit.kind in ('infantry', 'mech')}
+        bombers = [unit for unit in session.target.units if unit.owner == faction and
+                   unit.location.region == Region.SPACE and
+                   unit_profile(unit).get('bombardHitsOn')]
+        hostile_shield = any(unit.owner != faction and unit.kind == 'pds' and
+                             unit_profile(unit).get('planetaryShield') for unit in session.target.units)
+        session.bombard_targets.clear()
+        if hostile_shield:
+            session.bombardment_resolved = True
+            session.bombardment_cancelled = True
+            session.bombard_log.append('Bombardment canceled by planetary shield in this system.')
+        elif hostile_ground and bombers:
+            session.bombardment_cancelled = False
+            session.bombard_targets = {unit.unit_id: None for unit in bombers}
+            session.bombardment_resolved = False
+            session.stage = 'bombardment'
+            return
+        else:
+            session.bombardment_resolved = True
+            session.bombardment_cancelled = False
+        self.begin_invasion(session)
+
+    def cycle_bombardment_target(self, unit_id):
+        session = self.session
+        if not session or session.stage != 'bombardment' or unit_id not in session.bombard_targets:
+            raise MovementError('This ship cannot bombard a planet')
+        faction = session.player.faction
+        options = [planet.planet_id for planet in session.target.planets
+                   if any(unit.owner != faction and unit.location.region == Region.PLANET and
+                          unit.location.planet_id == planet.planet_id and unit.kind in ('infantry', 'mech')
+                          for unit in session.target.units)]
+        choices = [None, *options]
+        current = session.bombard_targets[unit_id]
+        session.bombard_targets[unit_id] = choices[(choices.index(current) + 1) % len(choices)]
+
+    def resolve_bombardment(self):
+        session = self.session
+        if not session or session.stage != 'bombardment':
+            raise MovementError('Bombardment is not active')
+        faction = session.player.faction
+        for unit_id, planet_id in session.bombard_targets.items():
+            if planet_id is None:
+                continue
+            ship = next((unit for unit in session.target.units if unit.unit_id == unit_id), None)
+            if ship is None:
+                continue
+            profile = unit_profile(ship)
+            rolls = []
+            for _ in range(int(profile.get('bombardDieCount') or 1)):
+                value = random.randint(1, 10)
+                rolls.append({'unit_id': unit_id, 'kind': ship.kind, 'planet_id': planet_id,
+                              'value': value, 'hit': value >= int(profile['bombardHitsOn'])})
+            session.bombard_rolls.extend(rolls)
+            hits = sum(roll['hit'] for roll in rolls)
+            destroyed = 0
+            for _ in range(hits):
+                defenders = [unit for unit in session.target.units if unit.owner != faction and
+                             unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
+                             unit.kind in ('infantry', 'mech')]
+                if not defenders:
+                    break
+                self.apply_hit(session.target, defenders)
+                destroyed += 1
+            planet = next(planet for planet in session.target.planets if planet.planet_id == planet_id)
+            session.bombard_log.append(
+                f'{ship.kind.title()} bombarded {planet.name}: {rolls} → {destroyed} hit(s).')
+        session.bombardment_resolved = True
+        self.begin_invasion(session)
+
+    def begin_invasion(self, session):
+        live_forces = {unit.unit_id for unit in self.landing_forces(session)}
+        session.landings = {unit_id: planet_id for unit_id, planet_id in session.landings.items()
+                            if unit_id in live_forces}
+        session.stage = 'invasion'
 
     def toggle_overflow_ship(self, unit_id):
         session = self.session
@@ -326,13 +552,8 @@ class MovementController:
         session.overflow_required = 0
         session.overflow_selected.clear()
         session.overflow_next_stage = None
-        if next_stage == 'invasion':
-            carried_ids = {unit.unit_id for unit in self.landing_forces(session)}
-            session.landings = {unit_id: planet_id for unit_id, planet_id in session.landings.items()
-                                if unit_id in carried_ids}
-            session.stage = 'invasion'
-        elif next_stage == 'space_combat':
-            self.start_combat(session)
+        if next_stage in ('invasion', 'space_combat'):
+            self.continue_after_movement(session, next_stage)
         else:
             session.stage = 'complete'
             self.finish()
@@ -343,12 +564,19 @@ class MovementController:
         session.combat_planet_id = None
         session.combat_factions = (session.player.faction,) + self.hostile_space_factions(
             session.target, session.player.faction)
+        self.resolve_anti_fighter_barrage(session)
+        session.combat_factions = tuple(faction for faction in session.combat_factions
+                                        if self.combat_units(session, faction))
         session.combat_round = 0
         session.combat_rolls.clear()
         session.combat_hits.clear()
         session.combat_assignments.clear()
         session.combat_needs_resolution = False
-        session.stage = 'space_combat' if len(session.combat_factions) > 1 else 'invasion'
+        if len(session.combat_factions) > 1:
+            session.stage = 'space_combat'
+        else:
+            session.space_combat_resolved = True
+            self.prepare_invasion(session)
 
     def start_ground_combat(self, session, planet_id):
         session.combat_type = 'ground'
@@ -439,10 +667,9 @@ class MovementController:
                 self.finish_ground_battle(session, own_alive, enemies_alive)
             elif not own_alive or not enemies_alive:
                 session.space_combat_resolved = True
-                live_forces = {unit.unit_id for unit in self.landing_forces(session)}
-                session.landings = {unit_id: planet_id for unit_id, planet_id in session.landings.items()
-                                    if unit_id in live_forces}
-                session.stage = 'invasion'
+                self.prepare_invasion(session)
+            elif session.combat_type == 'space' and session.retreat_announced:
+                session.stage = 'retreat_selection'
             return
 
         session.combat_round += 1
@@ -644,7 +871,13 @@ class MovementController:
         session.captured_planets = []
         session.ground_planets = []
         session.ground_planet_index = 0
+        self.resolve_planetary_cannon_defense(session)
         for planet_id in landed_planets:
+            attackers = [unit for unit in target.units if unit.owner == player.faction and
+                         unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
+                         unit.kind in ('infantry', 'mech')]
+            if not attackers:
+                continue
             defenders = [unit for unit in target.units if unit.owner != player.faction and
                          unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
                          unit.kind in ('infantry', 'mech')]
@@ -659,6 +892,33 @@ class MovementController:
             self.start_ground_combat(session, session.ground_planets[0])
         else:
             self.finish_invasion(session)
+
+    def resolve_planetary_cannon_defense(self, session):
+        session.defense_log.clear()
+        session.defense_checked = True
+        faction = session.player.faction
+        for planet_id in session.landed_planets:
+            cannons = [unit for unit in session.target.units if unit.owner != faction and unit.kind == 'pds' and
+                       unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
+                       unit_profile(unit).get('spaceCannonHitsOn')]
+            if not cannons:
+                continue
+            for cannon in cannons:
+                profile = unit_profile(cannon)
+                dice = [random.randint(1, 10)
+                        for _ in range(int(profile.get('spaceCannonDieCount') or 1))]
+                hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
+                session.defense_log.append(
+                    f'{cannon.owner.upper()} PDS on {planet_id}: {dice} → {hits} hit(s)')
+                for _ in range(hits):
+                    attackers = [unit for unit in session.target.units if unit.owner == faction and
+                                 unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
+                                 unit.kind in ('infantry', 'mech')]
+                    if not attackers:
+                        break
+                    target = self.apply_hit(session.target, attackers)
+                    session.defense_log.append(
+                        f'{target.kind.title()} on {planet_id} {"damaged" if target.damaged else "destroyed"}')
 
     def capture_planet(self, session, planet_id):
         target, player = session.target, session.player

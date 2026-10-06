@@ -266,6 +266,121 @@ class MovementTests(unittest.TestCase):
         self.assertIn(defender, self.target.units)
         self.assertFalse(defender.damaged)
 
+    def test_space_cannon_fires_before_combat_and_damages_entering_fleet(self):
+        self.target = next(tile for tile in self.controller.neighbors(self.home)
+                           if tile.planets and not tile.command_tokens and
+                           any(self.controller.route(self.home, tile, unit, self.player)
+                               for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'carrier'))
+        pds = Unit('hacan-space-cannon', 'pds', 'hacan', 'ylw',
+                   UnitLocation(Region.PLANET, planet_id=self.target.planets[0].planet_id))
+        self.target.units.append(pds)
+        session = self.controller.activate(self.player, self.target.position)
+        source = session.sources[self.home.position]
+        carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
+        session.toggle(carrier.unit_id)
+
+        with patch('movement.random.randint', return_value=10):
+            self.controller.confirm()
+
+        self.assertTrue(session.cannon_checked)
+        self.assertTrue(any('destroyed' in entry for entry in session.cannon_log))
+        self.assertNotIn(carrier, self.target.units)
+        self.assertEqual(session.stage, 'invasion')
+
+    def test_anti_fighter_barrage_rolls_once_and_can_end_space_combat(self):
+        destroyer = next(unit for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'destroyer')
+        enemy_fighters = [Unit(f'hacan-afb-fighter-{index}', 'fighter', 'hacan', 'ylw',
+                               UnitLocation(Region.SPACE)) for index in range(2)]
+        self.target.units.extend(enemy_fighters)
+        session = self.controller.activate(self.player, self.target.position)
+        session.toggle(destroyer.unit_id)
+
+        with patch('movement.random.randint', return_value=10):
+            self.controller.confirm()
+
+        self.assertEqual(len(session.afb_rolls['sol']), 2)
+        self.assertTrue(all(unit not in self.target.units for unit in enemy_fighters))
+        self.assertTrue(session.afb_resolved)
+        self.assertTrue(session.space_combat_resolved)
+        self.assertEqual(session.stage, 'invasion')
+
+    def test_retreat_can_use_system_with_own_token_without_spending_another(self):
+        destroyer = next(unit for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'destroyer')
+        defender = Unit('hacan-retreat-cruiser', 'cruiser', 'hacan', 'ylw', UnitLocation(Region.SPACE))
+        self.target.units.append(defender)
+        tactical = self.player.command_pools['tactical']
+        session = self.controller.activate(self.player, self.target.position)
+        session.toggle(destroyer.unit_id)
+        self.controller.confirm()
+        self.assertEqual(session.stage, 'space_combat')
+        self.controller.announce_retreat()
+        with patch('movement.random.randint', return_value=1):
+            self.controller.advance_combat()
+        self.controller.advance_combat()
+        self.assertEqual(session.stage, 'retreat_selection')
+
+        self.home.command_tokens.add('sol')
+        self.assertIn(self.home, self.controller.retreat_options(session, 'sol'))
+        self.controller.resolve_retreat(self.home.position)
+        self.assertEqual(session.stage, 'invasion')
+        self.assertIn('sol', self.home.command_tokens)
+        self.assertEqual(self.player.command_pools['tactical'], tactical - 1)
+        self.assertTrue(session.space_combat_resolved)
+
+    def test_bombardment_assigns_planet_and_removes_enemy_ground_force(self):
+        planet = self.target.planets[0]
+        planet_owner = 'hacan'
+        self.target.planet_owners[planet.planet_id] = planet_owner
+        defender = Unit('hacan-bombard-infantry', 'infantry', planet_owner, 'ylw',
+                        UnitLocation(Region.PLANET, planet_id=planet.planet_id))
+        dreadnought = Unit('sol-bombard-dread', 'dreadnought', 'sol', 'blu', UnitLocation(Region.SPACE))
+        self.target.units.extend((defender, dreadnought))
+        session = self.controller.activate(self.player, self.target.position)
+        self.controller.confirm()
+        self.assertEqual(session.stage, 'bombardment')
+        self.controller.cycle_bombardment_target(dreadnought.unit_id)
+        self.assertEqual(session.bombard_targets[dreadnought.unit_id], planet.planet_id)
+
+        with patch('movement.random.randint', return_value=10):
+            self.controller.resolve_bombardment()
+
+        self.assertNotIn(defender, self.target.units)
+        self.assertTrue(session.bombard_rolls)
+        self.assertEqual(session.stage, 'invasion')
+
+    def test_planetary_shield_cancels_bombardment_and_local_pds_defends_landing_planet(self):
+        target = next(tile for tile in self.controller.neighbors(self.home)
+                      if tile.planets and any(self.controller.route(self.home, tile, unit, self.player)
+                                             for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'carrier'))
+        planet = target.planets[0]
+        target.planet_owners[planet.planet_id] = 'hacan'
+        pds = Unit('hacan-planetary-shield-pds', 'pds', 'hacan', 'ylw',
+                   UnitLocation(Region.PLANET, planet_id=planet.planet_id))
+        dreadnought = Unit('sol-shield-dread', 'dreadnought', 'sol', 'blu', UnitLocation(Region.SPACE))
+        target.units.extend((pds, dreadnought))
+        session = self.controller.activate(self.player, target.position)
+        source = session.sources[self.home.position]
+        carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
+        infantry = [unit for unit in source.passengers if unit.kind == 'infantry'][:2]
+        session.toggle(carrier.unit_id)
+        for unit in infantry:
+            session.toggle(unit.unit_id)
+
+        with patch('movement.random.randint', return_value=1):
+            self.controller.confirm()
+        self.assertEqual(session.stage, 'invasion')
+        self.assertTrue(session.bombardment_cancelled)
+        for unit in infantry:
+            self.controller.cycle_landing(unit.unit_id)
+        with patch('movement.random.randint', return_value=10):
+            self.controller.establish_control()
+
+        self.assertTrue(session.defense_log)
+        self.assertEqual(sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                             unit.location.region == Region.PLANET and
+                             unit.location.planet_id == planet.planet_id for unit in target.units), 1)
+        self.assertEqual(target.planet_owners[planet.planet_id], 'sol')
+
     def test_ground_battles_resolve_landed_planets_in_order_then_capture_them(self):
         target = next(tile for tile in self.board.neighbors(self.home.position)
                       if len(tile.planets) >= 2 and not tile.command_tokens)

@@ -68,6 +68,8 @@ class BoardWindow(arcade.Window):
         self.system_panel = SystemPanel()
         self.player_panel = PlayerPanel(create_players(self.board, self.map_config))
         self.turn_order = TurnOrder(self.player_panel.players)
+        self.show_planet_control = True
+        self.control_toggle_hit = None
         self.turn_history_size = 0
         self.turn_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
@@ -159,6 +161,41 @@ class BoardWindow(arcade.Window):
             self.player_panel.image(f'command_token/command_{player.color_code}.png', cx, cy, token_size)
             self.player_panel.image(f'factions/{player.faction}.png', cx, cy, token_size * .55)
             self.token_hits.append((tile.position, player.faction, cx, cy, token_size * .52))
+        if self.show_planet_control:
+            self.draw_planet_control_border(tile, x, y, width)
+
+    def draw_planet_control_border(self, tile, x, y, width):
+        players = {player.faction: player for player in self.player_panel.players}
+        counts = {}
+        for planet in tile.planets:
+            faction = tile.planet_owners.get(planet.planet_id)
+            if faction in players:
+                counts[faction] = counts.get(faction, 0) + 1
+        if not counts:
+            return
+        factions = list(counts)
+        total = sum(counts.values())
+        edge_counts = {faction: max(1, int(6 * count / total)) for faction, count in counts.items()}
+        while sum(edge_counts.values()) > 6:
+            faction = max((f for f in factions if edge_counts[f] > 1),
+                          key=lambda f: edge_counts[f] - 6 * counts[f] / total)
+            edge_counts[faction] -= 1
+        while sum(edge_counts.values()) < 6:
+            faction = max(factions, key=lambda f: 6 * counts[f] / total - edge_counts[f])
+            edge_counts[faction] += 1
+        edge_factions = [faction for faction in factions for _ in range(edge_counts[faction])]
+        colors = {'blu': (92, 166, 255), 'ylw': (255, 214, 86), 'ppl': (194, 132, 255),
+                  'red': (247, 101, 101), 'grn': (104, 219, 147), 'org': (255, 151, 72),
+                  'blk': (174, 188, 204), 'wht': (224, 235, 245), 'brn': (181, 128, 87),
+                  'gry': (166, 180, 194)}
+        radius = width * .49
+        vertices = [(x + radius * math.cos(math.pi * index / 3),
+                     y + radius * math.sin(math.pi * index / 3)) for index in range(6)]
+        for index, faction in enumerate(edge_factions):
+            color = colors.get(players[faction].color_code, ACCENT)
+            start, end = vertices[index], vertices[(index + 1) % 6]
+            arcade.draw_line(*start, *end, (*color, 65), 8)
+            arcade.draw_line(*start, *end, color, 3)
 
     @property
     def planet_hover_system(self):
@@ -248,7 +285,7 @@ class BoardWindow(arcade.Window):
                 self.draw_tile(tile, x, y, radius * 2)
                 if self.planet_hover_system == position:
                     self.highlight_system(x, y, radius * 2)
-                if tile.player is not None:
+                if tile.player is not None and not self.show_planet_control:
                     self.outline(position, tuple(tile.color), 2)
             if self.hover is not None and self.hover != self.selected:
                 self.outline(self.hover, (170, 185, 207), 2)
@@ -261,9 +298,16 @@ class BoardWindow(arcade.Window):
         arcade.draw_lrbt_rectangle_filled(0, left, self.height - 80, self.height, (10, 17, 29))
         self.text('title', 'TWILIGHT IMPERIUM IV', 30, self.height - 34, 21)
         self.text('subtitle', f'Game board · {len(self.board.home_tiles)} players · {len(self.board)} systems', 30, self.height - 61, 12, MUTED)
-        self.text('zoom', f'{self.focus_zoom if self.focus_view else self.zoom:.1f}×', left - 62, self.height - 45, 13, ACCENT)
-        arcade.draw_lrbt_rectangle_filled(left - 225, left - 85, self.height - 56, self.height - 24, (25, 45, 63))
-        self.text('focus_button', 'Galaxy view' if self.focus_view else 'Detail view', left - 212, self.height - 46, 12, ACCENT)
+        self.text('zoom', f'{self.focus_zoom if self.focus_view else self.zoom:.1f}×', left - 62, self.height - 75, 11, ACCENT)
+        arcade.draw_lrbt_rectangle_filled(left - 225, left - 118, self.height - 56, self.height - 24, (25, 45, 63))
+        self.text('focus_button', 'Galaxy' if self.focus_view else 'Detail', left - 212, self.height - 46, 11, ACCENT)
+        control_left, control_right = left - 110, left - 4
+        arcade.draw_lrbt_rectangle_filled(control_left, control_right, self.height - 56, self.height - 24,
+                                           (35, 66, 77) if self.show_planet_control else (25, 45, 63))
+        self.text('control_toggle', 'BORDERS ON' if self.show_planet_control else 'BORDERS OFF',
+                  control_left + 7, self.height - 46, 9,
+                  (110, 218, 161) if self.show_planet_control else MUTED)
+        self.control_toggle_hit = (control_left, control_right, self.height - 56, self.height - 24)
         active_player = self.turn_order.active_player
         active_faction = active_player.faction.upper() if active_player else 'NO PLAYER'
         allocation_status = ' · COMMAND ALLOCATION' if self.turn_order.command_allocation else ''
@@ -295,7 +339,7 @@ class BoardWindow(arcade.Window):
             set(self.movement.session.production_planets)
             if self.movement.session and self.movement.session.stage == 'production' else set())
         self.player_panel.draw(self)
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
             self.combat_panel.draw(self, self.movement.session)
 
     def on_update(self, delta_time):
@@ -330,6 +374,17 @@ class BoardWindow(arcade.Window):
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
             self.on_draw()
             arcade.get_image().save(preview_dir / 'board-preview.png')
+            assert self.show_planet_control and self.labels['control_toggle'].text == 'BORDERS ON'
+            bounds = self.control_toggle_hit
+            self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert not self.show_planet_control
+            self.on_draw()
+            assert self.labels['control_toggle'].text == 'BORDERS OFF'
+            bounds = self.control_toggle_hit
+            self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert self.show_planet_control
             for tile in self.board.home_tiles:
                 if tile.units:
                     self.focus_view = True
@@ -362,7 +417,7 @@ class BoardWindow(arcade.Window):
                                         control.bottom + control.height / 2, arcade.MOUSE_BUTTON_LEFT, 0)
                     self.on_draw()
                 click_control(('planet', 0))
-                assert panel.player.planets[0].exhausted
+                assert not panel.player.planets[0].exhausted, 'Planets cannot be exhausted outside production payment.'
                 click_control(('currency', 'commodities', 1))
                 assert panel.player.commodities == 1
                 click_control(('pool', 'tactical'))
@@ -794,7 +849,7 @@ class BoardWindow(arcade.Window):
             return
         if self.token_context and self.token_context[0] != self.selected:
             self.token_context = None
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
             action = self.combat_panel.hit_test(x, y)
             if action:
                 try:
@@ -802,6 +857,11 @@ class BoardWindow(arcade.Window):
                         self.movement.assign_combat_hit(action[1], action[2])
                     elif action[0] == 'advance':
                         self.movement.advance_combat()
+                    elif action[0] == 'announce_retreat':
+                        self.movement.announce_retreat()
+                    elif action[0] == 'retreat_to':
+                        self.movement.resolve_retreat(action[1])
+                        self.movement_panel.reset()
                     self.movement_error = None
                 except MovementError as error:
                     self.movement_error = str(error)
@@ -834,6 +894,11 @@ class BoardWindow(arcade.Window):
                             self.selected_units = ()
                         elif action[0] == 'landing':
                             self.movement.cycle_landing(action[1])
+                        elif action[0] == 'bombard':
+                            self.movement.cycle_bombardment_target(action[1])
+                        elif action[0] == 'resolve_bombardment':
+                            self.movement.resolve_bombardment()
+                            self.movement_panel.reset()
                         elif action[0] == 'overflow':
                             self.movement.toggle_overflow_ship(action[1])
                         elif action[0] == 'resolve_overflow':
@@ -881,7 +946,11 @@ class BoardWindow(arcade.Window):
                 self.turn_button_hit[2] <= y <= self.turn_button_hit[3]:
             self.pass_turn()
             return
-        if left - 225 <= x <= left - 85 and self.height - 56 <= y <= self.height - 24:
+        if self.control_toggle_hit and self.control_toggle_hit[0] <= x <= self.control_toggle_hit[1] and \
+                self.control_toggle_hit[2] <= y <= self.control_toggle_hit[3]:
+            self.show_planet_control = not self.show_planet_control
+            return
+        if left - 225 <= x <= left - 118 and self.height - 56 <= y <= self.height - 24:
             self.toggle_focus()
             return
         if x >= left:

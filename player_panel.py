@@ -71,7 +71,7 @@ class PlayerPanel:
             self.card_offset = 0
             self.hovered_planet = None
         elif action == 'planet':
-            self.player.planets[args[0]].flip()
+            return
         elif action == 'currency':
             self.player.change_currency(*args)
         elif action == 'pool':
@@ -125,7 +125,7 @@ class PlayerPanel:
         reserve_width = 328
         self.draw_currencies(window, reserve_left, height - 17, reserve_width)
         self.draw_reserves(window, reserve_left, 32, reserve_width)
-        window.text('planet_help', 'PLANETS  ·  Click to flip / hover for details', 16, 108, 11, MUTED)
+        window.text('planet_help', 'PLANETS  ·  Exhaust to pay for production / hover for details', 16, 108, 11, MUTED)
         card_width, gap = 112, 8
         slots = max(1, int((reserve_left - 28) // (card_width + gap)))
         self.card_offset = min(self.card_offset, max(0, len(self.player.planets) - slots))

@@ -12,10 +12,15 @@ class CombatPanel:
     def __init__(self):
         self.advance_hit = None
         self.assignment_hits = []
+        self.action_hits = []
 
     def hit_test(self, x, y):
         if self.advance_hit and self.advance_hit[0] <= x <= self.advance_hit[1] and self.advance_hit[2] <= y <= self.advance_hit[3]:
             return ('advance',)
+        action = next((action for action, left, right, bottom, top in reversed(self.action_hits)
+                       if left <= x <= right and bottom <= y <= top), None)
+        if action:
+            return action
         return next((action for action, left, right, bottom, top in reversed(self.assignment_hits)
                      if left <= x <= right and bottom <= y <= top), None)
 
@@ -93,6 +98,7 @@ class CombatPanel:
     def draw(self, window, session):
         self.advance_hit = None
         self.assignment_hits.clear()
+        self.action_hits.clear()
         arcade.draw_lrbt_rectangle_filled(0, window.width, 0, window.height, (3, 7, 14, 218))
         width = min(1180, window.width - 56)
         height = min(760, window.height - 56)
@@ -113,7 +119,28 @@ class CombatPanel:
         defenders = factions[1:]
         col_gap = 22
         col_width = (width - 48 - col_gap) / 2
-        side_top = bottom + height - 94
+        afb_rows = 0
+        if session.combat_type == 'space' and any(session.afb_rolls.values()):
+            afb_rows = 1
+            afb_x = left + 24
+            afb_y = bottom + height - 81
+            window.text('afb_title', 'ANTI-FIGHTER BARRAGE', afb_x, afb_y + 2, 8, MUTED)
+            afb_x += 132
+            for faction, rolls in session.afb_rolls.items():
+                if not rolls:
+                    continue
+                label_width = 38
+                window.text(('afb_faction', faction), faction.upper(), afb_x, afb_y + 2, 8, ACCENT)
+                afb_x += label_width
+                for roll in rolls:
+                    if afb_x > left + width - 35:
+                        afb_rows += 1
+                        afb_x = left + 24
+                        afb_y -= 17
+                    self.draw_die(window, afb_x, afb_y - 1, roll['value'], roll['hit'], size=14)
+                    afb_x += 17
+                afb_x += 8
+        side_top = bottom + height - 94 - afb_rows * 17
         arcade.draw_line(left + width / 2, bottom + 84, left + width / 2, side_top + 12,
                          (53, 76, 99), 1)
         self.draw_side(window, session, (factions[0],) if factions else (), left + 16,
@@ -121,7 +148,26 @@ class CombatPanel:
         self.draw_side(window, session, defenders, left + width / 2 + 7,
                        side_top, col_width)
 
-        if session.combat_needs_resolution:
+        if session.stage == 'retreat_selection':
+            window.text('retreat_title', 'RETREAT TO AN ADJACENT SYSTEM', left + 24, bottom + 77, 10, ACCENT)
+            options = window.movement.retreat_options(session, session.retreat_announced)
+            columns = min(6, max(1, len(options)))
+            cell_width = (width - 48) / columns
+            for index, tile in enumerate(options):
+                row, column = divmod(index, 6)
+                bx = left + 24 + column * cell_width
+                by = bottom + 24 - row * 27
+                arcade.draw_lrbt_rectangle_filled(bx, bx + cell_width - 5, by, by + 23, (31, 78, 83))
+                label = f'Tile {tile.system_id}'
+                window.text(('retreat_option', tile.position), label, bx + 6, by + 7, 8, INK,
+                            cell_width - 14)
+                self.action_hits.append((('retreat_to', tile.position), bx, bx + cell_width - 5, by, by + 23))
+            if not options:
+                window.text('retreat_no_options', 'No legal adjacent system remains.', left + 24,
+                            bottom + 52, 10, MUTED)
+            window.text('combat_help', 'Select a valid adjacent system for your fleet.',
+                        left + 20, bottom + 37, 9, MUTED, width - 40)
+        elif session.combat_needs_resolution:
             complete = window.movement.combat_assignments_complete(session)
             units_label = 'ground forces' if session.combat_type == 'ground' else 'ships'
             label = 'Resolve Hits · Continue' if complete else f'Assign hits to your {units_label}'
@@ -130,15 +176,37 @@ class CombatPanel:
             complete = True
             label = 'Roll Combat Dice' if not session.combat_round else 'Next Combat Round'
             color = (31, 94, 100)
-        bx, by, bw, bh = left + width / 2 - 120, bottom + 24, 240, 38
-        arcade.draw_lrbt_rectangle_filled(bx, bx + bw, by, by + bh, color)
-        arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh, (102, 207, 224), 1)
-        window.text('combat_advance_button', label, bx + 14, by + 12, 11, INK if complete else MUTED)
-        self.advance_hit = (bx, bx + bw, by, by + bh) if complete else None
+        if session.stage == 'retreat_selection':
+            self.advance_hit = None
+        else:
+            bx, by, bw, bh = left + width / 2 - 120, bottom + 24, 240, 38
+            arcade.draw_lrbt_rectangle_filled(bx, bx + bw, by, by + bh, color)
+            arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh, (102, 207, 224), 1)
+            window.text('combat_advance_button', label, bx + 14, by + 12, 11, INK if complete else MUTED)
+            self.advance_hit = (bx, bx + bw, by, by + bh) if complete else None
+        if session.stage == 'space_combat' and not session.retreat_announced:
+            retreat_options = window.movement.retreat_options(session, session.player.faction)
+            rx, ry, rw, rh = left + 20, bottom + 24, min(220, col_width - 24), 38
+            enabled = bool(retreat_options) and not session.combat_needs_resolution
+            arcade.draw_lrbt_rectangle_filled(rx, rx + rw, ry, ry + rh,
+                                               (31, 78, 83) if enabled else (31, 39, 50))
+            label = 'Announce Retreat' if retreat_options else 'No Adjacent Retreat'
+            window.text('announce_retreat_button', label, rx + 10, ry + 13, 9,
+                        INK if enabled else MUTED, rw - 18)
+            if enabled:
+                self.action_hits.append((('announce_retreat',), rx, rx + rw, ry, ry + rh))
+            else:
+                window.text('retreat_unavailable', 'Need your ships in a safe adjacent system.',
+                            rx, ry + 43, 8, MUTED, rw)
+        elif session.stage == 'space_combat' and session.retreat_announced:
+            window.text('retreat_declared', 'Retreat declared; choose destination after this round.',
+                        left + 22, bottom + 75, 9, ACCENT, col_width)
         if window.movement_error:
             window.text('combat_error', window.movement_error, left + width / 2, bottom + 70, 10,
                         (245, 142, 128), width - 40)
-        if session.combat_needs_resolution:
+        if session.stage == 'retreat_selection':
+            pass
+        elif session.combat_needs_resolution:
             remaining = sum(max(0, min(session.combat_hits.get(faction, 0),
                                        window.movement.combat_hit_capacity(session, faction)) -
                                 len(session.combat_assignments.get(faction, []))) for faction in factions)
