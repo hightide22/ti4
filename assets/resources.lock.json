@@ -1148,6 +1148,16 @@
       "sha": "d2a594a370fc987031e66ddcd8ef0bf5d3b02151"
     },
     {
+      "path": "data/units/baseUnits.json",
+      "size": 12288,
+      "sha": "b3690b2213d826128286fa1f75375c6c247ba65e"
+    },
+    {
+      "path": "data/units/pok.json",
+      "size": 55833,
+      "sha": "09be5feab63e065751a4b79d6a20c06ccc8accd6"
+    },
+    {
       "path": "data/technologies/pok.json",
       "size": 52752,
       "sha": "3a522a4923e2c5b84ddfdefcf7d1af8987b05dab"

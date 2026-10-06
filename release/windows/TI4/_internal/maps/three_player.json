@@ -1,0 +1,172 @@
+{
+  "name": "Official three-player galaxy",
+  "source": "Fantasy Flight Games, TI4 Learn to Play, page 22",
+  "source_url": "https://images-cdn.fantasyflightgames.com/filer_public/c4/f0/c4f03c19-f9da-422f-b162-73f393e64a28/ti-k0289_learn_to_play_2020_web.pdf",
+  "tiles": [
+    {
+      "q": -3,
+      "r": 3,
+      "id": "01",
+      "player": "Player 1 · Federation of Sol",
+      "color": [
+        106,
+        183,
+        255
+      ],
+      "faction": "sol",
+      "unit_color": "blu"
+    },
+    {
+      "q": -3,
+      "r": 2,
+      "id": "28"
+    },
+    {
+      "q": -2,
+      "r": 3,
+      "id": "21"
+    },
+    {
+      "q": -2,
+      "r": 2,
+      "id": "30"
+    },
+    {
+      "q": -2,
+      "r": 1,
+      "id": "26"
+    },
+    {
+      "q": -2,
+      "r": 0,
+      "id": "27"
+    },
+    {
+      "q": -1,
+      "r": 2,
+      "id": "40"
+    },
+    {
+      "q": -1,
+      "r": 1,
+      "id": "45"
+    },
+    {
+      "q": -1,
+      "r": 0,
+      "id": "24"
+    },
+    {
+      "q": -1,
+      "r": -1,
+      "id": "47"
+    },
+    {
+      "q": -1,
+      "r": -2,
+      "id": "34"
+    },
+    {
+      "q": 0,
+      "r": 2,
+      "id": "35"
+    },
+    {
+      "q": 0,
+      "r": 1,
+      "id": "22"
+    },
+    {
+      "q": 0,
+      "r": 0,
+      "id": "18"
+    },
+    {
+      "q": 0,
+      "r": -1,
+      "id": "42"
+    },
+    {
+      "q": 0,
+      "r": -2,
+      "id": "33"
+    },
+    {
+      "q": 0,
+      "r": -3,
+      "id": "12",
+      "player": "Player 3 · Universities of Jol-Nar",
+      "color": [
+        185,
+        148,
+        248
+      ],
+      "faction": "jolnar",
+      "unit_color": "ppl"
+    },
+    {
+      "q": 1,
+      "r": 1,
+      "id": "23"
+    },
+    {
+      "q": 1,
+      "r": 0,
+      "id": "44"
+    },
+    {
+      "q": 1,
+      "r": -1,
+      "id": "19"
+    },
+    {
+      "q": 1,
+      "r": -2,
+      "id": "25"
+    },
+    {
+      "q": 1,
+      "r": -3,
+      "id": "29"
+    },
+    {
+      "q": 2,
+      "r": 1,
+      "id": "50"
+    },
+    {
+      "q": 2,
+      "r": 0,
+      "id": "36"
+    },
+    {
+      "q": 2,
+      "r": -1,
+      "id": "39"
+    },
+    {
+      "q": 2,
+      "r": -2,
+      "id": "38"
+    },
+    {
+      "q": 3,
+      "r": 0,
+      "id": "16",
+      "player": "Player 2 · Emirates of Hacan",
+      "color": [
+        244,
+        183,
+        87
+      ],
+      "faction": "hacan",
+      "unit_color": "ylw"
+    },
+    {
+      "q": 3,
+      "r": -1,
+      "id": "31"
+    }
+  ],
+  "setup": "starting_fleets"
+}
