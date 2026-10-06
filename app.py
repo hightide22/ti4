@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import arcade
-from ui_theme import (BG, PANEL, SHELL, INK, MUTED, ACCENT, DANGER, SIDEBAR_WIDTH, FONT,
+from ui_theme import (BG, PANEL, SHELL, INK, MUTED, ACCENT, GOLD, DANGER, SIDEBAR_WIDTH, FONT,
                       VARIANT, button)
 
 from board import Board, Tile, load_board
@@ -288,6 +288,11 @@ class BoardWindow(arcade.Window):
                 bool(self.strategy_view and not self.movement.session))
 
     def sync_strategy_actor(self):
+        if self.strategy.session and self.strategy.session.stage in (
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+            self.focus_view = False
+            if getattr(self, 'inspector_visible', True) is False and hasattr(self, 'toggle_inspector'):
+                self.toggle_inspector()
         player = self.strategy.player
         index = self.player_panel.players.index(player)
         if self.player_panel.active != index:
@@ -337,6 +342,8 @@ class BoardWindow(arcade.Window):
                             session.pool_source = pool
                 elif kind == 'system':
                     ctl.select_system(args[0])
+                elif kind == 'confirm_warfare_removal':
+                    ctl.confirm_warfare_removal()
                 elif kind == 'ready_planet':
                     ctl.toggle_ready(args[0])
                 elif kind == 'ready_confirm':
@@ -350,6 +357,7 @@ class BoardWindow(arcade.Window):
                 elif kind == 'structure':
                     if not (session.primary and session.builds_left == 1):
                         session.structure = args[0]
+                        session.selected_system = None
                 elif kind == 'build':
                     ctl.build(args[0])
                 elif kind == 'produce_at':
@@ -378,6 +386,37 @@ class BoardWindow(arcade.Window):
             self.strategy.toggle_ready(session.player.planets[args[0]].planet.planet_id)
         elif session.stage in ('allocate', 'warfare_allocate') and kind == 'pool':
             self.handle_strategy_action(('allocate', args[0]))
+
+    def strategy_map_click(self, x, y):
+        session = self.strategy.session
+        if not session or session.stage not in (
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+            return
+        position = self.pick(x, y)
+        if position is None:
+            return
+        if position not in self.strategy.selectable_systems():
+            return
+        try:
+            self.selected = position
+            self.focus_view = False
+            self.system_panel.reset()
+            if session.stage == 'warfare_system':
+                token = next((hit for hit in reversed(self.token_hits)
+                              if hit[0] == position and hit[1] == session.player.faction and
+                              math.dist((x, y), (hit[2], hit[3])) <= hit[4]), None)
+                if token:
+                    if session.selected_system != position:
+                        self.strategy.select_system(position)
+                    self.strategy.select_warfare_token(position, token[1])
+                else:
+                    self.strategy.select_system(position)
+            else:
+                self.strategy.select_system(position)
+            self.movement_error = None
+            self.sync_strategy_actor()
+        except ValueError as error:
+            self.movement_error = str(error)
 
     def pass_turn(self):
         self.strategy_view = False
@@ -458,6 +497,16 @@ class BoardWindow(arcade.Window):
                 self.outline(self.hover, (170, 185, 207), 2)
             self.outline(self.selected, ACCENT, 3)
             self.draw_route_preview(movement_route)
+        if self.strategy.session and self.strategy.session.stage in (
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+            for position in self.strategy.selectable_systems():
+                self.outline(position, GOLD, 4)
+            selected_system = self.strategy.session.selected_system
+            if selected_system is not None:
+                self.outline(selected_system, ACCENT, 5)
+            pending_system = self.strategy.session.pending_system
+            if pending_system is not None:
+                self.outline(pending_system, (255, 230, 128), 6)
         if self.unit_renderer.is_loading:
             self.text('unit_layout_loading', 'Preparing fleet layouts…',
                       (self.width - self.sidebar) / 2, self.height * .55, 13, MUTED)
@@ -467,11 +516,23 @@ class BoardWindow(arcade.Window):
         self.text('title', 'TWILIGHT / IV', 22, self.height - 31, 18)
         self.text('subtitle', f'{VARIANT}  /  {len(self.board.home_tiles)} players', 22, self.height - 55, 10, MUTED)
         self.text('zoom', f'{self.focus_zoom if self.focus_view else self.zoom:.1f}×', left - 62, self.height - 75, 11, ACCENT)
-        control_left, control_right = left - 110, left - 4
-        button(self, 'control_toggle', 'Borders on' if self.show_planet_control else 'Borders off',
-               control_left, self.height - 58, control_right - control_left, 34,
-               selected=self.show_planet_control, size=10)
+        control_left, control_right = left - 42, left - 4
+        control_bottom = self.height - 58
+        button(self, 'control_toggle', '', control_left, control_bottom,
+               control_right - control_left, 34, selected=self.show_planet_control)
+        icon_color = ACCENT if self.show_planet_control else MUTED
+        icon_x, icon_y, icon_radius = (control_left + control_right) / 2, control_bottom + 17, 8
+        icon_points = [(icon_x + icon_radius * math.cos(math.pi / 3 * index),
+                        icon_y + icon_radius * math.sin(math.pi / 3 * index)) for index in range(6)]
+        arcade.draw_polygon_outline(icon_points, icon_color, 2)
+        if self.show_planet_control:
+            arcade.draw_circle_filled(icon_x, icon_y, 2.5, icon_color)
         self.control_toggle_hit = (control_left, control_right, self.height - 56, self.height - 24)
+        if control_left - 145 <= self.mouse_position[0] <= control_right and \
+                control_bottom - 5 <= self.mouse_position[1] <= control_bottom + 39:
+            self.text('control_toggle_hint',
+                      f'Planet borders: {"on" if self.show_planet_control else "off"}',
+                      control_left - 110, self.height - 104, 9, MUTED, max_width=105)
         active_player = self.turn_order.active_player
         active_faction = active_player.faction.upper() if active_player else 'NO PLAYER'
         allocation_status = (' · RESOLVING ' + self.strategy.player.faction.upper() if self.strategy.session else
@@ -547,13 +608,13 @@ class BoardWindow(arcade.Window):
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
             self.on_draw()
             arcade.get_image().save(preview_dir / 'board-preview.png')
-            assert self.show_planet_control and self.labels['control_toggle'].text == 'Borders on'
+            assert self.show_planet_control
             bounds = self.control_toggle_hit
             self.on_mouse_press((bounds[0] + bounds[1]) / 2,
                                 (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
             assert not self.show_planet_control
             self.on_draw()
-            assert self.labels['control_toggle'].text == 'Borders off'
+            assert not self.show_planet_control
             bounds = self.control_toggle_hit
             self.on_mouse_press((bounds[0] + bounds[1]) / 2,
                                 (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
@@ -1011,7 +1072,14 @@ class BoardWindow(arcade.Window):
         self.player_panel.hover(x, y)
         if self.strategy_modal:
             self.strategy_panel.update_hover(x, y)
-            self.strategy_hover_system = self.strategy_panel.hover_system
+            session = self.strategy.session
+            map_stage = bool(session and session.stage in (
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'))
+            bounds = self.strategy_panel.bounds
+            over_modal = bounds and bounds[0] <= x <= bounds[1] and bounds[2] <= y <= bounds[3]
+            position = self.pick(x, y) if map_stage and not over_modal else None
+            self.strategy_hover_system = (position if position in self.strategy.selectable_systems()
+                                          else self.strategy_panel.hover_system)
         else:
             self.strategy_hover_system = None
         if self.movement.session and self.movement.session.stage == 'movement':
@@ -1035,6 +1103,9 @@ class BoardWindow(arcade.Window):
                     self.handle_strategy_action(action)
                 else:
                     self.strategy_tray_click(x, y)
+                    bounds = self.strategy_panel.bounds
+                    if not bounds or not (bounds[0] <= x <= bounds[1] and bounds[2] <= y <= bounds[3]):
+                        self.strategy_map_click(x, y)
             return
         if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
             if button != arcade.MOUSE_BUTTON_LEFT:

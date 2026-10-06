@@ -80,9 +80,11 @@ class StrategyPanel:
         self.hover_system_hits.clear()
         s = w.strategy.session
         draft = turn.strategy_selection
-        width = min(1060 if draft else 830, w.width - 48)
+        map_choice = bool(s and s.stage in ('construction', 'diplomacy_system',
+                                            'diplomacy_secondary_system', 'warfare_system'))
+        width = min(1060 if draft else 440 if map_choice else 830, w.width - 48)
         height = min(730, w.height - 48) if draft else min(555, w.height - w.player_panel.HEIGHT - 48)
-        base_x = (w.width - width) / 2
+        base_x = w.width - width - 16 if map_choice else (w.width - width) / 2
         base_bottom = (w.height - height) / 2 if draft else w.player_panel.HEIGHT + (w.height - w.player_panel.HEIGHT - height) / 2
         x = max(0, min(w.width - width, base_x + self.offset[0]))
         floor = 0 if draft else w.player_panel.HEIGHT
@@ -90,7 +92,9 @@ class StrategyPanel:
         self.offset[:] = [x - base_x, bottom - base_bottom]
         top = bottom + height
         self.bounds = (x, x + width, bottom, top)
-        arcade.draw_lrbt_rectangle_filled(0, w.width, w.player_panel.HEIGHT if not draft else 0, w.height, (4, 9, 18, 205))
+        if not map_choice:
+            arcade.draw_lrbt_rectangle_filled(0, w.width, w.player_panel.HEIGHT if not draft else 0,
+                                              w.height, (4, 9, 18, 205))
         modal(x, x + width, bottom, top)
         w.text('strategy_drag_hint', 'DRAG HEADER TO MOVE', x + width - 181, top - 22, 8, MUTED)
         if draft:
@@ -206,18 +210,36 @@ class StrategyPanel:
                    x, y - 213, 11, INK, width)
             if s.stage == 'warfare_allocate':
                 self.button(w, ('continue',), 'FINISH REDISTRIBUTION', x, foot, width, not s.player.pending_commands)
-        elif s.stage in ('diplomacy_system', 'warfare_system'):
-            if s.stage == 'diplomacy_system':
-                tiles = [t for t in w.board.values() if s.player.faction in t.planet_owners.values() and t.number != 18]
+        elif s.stage in ('diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+            eligible = ctl.selectable_systems()
+            if s.stage == 'warfare_system':
+                if s.pending_system is not None:
+                    tile = w.board[s.pending_system]
+                    w.text('warfare_token_confirm', f'Remove your command token from {tile.name}?',
+                           x, y, 13, GOLD, width)
+                    self.button(w, ('confirm_warfare_removal',), 'CONFIRM TOKEN REMOVAL',
+                                x, foot, width)
+                elif s.selected_system is not None:
+                    tile = w.board[s.selected_system]
+                    w.text('warfare_token_selected', f'{tile.name} selected · click your token on the map',
+                           x, y, 13, GOLD, width)
+                else:
+                    w.text('warfare_map_help', 'Click a highlighted system, then click your command token.',
+                           x, y, 13, INK, width)
             else:
-                tiles = [t for t in w.board.values() if s.player.faction in t.command_tokens]
-            self.options(w, [(('system', t.position), t.name, False) for t in tiles], x, y - 19, width, rows)
-            if not tiles:
+                title = 'Choose a system on the map' if eligible else 'No eligible systems.'
+                if s.selected_system is not None:
+                    title = f'{w.board[s.selected_system].name} selected · choose a planet next'
+                w.text('strategy_map_help', title, x, y, 13, INK if eligible else MUTED, width)
+            if not eligible and s.stage != 'warfare_system':
+                self.button(w, ('continue',), 'CONTINUE', x, foot, width)
+            elif not eligible:
                 w.text('strategy_no_system', 'No eligible systems.', x, y, 12, MUTED)
                 self.button(w, ('continue',), 'CONTINUE', x, foot, width)
         elif s.stage == 'ready_planets':
             options = [(('ready_planet', c.planet.planet_id), c.planet.name, c.planet.planet_id in s.ready_planets)
-                       for c in s.player.planets if c.exhausted]
+                       for c in s.player.planets if c.exhausted and
+                       w.strategy.planet_system(c.planet.planet_id).position == s.selected_system]
             w.text('strategy_ready_title', f'Ready up to 2 planets · selected {len(s.ready_planets)}/2', x, y, 12, GOLD)
             self.options(w, options, x, y - 47, width, rows)
             self.button(w, ('ready_confirm',), 'CONFIRM PLANETS', x, foot, width)
@@ -235,8 +257,15 @@ class StrategyPanel:
                 self.button(w, ('structure', kind), 'SPACE DOCK' if i == 0 else 'PDS',
                             x + i * (width / 2 + 4), y - 44, width / 2 - 4,
                             not (s.primary and s.builds_left == 1 and kind == 'spacedock'), s.structure == kind)
-            self.options(w, [(('build', c.planet.planet_id), c.planet.name, False) for c in s.player.planets],
-                         x, y - 87, width, max(2, rows - 1))
+            planets = ctl.buildable_planets()
+            if s.selected_system is None:
+                w.text('strategy_build_map_help', 'Click a highlighted system on the map to choose a planet.',
+                       x, y - 77, 11, INK, width)
+            else:
+                w.text('strategy_build_system', f'{w.board[s.selected_system].name} · choose a planet',
+                       x, y - 77, 11, GOLD, width)
+                self.options(w, [(('build', c.planet.planet_id), c.planet.name, False) for c in planets],
+                             x, y - 109, width, max(2, rows - 1))
             self.button(w, ('continue',), 'SKIP REMAINING PLACEMENTS', x, foot, width)
         elif s.stage == 'production_site':
             options = [(('produce_at', u.unit_id), next(p.name for p in t.planets if p.planet_id == u.location.planet_id), False)

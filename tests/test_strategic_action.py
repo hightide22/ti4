@@ -132,6 +132,8 @@ class StrategicActionTests(unittest.TestCase):
         planet = self.sol.planets[0].planet.planet_id
         c.session.structure = 'pds'
         before = sum(len(t.units) for t in self.board.values())
+        first_tile = next(t for t in self.board.values() if planet in t.planet_owners)
+        c.select_system(first_tile.position)
         c.build(planet)
         self.assertEqual(sum(len(t.units) for t in self.board.values()), before + 1)
         self.assertTrue(c.session.primary)
@@ -140,6 +142,7 @@ class StrategicActionTests(unittest.TestCase):
         target = self.hacan.planets[1].planet.planet_id
         tile = next(t for t in self.board.values() if target in t.planet_owners)
         self.assertNotIn('hacan', tile.command_tokens)
+        c.select_system(tile.position)
         c.build(target)
         self.assertIn('hacan', tile.command_tokens)
         self.assertTrue(any(u.kind == 'pds' and u.location.planet_id == target for u in tile.units))
@@ -151,6 +154,11 @@ class StrategicActionTests(unittest.TestCase):
         tile = self.board[(0, 0)]
         tile.command_tokens.add('sol')
         c.select_system(tile.position)
+        c.select_warfare_token(tile.position, 'sol')
+        self.assertIn('sol', tile.command_tokens)
+        self.assertEqual(c.session.stage, 'warfare_system')
+        c.confirm_warfare_removal()
+        self.assertNotIn('sol', tile.command_tokens)
         c.allocate('tactical')
         self.assertTrue(c.session.primary)
         c.continue_stage()
