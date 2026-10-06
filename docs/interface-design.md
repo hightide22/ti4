@@ -1,6 +1,6 @@
 # Command interface
 
-This branch contains the compact, dark Command concept. Run `python app.py` from the project environment. The Windows bundle is deliberately unchanged.
+This branch contains the compact Command concept with a permanently visible system workbench and the game's original palette. Run `python app.py` from the project environment. The Windows bundle is deliberately unchanged.
 
 - The map stays central. The top bar separates the current player and turn action from map controls.
 - The left roster shows active/passed players, strategy cards and the speaker; hover for faction details.
@@ -11,7 +11,7 @@ This branch contains the compact, dark Command concept. Run `python app.py` from
 - Strategy cards have large selection areas and explicit availability labels. Strategy and combat dialogs can be moved using their headers.
 - Combat has a fixed summary for each side, wrapped dice, independent column scrolling and a separate action footer. Click a unit group to assign a hit; scroll over that side to see more units.
 
-The alternative Atlas branch uses the same interactions with light panels, more space per row and larger resource cards. Switch branches while the game is closed.
+The alternative Atlas branch lets players collapse the system inspector to give the galaxy more room. Both concepts use the game's original colors. Switch branches while the game is closed.
 
 ## Validation
 

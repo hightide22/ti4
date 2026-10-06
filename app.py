@@ -467,8 +467,6 @@ class BoardWindow(arcade.Window):
         self.text('title', 'TWILIGHT / IV', 22, self.height - 31, 18)
         self.text('subtitle', f'{VARIANT}  /  {len(self.board.home_tiles)} players', 22, self.height - 55, 10, MUTED)
         self.text('zoom', f'{self.focus_zoom if self.focus_view else self.zoom:.1f}×', left - 62, self.height - 75, 11, ACCENT)
-        button(self, 'focus_button', 'Galaxy' if self.focus_view else 'Detail',
-               left - 225, self.height - 58, 107, 34, selected=self.focus_view)
         control_left, control_right = left - 110, left - 4
         button(self, 'control_toggle', 'Borders on' if self.show_planet_control else 'Borders off',
                control_left, self.height - 58, control_right - control_left, 34,
@@ -480,7 +478,7 @@ class BoardWindow(arcade.Window):
                              ' · COMMAND ALLOCATION' if self.turn_order.command_allocation else '')
         self.text('turn_status', f'ROUND {self.turn_order.round_number} · {active_faction}{allocation_status}',
                   left - 370, self.height - 19, 9, ACCENT if self.turn_order.action_used else MUTED, max_width=364)
-        turn_left, turn_right = left - 370, left - 233
+        turn_left, turn_right = left - 250, left - 115
         turn_bottom, turn_top = self.height - 58, self.height - 27
         pending_commands = active_player.pending_commands if active_player else 0
         enabled = (not self.movement.session and not pending_commands and
@@ -1185,9 +1183,6 @@ class BoardWindow(arcade.Window):
         if self.control_toggle_hit and self.control_toggle_hit[0] <= x <= self.control_toggle_hit[1] and \
                 self.control_toggle_hit[2] <= y <= self.control_toggle_hit[3]:
             self.show_planet_control = not self.show_planet_control
-            return
-        if left - 225 <= x <= left - 118 and self.height - 56 <= y <= self.height - 24:
-            self.toggle_focus()
             return
         if x >= left:
             if self.system_panel.strategy_tab_hit and all((
