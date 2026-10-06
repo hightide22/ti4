@@ -18,6 +18,7 @@ from player_panel import PlayerPanel
 from movement import MovementController, MovementError
 from movement_panel import MovementPanel
 from combat_panel import CombatPanel
+from turn_order import TurnOrder
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -66,6 +67,9 @@ class BoardWindow(arcade.Window):
         self.unit_renderer.blocking_layouts = smoke
         self.system_panel = SystemPanel()
         self.player_panel = PlayerPanel(create_players(self.board, self.map_config))
+        self.turn_order = TurnOrder(self.player_panel.players)
+        self.turn_history_size = 0
+        self.turn_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
         self.movement_panel = MovementPanel()
         self.combat_panel = CombatPanel()
@@ -179,6 +183,31 @@ class BoardWindow(arcade.Window):
         self.focus_zoom = 1.0
         self.hovered_units = ()
 
+    def sync_turn_action(self):
+        if self.smoke:
+            return
+        history_size = len(self.movement.history)
+        if history_size > self.turn_history_size:
+            self.turn_order.mark_action_completed()
+        elif history_size < self.turn_history_size and self.turn_order.action_used:
+            self.turn_order.action_used = False
+        self.turn_history_size = history_size
+
+    def pass_turn(self):
+        player = self.turn_order.pass_turn()
+        if player is None:
+            return
+        self.player_panel.active = self.turn_order.active_index
+        self.player_panel.source_pool = None
+        self.player_panel.card_offset = 0
+        self.player_panel.hovered_planet = None
+        self.turn_history_size = len(self.movement.history)
+        self.selected_units = ()
+        self.token_context = None
+        self.movement_error = None
+        self.system_panel.reset()
+        self.movement_panel.reset()
+
     def on_draw(self):
         self.clear(BG)
         star_bins = [[] for _ in range(6)]
@@ -223,6 +252,21 @@ class BoardWindow(arcade.Window):
         self.text('zoom', f'{self.focus_zoom if self.focus_view else self.zoom:.1f}×', left - 62, self.height - 45, 13, ACCENT)
         arcade.draw_lrbt_rectangle_filled(left - 225, left - 85, self.height - 56, self.height - 24, (25, 45, 63))
         self.text('focus_button', 'Galaxy view' if self.focus_view else 'Detail view', left - 212, self.height - 46, 12, ACCENT)
+        active_player = self.turn_order.active_player
+        active_faction = active_player.faction.upper() if active_player else 'NO PLAYER'
+        action_status = ' · ACTION USED' if self.turn_order.action_used else ''
+        self.text('turn_status', f'TURN {self.turn_order.turn_number} · {active_faction}{action_status}',
+                  left - 370, self.height - 19, 9, ACCENT if self.turn_order.action_used else MUTED)
+        turn_left, turn_right = left - 370, left - 233
+        turn_bottom, turn_top = self.height - 58, self.height - 27
+        enabled = not self.movement.session
+        arcade.draw_lrbt_rectangle_filled(turn_left, turn_right, turn_bottom, turn_top,
+                                           (31, 78, 83) if enabled else (34, 41, 52))
+        arcade.draw_lrbt_rectangle_outline(turn_left, turn_right, turn_bottom, turn_top,
+                                            (77, 151, 151) if enabled else (61, 75, 92), 1)
+        self.text('pass_turn_button', 'PASS TURN', turn_left + 31, turn_bottom + 10, 10,
+                  INK if enabled else MUTED)
+        self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled else None
         if self.movement.session:
             self.movement_panel.draw(self, self.movement.session, left)
             if self.movement_error:
@@ -241,6 +285,7 @@ class BoardWindow(arcade.Window):
 
     def on_update(self, delta_time):
         self.unit_renderer.update(delta_time)
+        self.sync_turn_action()
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
         self.frames += 1
         if self.smoke and self.frames == 5:
@@ -577,6 +622,12 @@ class BoardWindow(arcade.Window):
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
             self.on_draw()
             arcade.get_image().save(preview_dir / 'board-preview.png')
+            expected_next = self.player_panel.players[1]
+            bounds = self.turn_button_hit
+            self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert self.turn_order.active_player is expected_next
+            assert self.player_panel.player is expected_next
             print(f'PASS: {len(self.board)} tile objects; board, player panel and movement activation / undo checked')
             self.close()
 
@@ -588,6 +639,7 @@ class BoardWindow(arcade.Window):
         self.hovered_units = tuple(u.unit_id for u in hit.placement.units) if hit else tuple(u.unit_id for u in inventory_hit.units) if inventory_hit else ()
 
     def on_mouse_press(self, x, y, button, modifiers):
+        self.sync_turn_action()
         if button == arcade.MOUSE_BUTTON_RIGHT:
             if not self.movement.session:
                 hit = next(((position, faction) for position, faction, cx, cy, radius in reversed(self.token_hits)
@@ -673,9 +725,18 @@ class BoardWindow(arcade.Window):
                             self.selected_units = ()
                     except MovementError as error:
                         self.movement_error = str(error)
+                self.sync_turn_action()
             return
         if x < left and y < self.player_panel.HEIGHT:
+            player_control = next((control for control in reversed(self.player_panel.controls)
+                                   if control.contains(x, y) and control.action[0] == 'player'), None)
+            if not self.smoke and player_control and player_control.action[1] != self.turn_order.active_index:
+                return
             self.player_panel.handle_click(x, y)
+            return
+        if self.turn_button_hit and self.turn_button_hit[0] <= x <= self.turn_button_hit[1] and \
+                self.turn_button_hit[2] <= y <= self.turn_button_hit[3]:
+            self.pass_turn()
             return
         if left - 225 <= x <= left - 85 and self.height - 56 <= y <= self.height - 24:
             self.toggle_focus()
@@ -724,6 +785,8 @@ class BoardWindow(arcade.Window):
             now = time.monotonic()
             if self.last_click[0] == picked and now - self.last_click[1] < .33:
                 try:
+                    if self.turn_order.action_used and not self.smoke:
+                        raise MovementError('Your action is complete. Pass the turn to continue.')
                     self.movement.activate(self.player_panel.player, picked)
                     self.movement_panel.reset()
                     self.movement_error = None
@@ -754,11 +817,13 @@ class BoardWindow(arcade.Window):
             self.target_zoom = min(3.5, max(.55, self.target_zoom * 1.15 ** scroll_y))
 
     def on_key_press(self, symbol, modifiers):
+        self.sync_turn_action()
         if symbol == arcade.key.Z and modifiers & arcade.key.MOD_CTRL:
-            if self.movement.undo():
+            if (self.movement.session or self.turn_order.action_used or self.smoke) and self.movement.undo():
                 self.movement_error = None
                 self.movement_panel.reset()
                 self.selected_units = ()
+                self.sync_turn_action()
         elif symbol == arcade.key.SPACE and not self.movement.session:
             self.toggle_focus()
         elif symbol == arcade.key.ESCAPE:
