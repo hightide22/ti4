@@ -227,6 +227,32 @@ class BoardWindow(arcade.Window):
         arcade.draw_polygon_outline(vertices(1.01), (*ACCENT, 65), 3)
         arcade.draw_polygon_outline(vertices(1), (*ACCENT, 155), 1.5)
 
+    def draw_route_preview(self, route):
+        if self.focus_view or not route or len(route) < 2:
+            return
+        radius = self.fit_scale * self.zoom * .98
+        centers = [self.screen(position) for position in route]
+        for index, (start_center, end_center) in enumerate(zip(centers, centers[1:])):
+            dx, dy = end_center[0] - start_center[0], end_center[1] - start_center[1]
+            distance = math.hypot(dx, dy)
+            if distance <= 0:
+                continue
+            ux, uy = dx / distance, dy / distance
+            start = (start_center[0] + ux * radius * .65,
+                     start_center[1] + uy * radius * .65)
+            end = (end_center[0] - ux * radius * .65,
+                   end_center[1] - uy * radius * .65)
+            arcade.draw_line(*start, *end, (8, 15, 26, 220), 8)
+            arcade.draw_line(*start, *end, (255, 203, 103), 3)
+            head_length = min(14, math.dist(start, end) * .65)
+            head_width = max(5, head_length * .62)
+            base = (end[0] - ux * head_length, end[1] - uy * head_length)
+            px, py = -uy * head_width, ux * head_width
+            arcade.draw_polygon_filled(
+                [end, (base[0] + px, base[1] + py), (base[0] - px, base[1] - py)],
+                (255, 203, 103),
+            )
+
     def toggle_focus(self):
         self.focus_view = not self.focus_view
         self.focus_zoom = 1.0
@@ -354,8 +380,7 @@ class BoardWindow(arcade.Window):
         if not self.turn_order.players:
             return
         if round_complete:
-            for tile in self.board.values():
-                tile.command_tokens.clear()
+            self.clear_round_tokens()
             for player in self.turn_order.players:
                 player.receive_round_commands()
                 for card in player.planets:
@@ -376,6 +401,12 @@ class BoardWindow(arcade.Window):
         self.system_panel.reset()
         self.movement_panel.reset()
 
+    def clear_round_tokens(self):
+        """Remove every faction's command token from every system at round end."""
+        for tile in self.board.values():
+            tile.command_tokens.clear()
+        self.token_hits.clear()
+
     def on_draw(self):
         self.clear(BG)
         star_bins = [[] for _ in range(6)]
@@ -391,6 +422,7 @@ class BoardWindow(arcade.Window):
             self.selected = next(iter(self.board))
         self.unit_renderer.hits.clear()
         self.token_hits.clear()
+        movement_route = self.movement_panel.preview_route(self.movement.session)
         if self.focus_view:
             tile = self.board[self.selected]
             cx, cy = self.viewport_center
@@ -398,17 +430,25 @@ class BoardWindow(arcade.Window):
             self.draw_tile(tile, cx, cy + 15, width, detailed=True)
             if self.planet_hover_system == tile.position:
                 self.highlight_system(cx, cy + 15, width)
+            if self.movement_panel.hovered_source_position == tile.position:
+                arcade.draw_polygon_outline(
+                    [(cx + width * .49 * math.cos(math.pi * index / 3),
+                      cy + 15 + width * .49 * math.sin(math.pi * index / 3)) for index in range(6)],
+                    (255, 203, 103), 4)
         else:
             for position, tile in self.board.items():
                 x, y = self.screen(position)
                 self.draw_tile(tile, x, y, radius * 2)
                 if self.planet_hover_system == position:
                     self.highlight_system(x, y, radius * 2)
+                if self.movement_panel.hovered_source_position == position:
+                    self.outline(position, (255, 203, 103), 4)
                 if tile.player is not None and not self.show_planet_control:
                     self.outline(position, tuple(tile.color), 2)
             if self.hover is not None and self.hover != self.selected:
                 self.outline(self.hover, (170, 185, 207), 2)
             self.outline(self.selected, ACCENT, 3)
+            self.draw_route_preview(movement_route)
         if self.unit_renderer.is_loading:
             self.text('unit_layout_loading', 'Preparing fleet layouts…',
                       (self.width - self.sidebar) / 2, self.height * .55, 13, MUTED)
@@ -619,6 +659,15 @@ class BoardWindow(arcade.Window):
                 assert all(self.labels[('action_status', index)].text == 'Wait' for index in range(3, 13)), \
                     {index: self.labels[('action_status', index)].text for index in range(13)}
                 source = self.movement.session.sources[home.position]
+                route_hit = self.movement_panel.route_hits[0]
+                self.on_mouse_motion((route_hit[2] + route_hit[3]) / 2,
+                                     (route_hit[4] + route_hit[5]) / 2, 0, 0)
+                route_preview = self.movement_panel.preview_route(self.movement.session)
+                assert self.movement_panel.hovered_source_position == home.position
+                assert route_preview == source.routes[route_hit[1]] and route_preview[-1] == target.position
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'movement-route-preview.png')
+                self.on_mouse_motion(-1, -1, 0, 0)
                 production_planet = target.planets[0]
                 target.units.append(Unit('smoke-production-base', 'spacedock', 'sol', sol_player.color_code,
                                          UnitLocation(Region.PLANET, planet_id=production_planet.planet_id)))
@@ -884,14 +933,16 @@ class BoardWindow(arcade.Window):
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
             # The first round wraps only after every player passes. The completed round
             # clears board tokens, refreshes planets, and grants each player's commands.
+            expected_players = self.player_panel.players
             sol_player.planets[0].exhausted = True
+            for tile_index, tile in enumerate(self.board.values()):
+                tile.command_tokens.update(player.faction for player in expected_players[:tile_index % 4])
             target.command_tokens.add('sol')
             self.on_draw()
             arcade.get_image().save(preview_dir / 'board-preview.png')
             self.turn_order.mark_action_completed()
             self.on_draw()
             assert self.labels['pass_turn_button'].text == 'END TURN'
-            expected_players = self.player_panel.players
             bounds = self.turn_button_hit
             self.on_mouse_press((bounds[0] + bounds[1]) / 2,
                                 (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
@@ -912,6 +963,7 @@ class BoardWindow(arcade.Window):
             assert self.turn_order.round_number == 2
             assert self.turn_order.active_player is expected_players[0]
             assert not any(tile.command_tokens for tile in self.board.values())
+            assert not self.token_hits
             assert all(not card.exhausted for player in expected_players for card in player.planets)
             assert [player.pending_commands for player in expected_players] == [
                 player.round_command_gain() for player in expected_players]
@@ -960,6 +1012,10 @@ class BoardWindow(arcade.Window):
             self.strategy_hover_system = self.strategy_panel.hover_system
         else:
             self.strategy_hover_system = None
+        if self.movement.session and self.movement.session.stage == 'movement':
+            self.movement_panel.update_hover(x, y)
+        else:
+            self.movement_panel.update_hover(-1, -1)
         self.hover = None if self.focus_view else self.pick(x, y)
         hit = self.unit_renderer.hit_test(x, y) if x < self.width - self.sidebar and self.player_panel.HEIGHT <= y < self.height - 80 else None
         inventory_hit = self.system_panel.hit_test(x, y)

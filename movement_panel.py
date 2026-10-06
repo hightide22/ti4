@@ -8,6 +8,7 @@ from units import UNIT_TYPES, Region, unit_profile
 INK = (223, 232, 244)
 MUTED = (132, 154, 180)
 ACCENT = (100, 207, 224)
+GOLD = (245, 194, 103)
 CARD = (23, 39, 57)
 PRODUCTION_ORDER = ('infantry', 'fighter', 'destroyer', 'cruiser', 'carrier', 'dreadnought',
                     'mech', 'flagship', 'warsun')
@@ -24,6 +25,10 @@ class MovementPanel:
         self.hits = []
         self.buttons = []
         self.viewport = (0, 0, 0, 0)
+        self.source_hits = []
+        self.route_hits = []
+        self.hovered_source_position = None
+        self.hovered_route_id = None
 
     def reset(self):
         self.scroll = 0
@@ -41,6 +46,31 @@ class MovementPanel:
                          if left <= x <= right and bottom <= y <= top), None)
         return None
 
+    def update_hover(self, x, y):
+        self.hovered_source_position = None
+        self.hovered_route_id = None
+        vx, vy, vw, vh = self.viewport
+        if not (vx <= x <= vx + vw and vy <= y <= vy + vh):
+            return
+        route_hit = next(((position, unit_id) for position, unit_id, left, right, bottom, top
+                          in reversed(self.route_hits)
+                          if left <= x <= right and bottom <= y <= top), None)
+        if route_hit:
+            self.hovered_source_position, self.hovered_route_id = route_hit
+            return
+        source_hit = next(((position) for position, left, right, bottom, top in reversed(self.source_hits)
+                           if left <= x <= right and bottom <= y <= top), None)
+        self.hovered_source_position = source_hit
+
+    def preview_route(self, session):
+        if not session or session.stage != 'movement' or self.hovered_source_position is None:
+            return None
+        source = session.sources.get(self.hovered_source_position)
+        if not source or not source.ships:
+            return None
+        unit_id = self.hovered_route_id or source.ships[0].unit_id
+        return source.routes.get(unit_id)
+
     def rows(self, window, session, source, units, x, y, width, passenger=False):
         cell = (width - 8) / 2
         counts = {}
@@ -49,9 +79,12 @@ class MovementPanel:
             left, top = x + col * (cell + 8), y - row * 48
             selected = unit.unit_id in session.selected
             arcade.draw_lrbt_rectangle_filled(left, left + cell, top - 43, top,
+                                             (75, 81, 48) if unit.unit_id == self.hovered_route_id else
                                              (32, 69, 82) if selected else CARD)
-            if selected:
-                arcade.draw_lrbt_rectangle_outline(left, left + cell, top - 43, top, ACCENT, 1)
+            if selected or unit.unit_id == self.hovered_route_id:
+                arcade.draw_lrbt_rectangle_outline(left, left + cell, top - 43, top,
+                                                   GOLD if unit.unit_id == self.hovered_route_id else ACCENT,
+                                                   2 if unit.unit_id == self.hovered_route_id else 1)
             window.player_panel.image(f'units/{unit.color_code}_{UNIT_TYPES[unit.kind]["sprite"]}.png',
                                       left + 17, top - 21, 25)
             counts[unit.kind] = counts.get(unit.kind, 0) + 1
@@ -63,6 +96,9 @@ class MovementPanel:
             window.text(('movement_name', unit.unit_id), name, left + 33, top - 17, 11, INK)
             window.text(('movement_detail', unit.unit_id), detail, left + 33, top - 34, 10, MUTED)
             self.hits.append((('unit', unit.unit_id), left, left + cell, top - 43, top))
+            if not passenger and unit.unit_id in source.routes:
+                self.route_hits.append((source.tile.position, unit.unit_id,
+                                        left, left + cell, top - 43, top))
         return y - math.ceil(len(units) / 2) * 48
 
     def timeline(self, window, session, x, y, width):
@@ -111,6 +147,8 @@ class MovementPanel:
     def draw(self, window, session, left):
         self.hits.clear()
         self.buttons.clear()
+        self.source_hits.clear()
+        self.route_hits.clear()
         x, width = left + 18, window.sidebar - 36
         target = session.target
         window.text('move_header', 'WARFARE · SECONDARY PRODUCTION' if session.strategic_production else
@@ -151,6 +189,12 @@ class MovementPanel:
                     y -= 45
                 for source in session.sources.values():
                     title = f'Tile {source.tile.system_id} · {source.tile.name.split("/")[0]}'
+                    source_top = y + 17
+                    if self.hovered_source_position == source.tile.position:
+                        arcade.draw_lrbt_rectangle_filled(x - 4, x + width, y - 5, y + 19,
+                                                          (54, 74, 64))
+                        arcade.draw_lrbt_rectangle_outline(x - 4, x + width, y - 5, y + 19,
+                                                           GOLD, 1)
                     window.text(('move_source', source.tile.position), title, x, y, 13, INK)
                     y = self.rows(window, session, source, source.ships, x, y - 13, width) - 8
                     used, capacity = session.cargo_values(source)
@@ -166,6 +210,7 @@ class MovementPanel:
                         y -= 26
                     y -= 23
                     arcade.draw_line(x, y + 12, x + width, y + 12, (41, 60, 80), 1)
+                    self.source_hits.append((source.tile.position, x - 4, x + width, y, source_top))
             elif session.stage == 'bombardment':
                 window.text('bombardment_title', 'BOMBARDMENT TARGETS', x, y, 11, ACCENT)
                 y -= 23
