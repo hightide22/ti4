@@ -179,12 +179,17 @@ class BoardWindow(arcade.Window):
 
     def on_draw(self):
         self.clear(BG)
+        star_bins = [[] for _ in range(6)]
         for sx, sy, brightness in self.stars:
-            arcade.draw_point(sx * (self.width - self.sidebar), sy * (self.height - 80), (brightness, brightness, brightness + 20), 1)
+            bucket = min(5, max(0, (brightness - 45) // 10))
+            star_bins[bucket].append((sx * (self.width - self.sidebar), sy * (self.height - 80)))
+        for bucket, points in enumerate(star_bins):
+            if points:
+                brightness = 50 + bucket * 10
+                arcade.draw_points(points, (brightness, brightness, min(255, brightness + 20)), 1)
         radius = self.fit_scale * self.zoom
         if self.selected not in self.board:
             self.selected = next(iter(self.board))
-        self.tile_sprites = {tile: self.tile_sprites.get(tile) or TileSprite(tile) for tile in self.board.values()}
         self.unit_renderer.hits.clear()
         self.token_hits.clear()
         if self.focus_view:

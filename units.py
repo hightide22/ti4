@@ -161,6 +161,22 @@ def hex_clearance(x, y):
     return min(149.5 - dy, (math.sqrt(3) * 172.5 - math.sqrt(3) * dx - dy) / 2)
 
 
+def outline_edge_support(outline):
+    return (min(y for _, y in outline), max(y for _, y in outline),
+            tuple(max(sx * math.sqrt(3) * dx + sy * dy for dx, dy in outline)
+                  for sx, sy in ((-1, -1), (-1, 1), (1, -1), (1, 1))))
+
+
+def outline_hex_clearance(x, y, support):
+    min_y, max_y, diagonals = support
+    clearance = min(y + min_y, 299 - y - max_y)
+    for (sx, sy), extent in zip(((-1, -1), (-1, 1), (1, -1), (1, 1)), diagonals):
+        clearance = min(clearance, (math.sqrt(3) * 172.5 -
+                                    sx * math.sqrt(3) * (x - 172.5) -
+                                    sy * (y - 149.5) - extent) / 2)
+    return clearance
+
+
 GROUP_THRESHOLD = 5
 
 
@@ -269,6 +285,7 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
             placements.append(UnitPlacement(members, cx + (col - (row_count - 1) / 2) * 36, cy + (row - (rows - 1) / 2) * 36 - 2, size, badge_count=badge_count))
     fleet.sort(key=lambda item: (-item[1], item[0][0].owner))
     occupied = []
+    occupied_bounds = []
     same_kind = {}
     labels = protected_labels(tile)
     for members, size, badge_count in fleet:
@@ -279,24 +296,35 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
             if angle and key not in same_kind and candidates:
                 break
             if angle and candidates:
-                best = max(candidates, key=lambda c: c[0])
-                if key in same_kind and math.dist(best[1:3], same_kind[key]) <= size * 1.5:
+                best = max(candidates, key=lambda candidate: candidate[0])
+                if math.dist(best[1:3], same_kind[key]) <= size * 1.5:
                     break
             outline = rotated_silhouette(members[0].image_path, size, angle)
+            bound_radius = max(math.hypot(dx, dy) for dx, dy in outline)
+            edge_support = outline_edge_support(outline)
             for x in range(20, 326, 6):
                 for y in range(18, 283, 6):
+                    # The silhouette's bounding radius avoids exact polygon
+                    # collision checks when shapes are clearly far apart.
                     polygon = tuple((x + dx, y + dy) for dx, dy in outline)
-                    edge_clearance = min(hex_clearance(px, py) for px, py in polygon)
+                    edge_clearance = outline_hex_clearance(x, y, edge_support)
                     if edge_clearance < 3:
                         continue
-                    if any(circle_overlap(polygon, planet.center, planet.radius + 2) for planet in tile.planets):
+                    if any(math.dist((x, y), planet.center) < planet.radius + bound_radius + 2 and
+                           circle_overlap(polygon, planet.center, planet.radius + 2)
+                           for planet in tile.planets):
                         continue
-                    if any(polygons_overlap(polygon, label) for label in labels):
+                    if any(math.hypot(max(label[0][0] - x, 0, x - label[2][0]),
+                                      max(label[0][1] - y, 0, y - label[2][1])) < bound_radius and
+                           polygons_overlap(polygon, label) for label in labels):
                         continue
-                    if circle_overlap(polygon, (104, 274), 29):
+                    if math.dist((x, y), (104, 274)) < bound_radius + 29 and circle_overlap(polygon, (104, 274), 29):
                         continue
                     expanded = tuple((x + dx * 1.12, y + dy * 1.12) for dx, dy in outline)
-                    if any(polygons_overlap(expanded, other) for other in occupied):
+                    expanded_radius = bound_radius * 1.12
+                    if any(math.dist((x, y), (ox, oy)) < expanded_radius + other_radius and
+                           polygons_overlap(expanded, other)
+                           for other, (ox, oy, other_radius) in zip(occupied, occupied_bounds)):
                         continue
                     planet_clearance = min((math.hypot(x - p.center[0], y - p.center[1]) - p.radius for p in tile.planets), default=100)
                     score = min(edge_clearance, planet_clearance)
@@ -305,8 +333,9 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
                     candidates.append((score - abs(angle) * .015, x, y, polygon, angle))
         if not candidates:
             raise ValueError(f"No free display position for {members[0].kind} in tile {tile.number}")
-        _, x, y, polygon, angle = max(candidates, key=lambda c: c[0])
+        _, x, y, polygon, angle = max(candidates, key=lambda candidate: candidate[0])
         occupied.append(polygon)
+        occupied_bounds.append((x, y, max(math.hypot(px - x, py - y) for px, py in polygon)))
         same_kind.setdefault(key, (x, y))
         placements.append(UnitPlacement(members, x, y, size, angle, badge_count))
     return placements

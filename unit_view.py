@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 
 import arcade
