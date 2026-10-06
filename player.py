@@ -6,6 +6,19 @@ import json
 from board import Planet, RESOURCES
 
 
+COMMAND_TOKEN_SUPPLY = 16
+
+
+def command_tokens_in_play(player, board):
+    on_sheet = sum(player.command_pools.values()) + player.pending_commands
+    on_board = sum(player.faction in tile.command_tokens for tile in board.values())
+    return on_sheet + on_board
+
+
+def command_tokens_in_reinforcements(player, board):
+    return max(0, COMMAND_TOKEN_SUPPLY - command_tokens_in_play(player, board))
+
+
 @dataclass
 class PlanetCard:
     planet: Planet
@@ -49,8 +62,9 @@ class PlayerState:
     def round_command_gain(self):
         return 3 if self.faction == 'sol' else 2
 
-    def receive_round_commands(self):
-        self.pending_commands += self.round_command_gain()
+    def receive_round_commands(self, supply=16):
+        on_sheet = sum(self.command_pools.values()) + self.pending_commands
+        self.pending_commands += min(self.round_command_gain(), max(0, supply - on_sheet))
 
     def allocate_command(self, target):
         if target not in self.command_pools:

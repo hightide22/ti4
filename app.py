@@ -13,12 +13,13 @@ from board import Board, Tile, load_board
 from units import Region, Unit, UnitLocation, UNIT_TYPES
 from unit_view import UnitRenderer
 from system_panel import SystemPanel
-from player import PlanetCard, create_players
+from player import (PlanetCard, create_players, command_tokens_in_reinforcements)
 from player_panel import PlayerPanel
-from movement import MovementController, MovementError
+from movement import MovementController, MovementError, Session, Snapshot
 from movement_panel import MovementPanel
 from combat_panel import CombatPanel
 from turn_order import TurnOrder
+from strategy_panel import StrategyPanel
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -67,7 +68,11 @@ class BoardWindow(arcade.Window):
         self.unit_renderer.blocking_layouts = smoke
         self.system_panel = SystemPanel()
         self.player_panel = PlayerPanel(create_players(self.board, self.map_config))
-        self.turn_order = TurnOrder(self.player_panel.players)
+        self.turn_order = TurnOrder(self.player_panel.players, strategy_enabled=not smoke)
+        self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
+        self.strategy_panel = StrategyPanel()
+        self.strategy_view = not smoke
+        self.strategy_pending = None
         self.show_planet_control = True
         self.control_toggle_hit = None
         self.turn_history_size = 0
@@ -230,6 +235,213 @@ class BoardWindow(arcade.Window):
             self.turn_order.action_used = False
         self.turn_history_size = history_size
 
+    def use_strategy_primary(self, card):
+        player = self.turn_order.active_player
+        if card == 1:
+            self.strategy_pending = ('leadership', player, 0)
+            self.movement_error = 'Choose how many command tokens to buy, then confirm.'
+        elif card == 2:
+            self.strategy_pending = ('system', card, player)
+            self.movement_error = 'Choose a system for Diplomacy.'
+        elif card == 3:
+            self.strategy_pending = ('speaker', card, player)
+            self.movement_error = 'Choose the next Speaker in the strategy panel.'
+        elif card == 4:
+            owned = [(tile, planet) for tile in self.board.values() for planet in tile.planets
+                     if tile.planet_owners.get(planet.planet_id) == player.faction]
+            if not owned:
+                self.movement_error = 'Construction requires a controlled planet.'
+                return
+            # Choose PDS for the first placement when a piece is available, then place
+            # the additional PDS on a controlled planet with room under the base limit.
+            pds_total = sum(u.kind == 'pds' for t in self.board.values() for u in t.units)
+            if pds_total < 2:
+                first = next(((t, p) for t, p in owned if sum(
+                    u.kind == 'pds' and u.location.planet_id == p.planet_id for u in t.units) < 2), owned[0])
+                tile, planet = first
+                tile.units.append(Unit(f'{player.faction}-strategy-pds-{pds_total}', 'pds', player.faction,
+                                       player.color_code, UnitLocation(Region.PLANET, planet.planet_id)))
+                pds_total += 1
+            else:
+                first = next(((t, p) for t, p in owned if not any(
+                    u.kind == 'spacedock' and u.location.planet_id == p.planet_id for u in t.units)), None)
+                dock_total = sum(u.kind == 'spacedock' for t in self.board.values() for u in t.units)
+                if first and dock_total < 3:
+                    tile, planet = first
+                    tile.units.append(Unit(f'{player.faction}-strategy-dock-{dock_total}', 'spacedock',
+                                           player.faction, player.color_code,
+                                           UnitLocation(Region.PLANET, planet.planet_id)))
+            if pds_total < 2:
+                second = next(((t, p) for t, p in owned if sum(
+                    u.kind == 'pds' and u.location.planet_id == p.planet_id for u in t.units) < 2), None)
+                if second:
+                    tile, planet = second
+                    tile.units.append(Unit(f'{player.faction}-strategy-pds-{pds_total}', 'pds', player.faction,
+                                           player.color_code, UnitLocation(Region.PLANET, planet.planet_id)))
+            self.turn_order.mark_strategy_used(player, card)
+            self.movement_error = 'Construction placed the available base structures.'
+        elif card == 5:
+            player.trade_goods += 3
+            player.commodities = player.commodity_limit
+            self.turn_order.mark_strategy_used(player, card)
+            self.movement_error = 'Trade: gained 3 trade goods and replenished commodities.'
+        elif card == 6:
+            self.strategy_pending = ('system', card, player)
+            self.movement_error = 'Choose a system containing one of your command tokens.'
+        else:
+            # Cards 7 and 8 remain explicit no-op placeholders as requested.
+            self.turn_order.mark_strategy_used(player, card)
+            self.movement_error = 'This strategy card is a placeholder.'
+
+    def resolve_strategy_system(self, position):
+        pending = self.strategy_pending
+        if not pending or pending[0] != 'system':
+            return False
+        _, card, player = pending
+        tile = self.board[position]
+        if card == 2:
+            if any(planet.name.casefold() == 'mecatol rex' for planet in tile.planets):
+                self.movement_error = 'Diplomacy cannot target Mecatol Rex.'
+                return False
+            for opponent in self.turn_order.players:
+                if opponent is player or opponent.faction in tile.command_tokens:
+                    continue
+                reserve = command_tokens_in_reinforcements(opponent, self.board)
+                if not reserve:
+                    for pool in ('tactical', 'fleet', 'strategic'):
+                        if opponent.command_pools[pool]:
+                            opponent.command_pools[pool] -= 1
+                            break
+                    else:
+                        continue
+                tile.command_tokens.add(opponent.faction)
+            exhausted = [card for card in player.planets if card.exhausted]
+            for planet_card in exhausted[:2]:
+                planet_card.exhausted = False
+            self.turn_order.mark_strategy_used(player, card)
+            self.movement_error = 'Diplomacy placed opponents’ tokens and readied up to 2 planets.'
+        elif card == 6:
+            if player.faction not in tile.command_tokens:
+                self.movement_error = 'That system has no command token from this player.'
+                return False
+            tile.command_tokens.remove(player.faction)
+            player.command_pools['tactical'] += 1
+            self.turn_order.mark_strategy_used(player, card)
+            self.movement_error = 'Warfare returned the token to your tactical pool.'
+        else:
+            return False
+        self.strategy_pending = None
+        return True
+
+    def finish_leadership(self):
+        pending = self.strategy_pending
+        if not pending or pending[0] != 'leadership':
+            return
+        _, player, purchases = pending
+        payment = purchases * 3
+        available_influence = sum(c.planet.influence for c in player.planets if not c.exhausted)
+        if payment > available_influence + player.trade_goods:
+            self.movement_error = 'Not enough ready influence and trade goods for that purchase.'
+            return
+        if 3 + purchases > command_tokens_in_reinforcements(player, self.board):
+            self.movement_error = 'Not enough command tokens remain in your supply.'
+            return
+        goods_spent = min(player.trade_goods, payment)
+        player.trade_goods -= goods_spent
+        remaining = payment - goods_spent
+        for planet_card in sorted((c for c in player.planets if not c.exhausted),
+                                  key=lambda c: c.planet.influence, reverse=True):
+            if remaining <= 0:
+                break
+            planet_card.exhausted = True
+            remaining -= planet_card.planet.influence
+        player.pending_commands += 3 + purchases
+        self.turn_order.mark_strategy_used(player, 1)
+        self.strategy_pending = None
+        self.movement_error = f'Leadership: gained {3 + purchases} command token(s).'
+
+    def use_strategy_secondary(self, card):
+        player = self.turn_order.active_player
+        if not self.turn_order.can_use_secondary(player, card):
+            return False
+        if card in (1, 2, 4, 5, 6) and not player.command_pools['strategic']:
+            self.movement_error = 'A strategy command token is required.'
+            return False
+        if card == 1:
+            ready_influence = sum(c.planet.influence for c in player.planets if not c.exhausted)
+            affordable = (ready_influence + player.trade_goods) // 3
+            count = min(affordable, command_tokens_in_reinforcements(player, self.board))
+            if not count:
+                self.movement_error = 'You cannot afford a command token or your supply is empty.'
+                return False
+            payment = count * 3
+            goods_spent = min(player.trade_goods, payment)
+            player.trade_goods -= goods_spent
+            remaining = payment - goods_spent
+            for planet_card in sorted((c for c in player.planets if not c.exhausted),
+                                      key=lambda c: c.planet.influence, reverse=True):
+                if remaining <= 0:
+                    break
+                planet_card.exhausted = True
+                remaining -= planet_card.planet.influence
+            player.command_pools['strategic'] -= 1
+            player.pending_commands += count
+            self.movement_error = f'Leadership secondary: gained {count} command token(s).'
+        elif card == 2:
+            ready = [c for c in player.planets if c.exhausted][:2]
+            for planet_card in ready:
+                planet_card.exhausted = False
+            player.command_pools['strategic'] -= 1
+            self.movement_error = f'Diplomacy secondary readied {len(ready)} planet(s).'
+        elif card == 3:
+            self.movement_error = 'Politics secondary card draw is skipped.'
+        elif card == 4:
+            owned_token_systems = [t for t in self.board.values()
+                                   if player.faction in t.command_tokens and t.planets]
+            target = next(((t, p) for t in owned_token_systems for p in t.planets
+                           if t.planet_owners.get(p.planet_id) == player.faction), None)
+            if not target:
+                self.movement_error = 'Construction secondary needs a controlled planet in a system with your command token.'
+                return False
+            tile, planet = target
+            pds_count = sum(u.kind == 'pds' for t in self.board.values() for u in t.units)
+            dock_count = sum(u.kind == 'spacedock' for t in self.board.values() for u in t.units)
+            kind = 'pds' if pds_count < 2 else 'spacedock' if dock_count < 3 else None
+            if not kind:
+                self.movement_error = 'No PDS or Space Dock pieces remain in supply.'
+                return False
+            tile.units.append(Unit(f'{player.faction}-secondary-{card}-{pds_count}-{dock_count}', kind,
+                                   player.faction, player.color_code,
+                                   UnitLocation(Region.PLANET, planet.planet_id)))
+            player.command_pools['strategic'] -= 1
+            self.movement_error = f'Construction secondary placed a {kind.upper()} on {planet.name}.'
+        elif card == 5:
+            player.commodities = player.commodity_limit
+            player.command_pools['strategic'] -= 1
+            self.movement_error = 'Trade secondary replenished commodities.'
+        elif card == 6:
+            home = next((t for t in self.board.values() if t.player == player.faction), None)
+            if not home or not any(u.kind == 'spacedock' and u.owner == player.faction
+                                   for u in home.units):
+                self.movement_error = 'Warfare needs your home system.'
+                return False
+            session = Session(player, home, {}, Snapshot.capture(self.board, player, self.turn_order.players))
+            if not self.movement.production_sites(session):
+                self.movement_error = 'Warfare needs an active Space Dock in your home system.'
+                return False
+            self.movement.session = session
+            self.movement.prepare_production(session)
+            player.command_pools['strategic'] -= 1
+            self.turn_order.mark_secondary_used(player, card)
+            self.strategy_view = False
+            self.movement_error = None
+            self.movement_panel.reset()
+            return True
+        else:
+            return False
+        self.turn_order.mark_secondary_used(player, card)
+        return True
+
     def pass_turn(self):
         try:
             round_complete = self.turn_order.end_turn()
@@ -246,7 +458,11 @@ class BoardWindow(arcade.Window):
                 for card in player.planets:
                     card.exhausted = False
             self.turn_order.begin_command_allocation()
-        self.player_panel.active = self.turn_order.active_index
+            self.strategy_view = False
+            if not self.turn_order.command_allocation and self.turn_order.strategy_enabled:
+                self.turn_order.begin_strategy_phase()
+                self.strategy_view = True
+        self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
         self.player_panel.source_pool = None
         self.player_panel.card_offset = 0
         self.player_panel.hovered_planet = None
@@ -316,8 +532,10 @@ class BoardWindow(arcade.Window):
         turn_left, turn_right = left - 370, left - 233
         turn_bottom, turn_top = self.height - 58, self.height - 27
         pending_commands = active_player.pending_commands if active_player else 0
-        enabled = not self.movement.session and not pending_commands and not self.turn_order.command_allocation
-        button_label = ('ALLOCATE COMMANDS' if pending_commands else
+        enabled = (not self.movement.session and not pending_commands and
+                   not self.turn_order.command_allocation and not self.turn_order.strategy_selection)
+        button_label = ('STRATEGY PHASE' if self.turn_order.strategy_selection else
+                        'ALLOCATE COMMANDS' if pending_commands else
                         'END TURN' if self.turn_order.action_used else 'PASS')
         arcade.draw_lrbt_rectangle_filled(turn_left, turn_right, turn_bottom, turn_top,
                                            (31, 78, 83) if enabled else (34, 41, 52))
@@ -341,6 +559,8 @@ class BoardWindow(arcade.Window):
         self.player_panel.draw(self)
         if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
             self.combat_panel.draw(self, self.movement.session)
+        if self.movement.session is None and (self.turn_order.strategy_selection or self.strategy_view):
+            self.strategy_panel.draw(self, self.turn_order, left)
 
     def on_update(self, delta_time):
         self.unit_renderer.update(delta_time)
@@ -870,6 +1090,16 @@ class BoardWindow(arcade.Window):
                     self.movement_error = str(error)
             return
         left = self.width - self.sidebar
+        if self.turn_order.strategy_selection:
+            if x >= left:
+                action = self.strategy_panel.hit_test(x, y)
+                if action and action[0] == 'choose_strategy':
+                    self.turn_order.choose_strategy_card(action[1])
+                    self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
+                    self.strategy_view = not self.turn_order.strategy_selection
+                    self.movement_error = None
+                self.on_draw()
+            return
         if self.movement.session:
             if self.movement.session.stage == 'production' and y < self.player_panel.HEIGHT:
                 control = next((control for control in reversed(self.player_panel.controls)
@@ -927,10 +1157,48 @@ class BoardWindow(arcade.Window):
                         self.movement_error = str(error)
                 self.sync_turn_action()
             return
+        if self.strategy_view and x >= left:
+            action = self.strategy_panel.hit_test(x, y)
+            if action and action[0] == 'strategy_show_system':
+                self.strategy_view = False
+            elif action and action[0] == 'strategy_primary':
+                self.use_strategy_primary(action[1])
+            elif action and action[0] == 'strategy_secondary':
+                self.use_strategy_secondary(action[1])
+            elif action and action[0] == 'leadership_plus' and self.strategy_pending:
+                _, player, purchases = self.strategy_pending
+                self.strategy_pending = ('leadership', player, purchases + 1)
+            elif action and action[0] == 'leadership_minus' and self.strategy_pending:
+                _, player, purchases = self.strategy_pending
+                self.strategy_pending = ('leadership', player, max(0, purchases - 1))
+            elif action and action[0] == 'leadership_confirm':
+                self.finish_leadership()
+            elif action and action[0] == 'speaker_pick' and self.strategy_pending:
+                candidate = next((p for p in self.turn_order.players if p.faction == action[1]), None)
+                try:
+                    self.turn_order.set_speaker(candidate)
+                    owner = self.strategy_pending[2]
+                    self.turn_order.mark_strategy_used(owner, 3)
+                    self.strategy_pending = None
+                    self.movement_error = 'The Speaker for the next strategy phase has been chosen.'
+                except ValueError as error:
+                    self.movement_error = str(error)
+            self.on_draw()
+            return
+        if self.strategy_pending and x < left:
+            if self.strategy_pending[0] == 'speaker':
+                return
+            position = self.selected if self.focus_view else self.pick(x, y)
+            if position is not None:
+                self.resolve_strategy_system(position)
+                self.on_draw()
+            return
         if x < left and y < self.player_panel.HEIGHT:
             player_control = next((control for control in reversed(self.player_panel.controls)
                                    if control.contains(x, y) and control.action[0] == 'player'), None)
-            if not self.smoke and player_control and player_control.action[1] != self.turn_order.active_index:
+            active_player_index = (self.player_panel.players.index(self.turn_order.active_player)
+                                   if self.turn_order.active_player else -1)
+            if not self.smoke and player_control and player_control.action[1] != active_player_index:
                 return
             panel_control = next((control for control in reversed(self.player_panel.controls)
                                   if control.contains(x, y)), None)
@@ -940,8 +1208,11 @@ class BoardWindow(arcade.Window):
             self.player_panel.handle_click(x, y)
             if self.turn_order.command_allocation and self.player_panel.player and \
                     self.player_panel.player.pending_commands == 0:
-                self.turn_order.finish_player_command_allocation()
-                self.player_panel.active = self.turn_order.active_index
+                finished = self.turn_order.finish_player_command_allocation()
+                if finished and self.turn_order.strategy_enabled:
+                    self.turn_order.begin_strategy_phase()
+                    self.strategy_view = True
+                self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
                 self.player_panel.source_pool = None
                 self.player_panel.card_offset = 0
             return
@@ -957,6 +1228,12 @@ class BoardWindow(arcade.Window):
             self.toggle_focus()
             return
         if x >= left:
+            if self.system_panel.strategy_tab_hit and all((
+                    self.system_panel.strategy_tab_hit[0] <= x <= self.system_panel.strategy_tab_hit[1],
+                    self.system_panel.strategy_tab_hit[2] <= y <= self.system_panel.strategy_tab_hit[3])):
+                self.strategy_view = True
+                self.on_draw()
+                return
             add = self.system_panel.add_token_hit
             if self.token_context and self.token_context[1] is None and add and \
                     add[0] <= x <= add[1] and add[2] <= y <= add[3]:

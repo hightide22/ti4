@@ -4,6 +4,53 @@ from turn_order import TurnOrder
 
 
 class TurnOrderTests(unittest.TestCase):
+    def test_three_player_strategy_selection_uses_two_cards_and_lowest_initiative(self):
+        players = [type('Player', (), {'faction': faction, 'pending_commands': 0})()
+                   for faction in ('sol', 'hacan', 'jolnar')]
+        turns = TurnOrder(players, strategy_enabled=True)
+
+        # Sol is Speaker: pick order is Sol, Hacan, Jol-Nar, then repeat.
+        self.assertIs(turns.active_player, players[0])
+        for card in (5, 2, 1):
+            turns.choose_strategy_card(card)
+        self.assertIs(turns.active_player, players[0])
+        for card in (4, 6, 3):
+            turns.choose_strategy_card(card)
+        self.assertFalse(turns.strategy_selection)
+        self.assertEqual(turns.strategy_assignments['sol'], [5, 4])
+        self.assertEqual(turns.strategy_assignments['hacan'], [2, 6])
+        self.assertEqual(turns.strategy_assignments['jolnar'], [1, 3])
+        self.assertEqual(turns.strategy_initiative, [2, 1, 0])
+        self.assertIs(turns.active_player, players[2])
+
+    def test_cannot_pass_before_using_both_strategy_cards(self):
+        players = [type('Player', (), {'faction': faction, 'pending_commands': 0})()
+                   for faction in ('sol', 'hacan', 'jolnar')]
+        turns = TurnOrder(players, strategy_enabled=True)
+        for card in (1, 2, 3, 4, 5, 6):
+            turns.choose_strategy_card(card)
+        with self.assertRaises(ValueError):
+            turns.end_turn()
+        turns.mark_strategy_used(players[0], 1)
+        turns.action_used = False
+        with self.assertRaises(ValueError):
+            turns.end_turn()
+        turns.mark_strategy_used(players[0], 4)
+        self.assertFalse(turns.end_turn())
+        self.assertIs(turns.active_player, players[1])
+
+    def test_secondary_is_available_after_primary_and_once_per_round(self):
+        players = [type('Player', (), {'faction': faction, 'pending_commands': 0})()
+                   for faction in ('sol', 'hacan', 'jolnar')]
+        turns = TurnOrder(players, strategy_enabled=True)
+        for card in (1, 2, 3, 4, 5, 6):
+            turns.choose_strategy_card(card)
+        self.assertFalse(turns.can_use_secondary(players[1], 1))
+        turns.mark_strategy_used(players[0], 1)
+        self.assertTrue(turns.can_use_secondary(players[1], 1))
+        turns.mark_secondary_used(players[1], 1)
+        self.assertFalse(turns.can_use_secondary(players[1], 1))
+
     def test_players_take_turns_in_order_and_cycle(self):
         players = [object(), object(), object()]
         turns = TurnOrder(players)
