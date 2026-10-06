@@ -1,11 +1,8 @@
 """Central strategy-card draft and resolution dialogs."""
 import arcade
+from ui_theme import (CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, DISABLED, DANGER,
+                      surface, button, modal)
 
-INK = (223, 232, 244)
-MUTED = (132, 154, 180)
-ACCENT = (100, 207, 224)
-CARD = (23, 39, 57)
-GOLD = (245, 194, 103)
 STRATEGY_CARDS = {
     1: ('Leadership', 'Buy command tokens for 3 influence each.'),
     2: ('Diplomacy', 'Ready up to 2 exhausted planets.'),
@@ -57,14 +54,11 @@ class StrategyPanel:
         return next((a for a, l, r, b, t in reversed(self.hits) if l <= x <= r and b <= y <= t), None)
 
     def button(self, w, action, label, x, y, width, enabled=True, selected=False):
-        hovered = action == self.hover_action
-        arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + 32,
-                                         (48, 113, 117) if hovered else (37, 85, 89) if selected else CARD if enabled else (28, 33, 43))
-        arcade.draw_lrbt_rectangle_outline(x, x + width, y, y + 32,
-                                          ACCENT if selected or hovered else (58, 86, 104), 2 if hovered else 1)
-        w.text(('strategy_button', action), label, x + 9, y + 10, 10, INK if enabled else MUTED)
+        primary = action[0] in ('choose_strategy', 'start', 'pay', 'ready_confirm', 'trade_confirm', 'accept', 'continue')
+        button(w, ('strategy_button', action), label, x, y, width, 34,
+               primary=primary, selected=selected, enabled=enabled, size=11)
         if enabled:
-            self.hits.append((action, x, x + width, y, y + 32))
+            self.hits.append((action, x, x + width, y, y + 34))
             if action and action[0] == 'build':
                 planet_id = action[1]
                 position = next((tile.position for tile in w.board.values()
@@ -97,8 +91,8 @@ class StrategyPanel:
         top = bottom + height
         self.bounds = (x, x + width, bottom, top)
         arcade.draw_lrbt_rectangle_filled(0, w.width, w.player_panel.HEIGHT if not draft else 0, w.height, (4, 9, 18, 205))
-        arcade.draw_lrbt_rectangle_filled(x, x + width, bottom, top, (14, 25, 41))
-        arcade.draw_lrbt_rectangle_outline(x, x + width, bottom, top, (78, 138, 156), 2)
+        modal(x, x + width, bottom, top)
+        w.text('strategy_drag_hint', 'DRAG HEADER TO MOVE', x + width - 181, top - 22, 8, MUTED)
         if draft:
             self.draw_draft(w, turn, x, bottom, width, height)
             if self.mouse:
@@ -115,14 +109,14 @@ class StrategyPanel:
         w.text('strategy_modal_title', f'{s.card} · {STRATEGY_CARDS[s.card][0].upper()}',
                x + 22, top - 31, 17, ACCENT)
         kind = 'PRIMARY' if s.primary else 'SECONDARY'
-        w.text('strategy_actor', f'{s.player.name} · {kind}', x + 22, top - 57, 11, GOLD)
+        w.text('strategy_actor', f'{s.player.name} / {kind} ABILITY', x + 22, top - 57, 11, GOLD)
         w.player_panel.image(strategy_image(s.card), x + 111, top - 204, 234)
-        w.text('strategy_queue', f'Turn owner: {s.owner.faction.upper()}\nResponders left: {len(s.remaining)}',
+        w.text('strategy_queue', f'Action: {s.owner.faction.upper()}\nNext responses: {len(s.remaining)}',
                x + 24, bottom + 95, 10, MUTED, 177)
         rx, rw, y = x + 229, width - 251, top - 101
         self.draw_stage(w, s, rx, y, rw, bottom)
         if w.movement_error:
-            w.text('strategy_error', w.movement_error, x + 22, bottom + 18, 10, (248, 151, 130), width - 44)
+            w.text('strategy_error', w.movement_error, x + 22, bottom + 18, 10, DANGER, width - 44)
         if self.mouse:
             self.update_hover(*self.mouse)
 
@@ -137,17 +131,29 @@ class StrategyPanel:
         cell_h = (height - 115) / 2
         for card in range(1, 9):
             col, row = (card - 1) % 4, (card - 1) // 4
-            cx, cy = x + 30 + (col + .5) * cell_w, top - 87 - (row + .5) * cell_h
+            cell_left = x + 24 + col * cell_w
+            cell_top = top - 88 - row * cell_h
+            cell_bottom = cell_top - cell_h + 10
             ready = card in turn.available_strategy_cards
-            size = min(cell_h - 14, (cell_w - 12) * 1.25)
-            w.player_panel.image(strategy_image(card), cx, cy, size,
-                                 None if ready else (93, 100, 115, 160))
-            bounds = (cx - size * .4, cx + size * .4, cy - size / 2, cy + size / 2)
+            hovered = self.hover_action == ('choose_strategy', card)
+            surface(cell_left, cell_left + cell_w - 10, cell_bottom, cell_top,
+                    SELECTED if hovered else CARD if ready else DISABLED,
+                    ACCENT if hovered else BORDER)
+            image_size = min(cell_h - 85, cell_w * .72)
+            w.player_panel.image(strategy_image(card), cell_left + (cell_w - 10) / 2,
+                                 cell_top - 14 - image_size / 2, image_size,
+                                 None if ready else (130, 140, 151, 140))
+            w.text(('strategy_card_title', card), f'{card:02}  {STRATEGY_CARDS[card][0]}',
+                   cell_left + 12, cell_bottom + 40, 12, INK, max_width=cell_w - 32)
             if ready:
-                self.hits.append((('choose_strategy', card), *bounds))
+                status = 'Choose card'
+                self.hits.append((('choose_strategy', card), cell_left, cell_left + cell_w - 10,
+                                  cell_bottom, cell_top))
             else:
                 owner = next(p for p in turn.players if card in turn.strategy_assignments[p.faction])
-                w.text(('strategy_taken', card), owner.faction.upper(), bounds[0] + 8, cy, 12, GOLD)
+                status = f'Taken / {owner.faction.upper()}'
+            w.text(('strategy_taken', card), status, cell_left + 12, cell_bottom + 15,
+                   10, ACCENT if ready else MUTED, max_width=cell_w - 32)
         w.text('strategy_draft_speaker', f'Speaker: {turn.speaker.name} · clockwise selection',
                x + 24, bottom + 15, 10, MUTED)
 
@@ -164,7 +170,7 @@ class StrategyPanel:
             self.button(w, ('start', card), f'{card} · {"USED" if used else "PLAY CARD"}',
                         cx - 85, bottom + 54, 170,
                         not used and not turn.action_used and not player.pending_commands and not turn.command_allocation)
-        self.button(w, ('close',), 'CLOSE', x + width - 118, top - 43, 96)
+        self.button(w, ('close',), 'CLOSE', x + width - 118, top - 65, 96)
 
     def draw_stage(self, w, s, x, y, width, bottom):
         ctl = w.strategy

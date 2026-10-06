@@ -2,15 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import arcade
+from ui_theme import (PANEL, SHELL, CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, DISABLED,
+                      DASHBOARD_HEIGHT, VARIANT, surface, button)
 
 from board import RESOURCES
 
-BG = (12, 22, 36)
-CARD = (23, 39, 57)
-INK = (223, 232, 244)
-MUTED = (132, 154, 180)
-ACCENT = (100, 207, 224)
-GOLD = (245, 194, 103)
 
 
 @dataclass
@@ -26,7 +22,7 @@ class Control:
 
 
 class PlayerPanel:
-    HEIGHT = 160
+    HEIGHT = DASHBOARD_HEIGHT
 
     def __init__(self, players):
         self.players = players
@@ -55,9 +51,8 @@ class PlayerPanel:
             arcade.draw_texture_rect(texture, rect, color=arcade.types.Color(*color))
 
     def button(self, window, action, label, left, bottom, width, height=25, selected=False):
-        arcade.draw_lrbt_rectangle_filled(left, left + width, bottom, bottom + height,
-                                         (34, 72, 88) if selected else CARD)
-        window.text(('player_button', action), label, left + 8, bottom + 7, 11, ACCENT if selected else INK)
+        button(window, ('player_button', action), label, left, bottom, width, height,
+               selected=selected, size=11)
         self.controls.append(Control(action, left, bottom, width, height))
 
     def handle_click(self, x, y):
@@ -107,12 +102,12 @@ class PlayerPanel:
         self.controls.clear()
         width = window.width - window.sidebar
         height = self.HEIGHT
-        arcade.draw_lrbt_rectangle_filled(0, width, 0, height, BG)
-        arcade.draw_line(0, height, width, height, (48, 79, 101), 1)
+        arcade.draw_lrbt_rectangle_filled(0, width, 0, height, SHELL)
+        arcade.draw_line(0, height, width, height, BORDER, 1)
         if not self.player:
             window.text('no_player', 'No player factions in this map', 16, height - 30, 13, MUTED)
             return
-        window.text('dashboard_player', f'{self.player.faction.upper()} · PLAYER DASHBOARD',
+        window.text('dashboard_player', f'{self.player.faction.upper()} / PLAYER RESOURCES',
                     16, height - 25, 11, ACCENT)
         resources, influence = self.player.available_values
         self.image('planet_cards/pc_res_rdy.png', 267, height - 20, 16)
@@ -124,18 +119,18 @@ class PlayerPanel:
         self.draw_currencies(window, reserve_left, height - 17, reserve_width)
         self.draw_reserves(window, reserve_left, 32, reserve_width)
         leadership = window.strategy.session and window.strategy.session.stage == 'leadership'
-        help_text = ('PLANETS · Click to pay influence' if leadership else
-                     'PLANETS · Click to pay resources' if window.movement.session and window.movement.session.stage == 'production'
-                     else 'PLANETS · Hover for details')
-        window.text('planet_help', help_text, 16, 108, 11, MUTED)
-        card_width, gap = 112, 8
+        help_text = ('PAYMENT / Select planets for influence' if leadership else
+                     'PAYMENT / Select planets for resources' if window.movement.session and window.movement.session.stage == 'production'
+                     else 'PLANETS / Hover for details')
+        window.text('planet_help', help_text, 16, height - 64, 11, MUTED)
+        card_width, gap = (138 if VARIANT == 'Atlas' else 126), 8
         slots = max(1, int((reserve_left - 28) // (card_width + gap)))
         self.card_offset = min(self.card_offset, max(0, len(self.player.planets) - slots))
         if len(self.player.planets) > slots:
-            self.button(window, ('cards', -1), '<', reserve_left - 65, 103, 24, height=22)
-            self.button(window, ('cards', 1), '>', reserve_left - 37, 103, 24, height=22)
+            self.button(window, ('cards', -1), '<', reserve_left - 65, height - 69, 24, height=22)
+            self.button(window, ('cards', 1), '>', reserve_left - 37, height - 69, 24, height=22)
         for slot, index in enumerate(range(self.card_offset, min(len(self.player.planets), self.card_offset + slots))):
-            self.draw_planet(window, index, 16 + slot * (card_width + gap), 12, card_width, 86)
+            self.draw_planet(window, index, 16 + slot * (card_width + gap), 12, card_width, height - 86)
         if show_details and self.hovered_planet is not None and self.hovered_planet < len(self.player.planets):
             self.draw_details(window)
 
@@ -153,25 +148,26 @@ class PlayerPanel:
 
     def draw_reserves(self, window, x, y, width):
         cell_width = (width - 12) / 3
+        cell_height = self.HEIGHT - 111
         for index, pool in enumerate(('tactical', 'fleet', 'strategic')):
             left = x + index * (cell_width + 6)
             selected = pool == self.source_pool
-            arcade.draw_lrbt_rectangle_filled(left, left + cell_width, y, y + 61,
-                                             (32, 63, 77) if selected else CARD)
+            arcade.draw_lrbt_rectangle_filled(left, left + cell_width, y, y + cell_height,
+                                             SELECTED if selected else CARD)
             count = self.player.command_pools[pool]
             sprite = 'fleet' if pool == 'fleet' else 'command'
-            self.image(f'command_token/{sprite}_{self.player.color_code}.png', left + 23, y + 40, 29)
-            self.image(f'factions/{self.player.faction}.png', left + 23, y + 38, 12)
-            window.text(('pool_count', pool), str(count), left + 48, y + 31, 20, ACCENT)
+            self.image(f'command_token/{sprite}_{self.player.color_code}.png', left + 23, y + cell_height - 21, 29)
+            self.image(f'factions/{self.player.faction}.png', left + 23, y + cell_height - 23, 12)
+            window.text(('pool_count', pool), str(count), left + 48, y + cell_height - 30, 20, ACCENT)
             window.text(('pool_name', pool), pool.title(), left + 9, y + 9, 11, INK)
-            self.controls.append(Control(('pool', pool), left, y, cell_width, 61))
+            self.controls.append(Control(('pool', pool), left, y, cell_width, cell_height))
         if self.player.pending_commands:
             pending_bottom, pending_height = 3, 24
             selected_pending = self.source_pool == 'pending'
             arcade.draw_lrbt_rectangle_filled(x, x + width, pending_bottom, pending_bottom + pending_height,
-                                              (34, 72, 88) if selected_pending else (23, 39, 57))
+                                              SELECTED if selected_pending else CARD)
             arcade.draw_lrbt_rectangle_outline(x, x + width, pending_bottom, pending_bottom + pending_height,
-                                               (75, 164, 152) if selected_pending else (54, 75, 97), 1)
+                                               ACCENT if selected_pending else BORDER, 1)
             instruction = 'choose a pool' if window.strategy.session else 'click to allocate to a pool'
             window.text('pending_command_help',
                         f'New commands: {self.player.pending_commands} · {instruction}',
@@ -199,18 +195,18 @@ class PlayerPanel:
         if hovered:
             y += 3
             arcade.draw_lrbt_rectangle_filled(x - 3, x + width + 3, y - 3, y + height + 3, (*ACCENT, 24))
-        background = ((76, 65, 38) if paying_for_production else
-                      (29, 53, 68) if hovered else (19, 29, 43) if exhausted else CARD)
+        background = (SELECTED if paying_for_production else
+                      SELECTED if hovered else DISABLED if exhausted else CARD)
         arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + height, background)
         arcade.draw_lrbt_rectangle_outline(x, x + width, y, y + height,
                                           GOLD if paying_for_production else ACCENT if hovered else
-                                          (64, 74, 90) if exhausted else (67, 133, 154),
+                                          BORDER if exhausted else ACCENT,
                                           2 if paying_for_production or hovered else 1)
         window.text(('planet_name', index), planet.name, x + 8, y + height - 19, 12, INK, width - 16)
         tint = (140, 150, 164, 170) if exhausted else None
         self.image(self.trait_image(planet), x + 21, y + 43, 25, tint)
-        window.text(('planet_state', index), 'Exhausted' if exhausted else 'Ready',
-                    x + 39, y + 38, 11, MUTED if exhausted else ACCENT)
+        window.text(('planet_state', index), 'Paid' if paying_for_production else 'Exhausted' if exhausted else 'Ready',
+                    x + 39, y + 38, 10, MUTED if exhausted else ACCENT)
         suffix = 'exh' if exhausted else 'rdy'
         self.image(f'planet_cards/pc_res_{suffix}.png', x + 16, y + 15, 18)
         self.image(f'planet_cards/pc_inf_{suffix}.png', x + 70, y + 15, 18)
@@ -226,10 +222,10 @@ class PlayerPanel:
         card = self.player.planets[self.hovered_planet]
         planet = card.planet
         x, y = 16, self.HEIGHT + 12
-        arcade.draw_lrbt_rectangle_filled(x, x + 306, y, y + 111, (16, 31, 48, 250))
-        arcade.draw_lrbt_rectangle_outline(x, x + 306, y, y + 111, (67, 133, 154), 1)
+        surface(x, x + 330, y, y + 125, PANEL, ACCENT)
+
         self.image(self.trait_image(planet), x + 24, y + 85, 28)
-        window.text('planet_detail_name', planet.name, x + 47, y + 82, 16, INK)
+        window.text('planet_detail_name', planet.name, x + 47, y + 82, 16, INK, max_width=270)
         state = 'Exhausted' if card.exhausted else 'Ready'
         kind = 'Homeworld' if planet.faction_homeworld else (planet.planet_type or 'Planet').title()
         window.text('planet_detail_state', f'{kind} · {state}', x + 15, y + 58, 12, MUTED)

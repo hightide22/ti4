@@ -4,10 +4,12 @@ import textwrap
 from functools import lru_cache
 
 import arcade
+from ui_theme import (PANEL, SHELL, CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED,
+                      ROSTER_WIDTH)
 from board import RESOURCES
 from player import command_tokens_in_reinforcements
 from player_panel import Control
-from strategy_panel import strategy_image, INK, MUTED, ACCENT, GOLD
+from strategy_panel import strategy_image
 
 
 @lru_cache(maxsize=1)
@@ -20,7 +22,7 @@ def player_reference():
 
 
 class PlayerRoster:
-    WIDTH = 216
+    WIDTH = ROSTER_WIDTH
 
     def __init__(self):
         self.hits = []
@@ -44,9 +46,9 @@ class PlayerRoster:
     def draw(self, w):
         self.hits.clear()
         top, bottom = w.height - 80, w.player_panel.HEIGHT
-        arcade.draw_lrbt_rectangle_filled(0, self.WIDTH, bottom, top, (12, 22, 36))
-        arcade.draw_line(self.WIDTH, bottom, self.WIDTH, top, (48, 79, 101), 1)
-        w.text('roster_title', 'PLAYERS', 14, top - 24, 11, MUTED)
+        arcade.draw_lrbt_rectangle_filled(0, self.WIDTH, bottom, top, SHELL)
+        arcade.draw_line(self.WIDTH, bottom, self.WIDTH, top, BORDER, 1)
+        w.text('roster_title', 'PLAYERS / TURN ORDER', 14, top - 24, 10, MUTED)
         count = max(1, int((top - bottom - 45) // 113))
         self.offset = min(self.offset, max(0, len(w.turn_order.players) - count))
         for slot, index in enumerate(range(self.offset, min(len(w.turn_order.players), self.offset + count))):
@@ -55,12 +57,13 @@ class PlayerRoster:
             row_bottom = row_top - 104
             resolving = w.strategy.session and w.strategy.player is player
             active = w.turn_order.active_player is player
-            color = (43, 75, 79) if resolving else (26, 48, 66) if active else (19, 32, 49)
+            color = SELECTED if resolving else SELECTED if active else CARD
             arcade.draw_lrbt_rectangle_filled(8, self.WIDTH - 8, row_bottom, row_top, color)
             if active or resolving:
+                arcade.draw_lrbt_rectangle_filled(8, 11, row_bottom, row_top, GOLD if resolving else ACCENT)
                 arcade.draw_lrbt_rectangle_outline(8, self.WIDTH - 8, row_bottom, row_top,
                                                   GOLD if resolving else ACCENT, 1)
-            tag = ' · PASSED' if index in w.turn_order.passed_indices else ''
+            tag = ' · PASSED' if index in w.turn_order.passed_indices else ' · ACTIVE' if active else ''
             w.text(('roster_name', index), player.faction.upper() + tag, 17, row_top - 17, 10, INK)
             w.player_panel.image(f'factions/{player.faction}.png', 34, row_top - 55, 35)
             self.hits.append((('player', index), 8, self.WIDTH - 8, row_bottom, row_top))
@@ -113,8 +116,8 @@ class PlayerRoster:
         self.detail_offset = min(self.detail_offset, max(0, len(lines) - max_lines))
         visible = lines[self.detail_offset:self.detail_offset + max_lines]
         bottom = top - len(visible) * 17 - 32
-        arcade.draw_lrbt_rectangle_filled(x, x + width, bottom, top, (16, 31, 48, 255))
-        arcade.draw_lrbt_rectangle_outline(x, x + width, bottom, top, (67, 133, 154), 1)
+        arcade.draw_lrbt_rectangle_filled(x, x + width, bottom, top, PANEL)
+        arcade.draw_lrbt_rectangle_outline(x, x + width, bottom, top, ACCENT, 1)
         for i, (line, color) in enumerate(visible):
             w.text(('roster_detail', i), line, x + 14, top - 23 - i * 17, 10, color)
         if len(lines) > max_lines:

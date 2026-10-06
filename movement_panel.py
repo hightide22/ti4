@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import math
 import arcade
+from ui_theme import (PANEL, CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, ROW_HEIGHT,
+                      surface, button, meter)
 
 from units import UNIT_TYPES, Region, unit_profile
 
-INK = (223, 232, 244)
-MUTED = (132, 154, 180)
-ACCENT = (100, 207, 224)
-GOLD = (245, 194, 103)
-CARD = (23, 39, 57)
 PRODUCTION_ORDER = ('infantry', 'fighter', 'destroyer', 'cruiser', 'carrier', 'dreadnought',
                     'mech', 'flagship', 'warsun')
 
@@ -21,6 +18,8 @@ def amount(value):
 class MovementPanel:
     def __init__(self):
         self.scroll = 0
+        self.timeline_expanded = False
+        self.timeline_rows = ()
         self.scroll_max = 0
         self.hits = []
         self.buttons = []
@@ -32,6 +31,8 @@ class MovementPanel:
 
     def reset(self):
         self.scroll = 0
+        self.hovered_source_position = None
+        self.hovered_route_id = None
 
     def scroll_by(self, amount):
         self.scroll = max(0, min(self.scroll_max, self.scroll + amount))
@@ -76,13 +77,13 @@ class MovementPanel:
         counts = {}
         for index, unit in enumerate(units):
             row, col = divmod(index, 2)
-            left, top = x + col * (cell + 8), y - row * 48
+            left, top = x + col * (cell + 8), y - row * ROW_HEIGHT
             selected = unit.unit_id in session.selected
-            arcade.draw_lrbt_rectangle_filled(left, left + cell, top - 43, top,
-                                             (75, 81, 48) if unit.unit_id == self.hovered_route_id else
-                                             (32, 69, 82) if selected else CARD)
+            arcade.draw_lrbt_rectangle_filled(left, left + cell, top - (ROW_HEIGHT - 5), top,
+                                             SELECTED if unit.unit_id == self.hovered_route_id else
+                                             SELECTED if selected else CARD)
             if selected or unit.unit_id == self.hovered_route_id:
-                arcade.draw_lrbt_rectangle_outline(left, left + cell, top - 43, top,
+                arcade.draw_lrbt_rectangle_outline(left, left + cell, top - (ROW_HEIGHT - 5), top,
                                                    GOLD if unit.unit_id == self.hovered_route_id else ACCENT,
                                                    2 if unit.unit_id == self.hovered_route_id else 1)
             window.player_panel.image(f'units/{unit.color_code}_{UNIT_TYPES[unit.kind]["sprite"]}.png',
@@ -95,11 +96,11 @@ class MovementPanel:
                 detail = f'Move {unit.move_value} · Capacity {unit.capacity}'
             window.text(('movement_name', unit.unit_id), name, left + 33, top - 17, 11, INK)
             window.text(('movement_detail', unit.unit_id), detail, left + 33, top - 34, 10, MUTED)
-            self.hits.append((('unit', unit.unit_id), left, left + cell, top - 43, top))
+            self.hits.append((('unit', unit.unit_id), left, left + cell, top - (ROW_HEIGHT - 5), top))
             if not passenger and unit.unit_id in source.routes:
                 self.route_hits.append((source.tile.position, unit.unit_id,
-                                        left, left + cell, top - 43, top))
-        return y - math.ceil(len(units) / 2) * 48
+                                        left, left + cell, top - (ROW_HEIGHT - 5), top))
+        return y - math.ceil(len(units) / 2) * ROW_HEIGHT
 
     def timeline(self, window, session, x, y, width):
         stage = session.stage
@@ -134,15 +135,24 @@ class MovementPanel:
             ('STEP 5 · PRODUCTION', 'In progress' if production_current or overflow_after_production else 'Done' if stage == 'complete' else 'Skipped' if production_reached and not has_production else 'Wait'),
             ('  Produce Units', 'In progress' if overflow_after_production else 'Done' if stage == 'complete' else 'Current' if production_current else 'Skipped' if production_reached and not has_production else 'Wait'),
         )
-        for index, (label, status) in enumerate(rows):
-            current = status == 'Current'
+        self.timeline_rows = rows
+        indices = range(len(rows)) if self.timeline_expanded else (0, 1, 4, 5, 11)
+        row_height = 19 if self.timeline_expanded else 25
+        for index in indices:
+            label, status = rows[index]
+            current = status in ('Current', 'In progress')
             if current:
-                arcade.draw_lrbt_rectangle_filled(x - 5, x + width, y - 3, y + 13, (36, 69, 91))
-            color = (255, 207, 107) if current else (ACCENT if status in ('Done', 'In progress') else MUTED)
-            window.text(('action_step', index), label, x, y, 9 if label.startswith('  ') else 10, color, width * .61)
-            window.text(('action_status', index), status, x + width * .64, y, 9, color, width * .36)
-            y -= 15
-        return y - 6
+                surface(x - 3, x + width, y - 6, y + 15, SELECTED, None)
+                arcade.draw_lrbt_rectangle_filled(x - 3, x, y - 6, y + 15, GOLD)
+            color = GOLD if current else ACCENT if status == 'Done' else MUTED
+            label = label.replace('STEP ', '').replace(' · ', '  ')
+            window.text(('action_step', index), label, x + 8, y, 10, color, max_width=width * .65)
+            window.text(('action_status', index), status, x + width * .72, y, 9, color, max_width=width * .27)
+            y -= row_height
+        label = 'Hide step details' if self.timeline_expanded else 'Show all step details'
+        button(window, 'timeline_toggle', label, x, y - 21, width, 28, size=10)
+        self.buttons.append((('timeline',), x, x + width, y - 21, y + 7))
+        return y - 44
 
     def draw(self, window, session, left):
         self.hits.clear()
@@ -157,12 +167,14 @@ class MovementPanel:
         pool = 'strategic' if session.strategic_production else 'tactical'
         window.text('move_token', f'{session.player.faction.upper()} · {pool.title()} reserve: {session.player.command_pools[pool]}',
                     x, window.height - 90, 11, MUTED)
-        top, bottom = window.height - (122 if session.strategic_production else 250), 144
-        content_y = top - 18 if session.strategic_production else self.timeline(window, session, x, window.height - 119, width)
-        self.viewport = (int(left), bottom, int(window.sidebar), max(1, int(top - bottom)))
+        bottom = 164
+        content_y = (window.height - 122 if session.strategic_production else
+                     self.timeline(window, session, x, window.height - 121, width))
+        viewport_top = max(bottom + 55, content_y + 18)
+        self.viewport = (int(left), bottom, int(window.sidebar), max(1, int(viewport_top - bottom)))
         old_scissor = window.ctx.scissor
         window.ctx.scissor = self.viewport
-        start = min(top - 18, content_y)
+        start = viewport_top - 18
         y = start + self.scroll
         try:
             notices = []
@@ -187,21 +199,22 @@ class MovementPanel:
                 if not session.sources:
                     window.text('move_empty', 'No ships can reach this system', x, y - 15, 12, MUTED)
                     y -= 45
-                for source_index, source in enumerate(session.sources.values()):
-                    title = f'Tile {source.tile.system_id} · {source.tile.name.split("/")[0]}'
+                for source in session.sources.values():
+                    title = f'Tile {source.tile.system_id} · {source.tile.name.split(" - ")[0]}'
                     source_top = y + 25
                     hovered = self.hovered_source_position == source.tile.position
-                    header_color = (54, 74, 64) if hovered else ((22, 39, 56) if source_index % 2 else (19, 35, 52))
-                    header_border = GOLD if hovered else (47, 69, 89)
+                    header_color = SELECTED if hovered else CARD
+                    header_border = GOLD if hovered else BORDER
                     arcade.draw_lrbt_rectangle_filled(x - 8, x + width + 8, y - 7, y + 19,
                                                       header_color)
                     arcade.draw_lrbt_rectangle_outline(x - 8, x + width + 8, y - 7, y + 19,
                                                        header_border, 1.5 if hovered else 1)
-                    window.text(('move_source', source.tile.position), title, x + 5, y, 13, INK)
+                    window.text(('move_source', source.tile.position), title, x + 5, y, 13, INK, max_width=width - 10)
                     y = self.rows(window, session, source, source.ships, x, y - 17, width) - 8
                     used, capacity = session.cargo_values(source)
                     window.text(('move_capacity', source.tile.position),
-                                f'Cargo {used}/{capacity} · select ground forces to load',
+                                (f'Cargo {used}/{capacity} / select passengers' if capacity else 'Select a transport to load cargo')
+                                if source.passengers else f'Capacity {capacity} / no cargo available',
                                 x, y - 14, 10, ACCENT, width)
                     y -= 27
                     if source.passengers:
@@ -213,7 +226,7 @@ class MovementPanel:
                     y -= 13
                     source_bottom = y - 8
                     arcade.draw_lrbt_rectangle_outline(x - 8, x + width + 8, source_bottom,
-                                                       source_top, header_border if hovered else (41, 60, 80),
+                                                       source_top, header_border if hovered else BORDER,
                                                        1.5 if hovered else 1)
                     self.source_hits.append((source.tile.position, x - 8, x + width + 8,
                                              source_bottom, source_top))
@@ -275,7 +288,7 @@ class MovementPanel:
                     top = y
                     selected = unit.unit_id in session.overflow_selected
                     arcade.draw_lrbt_rectangle_filled(x, x + width, top - 35, top,
-                                                       (32, 69, 82) if selected else CARD)
+                                                       SELECTED if selected else CARD)
                     window.player_panel.image(f'units/{unit.color_code}_{UNIT_TYPES[unit.kind]["sprite"]}.png',
                                               x + 17, top - 17, 23)
                     window.text(('overflow_ship', unit.unit_id),
@@ -292,56 +305,58 @@ class MovementPanel:
                 y -= 21
                 window.text('production_capacity', f'Production limit: {produced}/{session.production_limit}',
                             x, y, 10, MUTED)
-                y -= 16
+                meter(x, y - 11, width, produced, session.production_limit)
+                y -= 30
                 window.text('production_payment', f'Planets + trade goods: {amount(paid)}/{amount(selected_cost)}',
                             x, y, 10, INK)
-                y -= 23
-                arcade.draw_lrbt_rectangle_filled(x, x + width, y - 24, y, CARD)
+                meter(x, y - 12, width, paid, selected_cost, GOLD)
+                y -= 27
+                surface(x, x + width, y - 40, y, SELECTED)
                 window.text('production_trade_goods',
-                            f'Use trade goods: {session.trade_goods_to_spend}/{session.player.trade_goods}',
-                            x + 8, y - 16, 9, INK)
-                for delta, left in ((-1, x + width - 57), (1, x + width - 29)):
-                    arcade.draw_lrbt_rectangle_filled(left, left + 23, y - 21, y - 3, (37, 65, 83))
-                    window.text(('production_tg_button', delta), '+' if delta > 0 else '−',
-                                left + 7, y - 18, 11, ACCENT)
-                    self.hits.append((('production_trade_goods', delta), left, left + 23, y - 21, y - 3))
-                y -= 32
+                            f'Trade goods  {session.trade_goods_to_spend} / {session.player.trade_goods}',
+                            x + 10, y - 25, 11, INK, max_width=width - 98)
+                for delta, left in ((-1, x + width - 78), (1, x + width - 38)):
+                    button(window, ('production_tg_button', delta), '+' if delta > 0 else '−',
+                           left, y - 36, 34, 32)
+                    self.hits.append((('production_trade_goods', delta), left, left + 34, y - 36, y - 4))
+                y -= 54
                 for kind in PRODUCTION_ORDER:
                     top = y
                     count = session.production_choices.get(kind, 0)
                     cost = window.movement.unit_cost(kind, session.player)
-                    arcade.draw_lrbt_rectangle_filled(x, x + width, top - 30, top, CARD)
+                    surface(x, x + width, top - 42, top, SELECTED if count else CARD, None)
                     sprite_path = f'units/{session.player.color_code}_{UNIT_TYPES[kind]["sprite"]}.png'
                     if kind in ('infantry', 'fighter'):
-                        window.player_panel.image(sprite_path, x + 10, top - 15, 16)
-                        window.player_panel.image(sprite_path, x + 23, top - 15, 16)
+                        window.player_panel.image(sprite_path, x + 13, top - 22, 20)
+                        window.player_panel.image(sprite_path, x + 29, top - 22, 20)
                     else:
-                        window.player_panel.image(sprite_path, x + 17, top - 15, 20)
-                    displayed_cost = (amount(window.movement.unit_cost(kind, session.player) * 2)
-                                      if kind in ('infantry', 'fighter') else amount(cost))
-                    window.text(('production_unit', kind),
-                                f'{UNIT_TYPES[kind]["name"]} · {displayed_cost}',
-                                x + 43, top - 11, 9, INK)
-                    window.text(('production_count', kind), str(count), x + width - 49, top - 11, 10, ACCENT)
-                    for delta, left in ((-1, x + width - 36), (1, x + width - 18)):
-                        arcade.draw_lrbt_rectangle_filled(left, left + 16, top - 26, top - 4,
-                                                          (37, 65, 83))
-                        window.text(('production_unit_button', kind, delta), '+' if delta > 0 else '−',
-                                    left + 4, top - 24, 10, ACCENT)
-                        self.hits.append((('production_unit', kind, delta), left, left + 16,
-                                          top - 26, top - 4))
-                    y -= 34
+                        window.player_panel.image(sprite_path, x + 22, top - 22, 28)
+                    displayed_cost = amount(cost * 2 if kind in ('infantry', 'fighter') else cost)
+                    window.text(('production_unit', kind), UNIT_TYPES[kind]['name'],
+                                x + 46, top - 16, 11, INK, max_width=width - 160)
+                    window.text(('production_cost', kind), f'Cost {displayed_cost}',
+                                x + 46, top - 32, 9, MUTED)
+                    window.text(('production_count', kind), str(count), x + width - 70, top - 26, 14, ACCENT)
+                    for delta, left in ((-1, x + width - 112), (1, x + width - 36)):
+                        button(window, ('production_unit_button', kind, delta), '+' if delta > 0 else '−',
+                               left, top - 37, 32, 32, enabled=count > 0 or delta > 0)
+                        self.hits.append((('production_unit', kind, delta), left, left + 32, top - 37, top - 5))
+                    y -= ROW_HEIGHT
+                y -= 14
                 window.text('production_help', 'Yellow planets pay resources; trade goods cover the rest.',
                             x, y, 9, MUTED, width)
-            self.scroll_max = max(0, start - (y - self.scroll) - (top - bottom) + 40)
+                y -= 22
+            self.scroll_max = max(0, start - (y - self.scroll) - (viewport_top - bottom) + 40)
             self.scroll_by(0)
         finally:
             window.ctx.scissor = old_scissor
         if self.scroll_max:
-            track = top - bottom
+            track = viewport_top - bottom
             thumb = max(28, track * track / (track + self.scroll_max))
-            thumb_top = top - self.scroll / self.scroll_max * (track - thumb)
+            thumb_top = viewport_top - self.scroll / self.scroll_max * (track - thumb)
             arcade.draw_lrbt_rectangle_filled(window.width - 10, window.width - 6, thumb_top - thumb, thumb_top, ACCENT)
+        if session.stage == 'movement':
+            self.update_hover(*window.mouse_position)
         ships = sum(len(session.ships(source)) for source in session.sources.values())
         cargo = sum(session.cargo_values(source)[0] for source in session.sources.values())
         landed = sum(planet_id is not None for planet_id in session.landings.values())
@@ -351,34 +366,38 @@ class MovementPanel:
                    f'{len(session.bombard_targets)} ships assigned to bombard' if session.stage == 'bombardment' else
                    f'{session.overflow_required} ships to destroy' if session.stage == 'fleet_overflow' else
                    f'{landed} ground force{"s" if landed != 1 else ""} assigned to planet{"s" if landed != 1 else ""}')
-        window.text('move_summary', summary, x, 118, 11, INK, width)
+        surface(x - 18, x + width + 18, 0, 153, PANEL, None)
+        arcade.draw_line(x, 153, x + width, 153, BORDER, 1)
+        window.text('move_summary', summary, x, 128, 11, INK, max_width=width)
         split = x + width * .64
         if session.stage == 'movement':
-            actions = (('confirm', f'Move {ships} ships' if ships else 'Finish movement', x, split - 6, (30, 88, 105)),
+            actions = (('confirm', f'Move {ships} ships' if ships else 'Finish movement', x, split - 6, SELECTED),
                        ('cancel', 'Cancel', split, x + width, CARD))
         elif session.stage == 'invasion':
             landing_assigned = any(planet_id is not None for planet_id in session.landings.values())
-            actions = (('establish', 'Land forces' if landing_assigned else 'Skip invasion', x, split - 6, (30, 88, 105)),
+            actions = (('establish', 'Land forces' if landing_assigned else 'Skip invasion', x, split - 6, SELECTED),
                        ('cancel', 'Cancel', split, x + width, CARD))
         elif session.stage == 'bombardment':
-            actions = (('resolve_bombardment', 'Resolve bombardment', x, split - 6, (30, 88, 105)),
+            actions = (('resolve_bombardment', 'Resolve bombardment', x, split - 6, SELECTED),
                        ('cancel', 'Cancel', split, x + width, CARD))
         elif session.stage == 'fleet_overflow':
             ready = len(session.overflow_selected) == session.overflow_required
             actions = (('resolve_overflow', f'Destroy {session.overflow_required} ships' if ready else
-                        f'Select {session.overflow_required} ships', x, split - 6, (30, 88, 105)),
+                        f'Select {session.overflow_required} ships', x, split - 6, SELECTED),
                        ('cancel', 'Cancel', split, x + width, CARD))
         elif session.stage == 'production':
             can_produce = bool(session.production_choices) and window.movement.production_payment(session) >= window.movement.production_cost(session)
             label = 'Produce units' if can_produce else 'Add payment' if session.production_choices else 'Choose units'
-            actions = (('produce', label, x, split - 6, (30, 88, 105)),
+            actions = (('produce', label, x, split - 6, SELECTED),
                        ('skip_production', 'Skip production', split, x + width, CARD))
         else:
-            actions = (('continue', 'Continue', x, split - 6, (30, 88, 105)),
+            actions = (('continue', 'Continue', x, split - 6, SELECTED),
                        ('cancel', 'Cancel', split, x + width, CARD))
-        for action, label, lo, hi, color in actions:
-            arcade.draw_lrbt_rectangle_filled(lo, hi, 65, 100, color)
-            window.text(('move_button', action), label, lo + 10, 77, 12, INK)
-            self.buttons.append(((action,), lo, hi, 65, 100))
-        window.text('move_help', 'Finish production to continue secondary abilities' if session.strategic_production else
-                    'Ctrl+Z cancels the full tactical action', x, 29, 10, MUTED, width)
+        for index, (action, label, lo, hi, color) in enumerate(actions):
+            by = 78 if index == 0 else 35
+            enabled = not (action == 'produce' and not can_produce)
+            button(window, ('move_button', action), label, x, by, width, 36,
+                   primary=index == 0, enabled=enabled)
+            if enabled:
+                self.buttons.append(((action,), x, x + width, by, by + 36))
+        window.text('move_help', 'Ctrl+Z · undo last checkpoint', x, 14, 9, MUTED, max_width=width)
