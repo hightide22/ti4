@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from math import ceil
+import random
 
 from player import PlanetCard
 from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile, unit_profiles
@@ -40,7 +41,7 @@ class Snapshot:
         cards = [(other, list(other.planets)) for other in all_players]
         return cls(player, dict(player.command_pools),
                    [(tile, list(tile.units), set(tile.command_tokens), dict(tile.planet_owners)) for tile in board.values()],
-                   [(unit, unit.location) for tile in board.values() for unit in tile.units],
+                   [(unit, unit.location, unit.damaged) for tile in board.values() for unit in tile.units],
                    cards,
                    [(card, card.exhausted) for _, player_cards in cards for card in player_cards],
                    [(other, other.trade_goods, other.commodities) for other in all_players])
@@ -54,8 +55,9 @@ class Snapshot:
             tile.command_tokens.update(tokens)
             tile.planet_owners.clear()
             tile.planet_owners.update(owners)
-        for unit, location in self.locations:
+        for unit, location, damaged in self.locations:
             unit.location = location
+            unit.damaged = damaged
         for player, cards in self.planet_cards:
             player.planets[:] = cards
         for card, exhausted in self.card_states:
@@ -84,6 +86,12 @@ class Session:
     production_choices: dict[str, int] = field(default_factory=dict)
     production_planets: set[str] = field(default_factory=set)
     trade_goods_to_spend: int = 0
+    combat_round: int = 0
+    combat_factions: tuple[str, ...] = ()
+    combat_rolls: dict[str, list[dict]] = field(default_factory=dict)
+    combat_hits: dict[str, int] = field(default_factory=dict)
+    combat_assignments: dict[str, list[str]] = field(default_factory=dict)
+    combat_needs_resolution: bool = False
 
     @property
     def choices(self):
@@ -118,6 +126,9 @@ class Session:
 
 
 class MovementController:
+    PRODUCIBLE_KINDS = {'infantry', 'fighter', 'destroyer', 'cruiser', 'carrier',
+                        'dreadnought', 'mech', 'flagship', 'warsun'}
+
     def __init__(self, board, players=()):
         self.board = board
         self.players = list(players)
@@ -189,6 +200,15 @@ class MovementController:
         self.session = Session(player, target, sources, snapshot)
         return self.session
 
+    def add_command_token(self, player, position):
+        tile = self.board[position]
+        if player.faction in tile.command_tokens:
+            raise MovementError('This system already has your command token')
+        if player.command_pools['tactical'] <= 0:
+            raise MovementError('No command tokens in the tactical reserve')
+        player.command_pools['tactical'] -= 1
+        tile.command_tokens.add(player.faction)
+
     def confirm(self):
         session = self.session
         if not session:
@@ -220,8 +240,16 @@ class MovementController:
         session.cannon_log = []
         session.landings = ({unit.unit_id: None for unit in self.landing_forces(session)}
                             if session.target.planets else {})
-        self._check_fleet_limit(session, 'invasion')
+        next_stage = ('space_combat' if self.hostile_space_factions(session.target, session.player.faction)
+                      else 'invasion')
+        self._check_fleet_limit(session, next_stage)
         return len(transfers)
+
+    @staticmethod
+    def hostile_space_factions(tile, faction):
+        return tuple(sorted({unit.owner for unit in tile.units
+                             if unit.owner != faction and unit.location.region == Region.SPACE and
+                             UNIT_TYPES[unit.kind]['ship']}))
 
     def fleet_ships(self, session):
         return [unit for unit in session.target.units if unit.owner == session.player.faction and
@@ -236,6 +264,8 @@ class MovementController:
             session.overflow_next_stage = next_stage
         elif next_stage == 'invasion':
             session.stage = 'invasion'
+        elif next_stage == 'space_combat':
+            self.start_combat(session)
         else:
             session.stage = 'complete'
             self.finish()
@@ -272,9 +302,112 @@ class MovementController:
             session.landings = {unit_id: planet_id for unit_id, planet_id in session.landings.items()
                                 if unit_id in carried_ids}
             session.stage = 'invasion'
+        elif next_stage == 'space_combat':
+            self.start_combat(session)
         else:
             session.stage = 'complete'
             self.finish()
+
+    def start_combat(self, session):
+        session.combat_factions = (session.player.faction,) + self.hostile_space_factions(
+            session.target, session.player.faction)
+        session.combat_round = 0
+        session.combat_rolls.clear()
+        session.combat_hits.clear()
+        session.combat_assignments.clear()
+        session.combat_needs_resolution = False
+        session.stage = 'space_combat' if len(session.combat_factions) > 1 else 'invasion'
+
+    def combat_units(self, session, faction):
+        return [unit for unit in session.target.units if unit.owner == faction and
+                unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+
+    def combat_hit_capacity(self, session, faction):
+        total = 0
+        for unit in self.combat_units(session, faction):
+            sustain = bool(unit_profile(unit).get('sustainDamage'))
+            total += 2 if sustain and not unit.damaged else 1
+        return total
+
+    def combat_assignment_target(self, session, faction, kind):
+        assigned = session.combat_assignments.setdefault(faction, [])
+        counts = {unit_id: assigned.count(unit_id) for unit_id in set(assigned)}
+        for unit in sorted(self.combat_units(session, faction), key=lambda item: item.unit_id):
+            if unit.kind != kind:
+                continue
+            max_hits = 2 if unit_profile(unit).get('sustainDamage') and not unit.damaged else 1
+            if counts.get(unit.unit_id, 0) < max_hits:
+                return unit
+        return None
+
+    def assign_combat_hit(self, faction, kind):
+        session = self.session
+        if not session or session.stage != 'space_combat' or not session.combat_needs_resolution:
+            raise MovementError('Roll combat dice before assigning hits')
+        hits = session.combat_hits.get(faction, 0)
+        assignments = session.combat_assignments.setdefault(faction, [])
+        required = min(hits, self.combat_hit_capacity(session, faction))
+        if len(assignments) >= required:
+            raise MovementError('All hits against this fleet have been assigned')
+        unit = self.combat_assignment_target(session, faction, kind)
+        if unit is None:
+            raise MovementError('No eligible unit of this type can take another hit')
+        assignments.append(unit.unit_id)
+
+    def combat_assignments_complete(self, session):
+        return all(len(session.combat_assignments.get(faction, [])) >=
+                   min(session.combat_hits.get(faction, 0), self.combat_hit_capacity(session, faction))
+                   for faction in session.combat_factions)
+
+    def advance_combat(self):
+        session = self.session
+        if not session or session.stage != 'space_combat':
+            raise MovementError('Space combat is not active')
+        if session.combat_needs_resolution:
+            if not self.combat_assignments_complete(session):
+                raise MovementError('Assign all available hits before continuing')
+            for faction in session.combat_factions:
+                for unit_id in session.combat_assignments.get(faction, []):
+                    unit = next((unit for unit in session.target.units if unit.unit_id == unit_id), None)
+                    if unit is None:
+                        continue
+                    if unit_profile(unit).get('sustainDamage') and not unit.damaged:
+                        unit.damaged = True
+                        continue
+                    session.target.units.remove(unit)
+                    for cargo in list(session.target.units):
+                        if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == unit.unit_id:
+                            session.target.units.remove(cargo)
+            session.combat_needs_resolution = False
+            own_alive = bool(self.combat_units(session, session.player.faction))
+            enemies_alive = any(self.combat_units(session, faction)
+                                for faction in session.combat_factions if faction != session.player.faction)
+            if not own_alive or not enemies_alive:
+                live_forces = {unit.unit_id for unit in self.landing_forces(session)}
+                session.landings = {unit_id: planet_id for unit_id, planet_id in session.landings.items()
+                                    if unit_id in live_forces}
+                session.stage = 'invasion'
+            return
+
+        session.combat_round += 1
+        session.combat_rolls = {}
+        session.combat_hits = {}
+        session.combat_assignments = {faction: [] for faction in session.combat_factions}
+        outgoing_hits = {}
+        for faction in session.combat_factions:
+            rolls = []
+            for unit in self.combat_units(session, faction):
+                profile = unit_profile(unit)
+                for _ in range(int(profile.get('combatDieCount') or 1)):
+                    value = random.randint(1, 10)
+                    rolls.append({'unit_id': unit.unit_id, 'kind': unit.kind, 'value': value,
+                                  'hit': value >= int(profile.get('combatHitsOn') or 10)})
+            session.combat_rolls[faction] = rolls
+            outgoing_hits[faction] = sum(result['hit'] for result in rolls)
+        session.combat_hits = {faction: sum(hits for shooter, hits in outgoing_hits.items()
+                                             if shooter != faction)
+                               for faction in session.combat_factions}
+        session.combat_needs_resolution = True
 
     def production_sites(self, session):
         sites = []
@@ -339,6 +472,8 @@ class MovementController:
         session = self.session
         if not session or session.stage != 'production':
             raise MovementError('Production is not active')
+        if kind not in self.PRODUCIBLE_KINDS:
+            raise MovementError('Structures cannot be produced yet')
         current = session.production_choices.get(kind, 0)
         if delta > 0:
             remaining = session.production_limit - self.production_total(session)

@@ -31,6 +31,7 @@ class SystemPanel:
         self.hits = []
         self.viewport = (0, 0, 0, 0)
         self.remove_token_hit = None
+        self.add_token_hit = None
 
     def reset(self):
         self.scroll = 0
@@ -73,6 +74,7 @@ class SystemPanel:
 
     def draw(self, window, tile, left):
         self.remove_token_hit = None
+        self.add_token_hit = None
         px, width = left + 18, window.sidebar - 36
         text = window.text
         text('system_label', 'SELECTED SYSTEM', px, window.height - 26, 10, MUTED)
@@ -104,6 +106,20 @@ class SystemPanel:
                 arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh, (184, 94, 91), 1)
                 text('remove_token_button', label, bx + 8, by + 6, 10, INK, bw - 16)
                 self.remove_token_hit = (bx, bx + bw, by, by + bh)
+            elif faction is None:
+                player = window.player_panel.player
+                available = player.faction not in tile.command_tokens and player.command_pools['tactical'] > 0
+                label = (f'Add {player.faction.upper()} token · 1 Tactical' if available else
+                         f'{player.faction.upper()} tactical reserve is empty' if player.command_pools['tactical'] <= 0 else
+                         f'{player.faction.upper()} already has a token here')
+                bx, by, bw, bh = px, window.height - 201, width, 23
+                arcade.draw_lrbt_rectangle_filled(bx, bx + bw, by, by + bh,
+                                                   (30, 76, 79) if available else (42, 49, 60))
+                arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh,
+                                                    (75, 164, 152) if available else (80, 91, 106), 1)
+                text('add_token_button', label, bx + 8, by + 6, 10, INK if available else MUTED, bw - 16)
+                if available:
+                    self.add_token_hit = (bx, bx + bw, by, by + bh)
         inventory = system_inventory(tile)
         texture = window.tile_sprites[tile].texture
         preview_width = min(250, width)

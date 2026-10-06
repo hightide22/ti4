@@ -17,6 +17,7 @@ from player import PlanetCard, create_players
 from player_panel import PlayerPanel
 from movement import MovementController, MovementError
 from movement_panel import MovementPanel
+from combat_panel import CombatPanel
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -67,6 +68,7 @@ class BoardWindow(arcade.Window):
         self.player_panel = PlayerPanel(create_players(self.board, self.map_config))
         self.movement = MovementController(self.board, self.player_panel.players)
         self.movement_panel = MovementPanel()
+        self.combat_panel = CombatPanel()
         self.movement_error = None
         self.token_hits = []
         self.token_context = None
@@ -234,6 +236,8 @@ class BoardWindow(arcade.Window):
             set(self.movement.session.production_planets)
             if self.movement.session and self.movement.session.stage == 'production' else set())
         self.player_panel.draw(self)
+        if self.movement.session and self.movement.session.stage == 'space_combat':
+            self.combat_panel.draw(self, self.movement.session)
 
     def on_update(self, delta_time):
         self.unit_renderer.update(delta_time)
@@ -512,6 +516,62 @@ class BoardWindow(arcade.Window):
                     self.on_mouse_press((bounds[0] + bounds[1]) / 2,
                                         (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
                     assert not target.command_tokens
+                    self.on_draw()
+                    before_tactical = sol_player.command_pools['tactical']
+                    tx, ty = self.screen(target.position)
+                    self.on_mouse_press(tx, ty, arcade.MOUSE_BUTTON_RIGHT, 0)
+                    self.on_draw()
+                    assert self.system_panel.add_token_hit
+                    bounds = self.system_panel.add_token_hit
+                    self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                        (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert 'sol' in target.command_tokens
+                    assert sol_player.command_pools['tactical'] == before_tactical - 1
+                    # Refresh token hit targets before the synthetic right-click.
+                    self.on_draw()
+                    self.on_mouse_press(tx, ty, arcade.MOUSE_BUTTON_RIGHT, 0)
+                    self.on_draw()
+                    bounds = self.system_panel.remove_token_hit
+                    self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                        (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert 'sol' not in target.command_tokens
+
+                    # Exercise the combat modal and dice controls with a deterministic miss round.
+                    hacan_home = next(tile for tile in self.board.values()
+                                      if any(unit.owner == 'hacan' for unit in tile.units))
+                    combat_target = next(tile for tile in self.board.neighbors(hacan_home.position)
+                                         if not any(unit.owner == 'sol' and unit.location.region == Region.SPACE
+                                                    for unit in tile.units))
+                    enemy_ship = Unit('smoke-combat-enemy', 'cruiser', 'sol', sol_player.color_code,
+                                      UnitLocation(Region.SPACE))
+                    combat_target.units.append(enemy_ship)
+                    hacan_player = next(player for player in self.player_panel.players if player.faction == 'hacan')
+                    self.player_panel.active = self.player_panel.players.index(hacan_player)
+                    self.movement.activate(hacan_player, combat_target.position)
+                    combat_session = self.movement.session
+                    combat_source = next(iter(combat_session.sources.values()))
+                    combat_ship = combat_source.ships[0]
+                    combat_session.toggle(combat_ship.unit_id)
+                    self.movement.confirm()
+                    assert combat_session.stage == 'space_combat'
+                    self.selected = combat_target.position
+                    self.on_draw()
+                    assert self.labels['combat_modal_title'].text == 'SPACE COMBAT'
+                    arcade.get_image().save(preview_dir / 'space-combat-preview.png')
+                    from unittest.mock import patch
+                    button = self.combat_panel.advance_hit
+                    with patch('movement.random.randint', return_value=1):
+                        self.on_mouse_press((button[0] + button[1]) / 2,
+                                            (button[2] + button[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                        self.on_draw()
+                        button = self.combat_panel.advance_hit
+                        self.on_mouse_press((button[0] + button[1]) / 2,
+                                            (button[2] + button[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert combat_session.stage == 'space_combat' and combat_session.combat_round == 1
+                    self.on_key_press(arcade.key.ESCAPE, 0)
+                    self.player_panel.active = self.player_panel.players.index(sol_player)
+                    assert enemy_ship in combat_target.units
+                    combat_target.units.remove(enemy_ship)
                 self.on_draw()
                 arcade.get_image().save(preview_dir / 'movement-preview.png')
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
@@ -532,9 +592,15 @@ class BoardWindow(arcade.Window):
             if not self.movement.session:
                 hit = next(((position, faction) for position, faction, cx, cy, radius in reversed(self.token_hits)
                             if math.dist((x, y), (cx, cy)) <= radius), None)
+                position = self.selected if self.focus_view else self.pick(x, y)
                 if hit:
                     self.token_context = hit
                     self.selected = hit[0]
+                    self.focus_view = False
+                    self.system_panel.reset()
+                elif position is not None:
+                    self.token_context = (position, None)
+                    self.selected = position
                     self.focus_view = False
                     self.system_panel.reset()
                 else:
@@ -544,6 +610,18 @@ class BoardWindow(arcade.Window):
             return
         if self.token_context and self.token_context[0] != self.selected:
             self.token_context = None
+        if self.movement.session and self.movement.session.stage == 'space_combat':
+            action = self.combat_panel.hit_test(x, y)
+            if action:
+                try:
+                    if action[0] == 'assign_hit':
+                        self.movement.assign_combat_hit(action[1], action[2])
+                    elif action[0] == 'advance':
+                        self.movement.advance_combat()
+                    self.movement_error = None
+                except MovementError as error:
+                    self.movement_error = str(error)
+            return
         left = self.width - self.sidebar
         if self.movement.session:
             if self.movement.session.stage == 'production' and y < self.player_panel.HEIGHT:
@@ -603,6 +681,17 @@ class BoardWindow(arcade.Window):
             self.toggle_focus()
             return
         if x >= left:
+            add = self.system_panel.add_token_hit
+            if self.token_context and self.token_context[1] is None and add and \
+                    add[0] <= x <= add[1] and add[2] <= y <= add[3]:
+                player = self.player_panel.player
+                try:
+                    self.movement.add_command_token(player, self.token_context[0])
+                except MovementError as error:
+                    self.movement_error = str(error)
+                self.token_context = None
+                self.system_panel.reset()
+                return
             remove = self.system_panel.remove_token_hit
             if self.token_context and remove and remove[0] <= x <= remove[1] and remove[2] <= y <= remove[3]:
                 position, faction = self.token_context

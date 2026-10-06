@@ -10,7 +10,7 @@ MUTED = (132, 154, 180)
 ACCENT = (100, 207, 224)
 CARD = (23, 39, 57)
 PRODUCTION_ORDER = ('infantry', 'fighter', 'destroyer', 'cruiser', 'carrier', 'dreadnought',
-                    'mech', 'pds', 'spacedock', 'flagship', 'warsun')
+                    'mech', 'flagship', 'warsun')
 
 
 def amount(value):
@@ -78,6 +78,8 @@ class MovementPanel:
         overflow_after_move = overflow_current and session.overflow_next_stage == 'invasion'
         overflow_after_production = overflow_current and session.overflow_next_stage == 'complete'
         has_production = bool(window.movement.production_sites(session))
+        combat_current = stage == 'space_combat'
+        combat_resolved = bool(session.combat_round and stage in ('invasion', 'production', 'complete'))
         movement_reached = movement_done or overflow_after_move
         invasion_reached = invasion_current or production_current or stage == 'complete' or overflow_after_production
         production_reached = production_current or stage == 'complete' or overflow_after_production
@@ -87,7 +89,7 @@ class MovementPanel:
             ('  Move Ships', ('Done' if ships_selected else 'Skipped') if movement_done else 'Current'),
             ('  Fleet Supply', 'Current' if overflow_current and overflow_after_move else 'Wait' if not movement_done else 'Done'),
             ('  Space Cannon Offense', 'Skipped' if movement_done else 'Wait'),
-            ('STEP 3 · SPACE COMBAT', 'Skipped' if movement_done else 'Wait'),
+            ('STEP 3 · SPACE COMBAT', 'In progress' if combat_current else 'Done' if combat_resolved else 'Skipped' if movement_done else 'Wait'),
             ('STEP 4 · INVASION', 'Done' if production_reached else ('In progress' if invasion_current and has_forces else ('Current' if invasion_current else 'Wait'))),
             ('  Bombardment', 'Skipped' if invasion_reached else 'Wait'),
             ('  Commit Ground Forces', ('Done' if landing_assigned else 'Skipped') if production_reached else ('Current' if invasion_current and has_forces else 'Skipped' if invasion_current else 'Wait')),

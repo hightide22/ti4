@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from board import load_board
 from movement import MovementController, MovementError
@@ -126,6 +127,10 @@ class MovementTests(unittest.TestCase):
         session.production_limit = original_limit
 
         self.controller.adjust_production('dreadnought', 1)
+        with self.assertRaises(MovementError):
+            self.controller.adjust_production('pds', 1)
+        with self.assertRaises(MovementError):
+            self.controller.adjust_production('spacedock', 1)
         self.controller.adjust_production('infantry', 1)
         self.assertEqual(self.controller.production_cost(session), 5)
         card = next(card for card in self.player.planets if card.planet.planet_id == production_planet_id)
@@ -186,6 +191,52 @@ class MovementTests(unittest.TestCase):
         self.assertIn(carrier, self.home.units)
         self.assertIn(infantry, self.home.units)
         self.assertNotIn('sol', self.target.command_tokens)
+
+    def test_space_combat_rolls_hits_sustains_damage_and_destroys_carrier_cargo(self):
+        self.player.command_pools['fleet'] = 6
+        defender = Unit('hacan-test-dread', 'dreadnought', 'hacan', 'ylw', UnitLocation(Region.SPACE))
+        self.target.units.append(defender)
+        home_units = list(self.home.units)
+        session = self.controller.activate(self.player, self.target.position)
+        source = session.sources[self.home.position]
+        carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
+        infantry = next(unit for unit in source.passengers if unit.kind == 'infantry')
+        session.toggle(carrier.unit_id)
+        session.toggle(infantry.unit_id)
+        self.controller.confirm()
+        self.assertEqual(session.stage, 'space_combat')
+
+        with patch('movement.random.randint', side_effect=(10, 1)):
+            self.controller.advance_combat()
+        self.assertEqual(session.combat_hits, {'sol': 0, 'hacan': 1})
+        self.controller.assign_combat_hit('hacan', 'dreadnought')
+        self.assertTrue(self.controller.combat_assignments_complete(session))
+        self.controller.advance_combat()
+        self.assertTrue(defender.damaged)
+        self.assertEqual(session.stage, 'space_combat')
+
+        with patch('movement.random.randint', side_effect=(1, 10)):
+            self.controller.advance_combat()
+        self.controller.assign_combat_hit('sol', 'carrier')
+        self.controller.advance_combat()
+        self.assertEqual(session.stage, 'invasion')
+        self.assertNotIn(carrier, self.target.units)
+        self.assertNotIn(infantry, self.target.units)
+        self.controller.establish_control()
+        self.assertIsNone(self.controller.session)
+
+        self.assertTrue(self.controller.undo())
+        self.assertEqual(self.home.units, home_units)
+        self.assertIn(defender, self.target.units)
+        self.assertFalse(defender.damaged)
+
+    def test_debug_command_token_uses_tactical_reserve(self):
+        tactical = self.player.command_pools['tactical']
+        self.controller.add_command_token(self.player, self.target.position)
+        self.assertIn(self.player.faction, self.target.command_tokens)
+        self.assertEqual(self.player.command_pools['tactical'], tactical - 1)
+        with self.assertRaises(MovementError):
+            self.controller.add_command_token(self.player, self.target.position)
 
     def test_ship_production_goes_to_space_and_skipping_refunds_exhausted_planets(self):
         self.player.command_pools['fleet'] = 4
