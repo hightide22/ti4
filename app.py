@@ -194,9 +194,20 @@ class BoardWindow(arcade.Window):
         self.turn_history_size = history_size
 
     def pass_turn(self):
-        player = self.turn_order.pass_turn()
-        if player is None:
+        try:
+            round_complete = self.turn_order.end_turn()
+        except ValueError as error:
+            self.movement_error = str(error)
             return
+        if not self.turn_order.players:
+            return
+        if round_complete:
+            for tile in self.board.values():
+                tile.command_tokens.clear()
+            for player in self.turn_order.players:
+                player.receive_round_commands()
+                for card in player.planets:
+                    card.exhausted = False
         self.player_panel.active = self.turn_order.active_index
         self.player_panel.source_pool = None
         self.player_panel.card_offset = 0
@@ -254,17 +265,19 @@ class BoardWindow(arcade.Window):
         self.text('focus_button', 'Galaxy view' if self.focus_view else 'Detail view', left - 212, self.height - 46, 12, ACCENT)
         active_player = self.turn_order.active_player
         active_faction = active_player.faction.upper() if active_player else 'NO PLAYER'
-        action_status = ' · ACTION USED' if self.turn_order.action_used else ''
-        self.text('turn_status', f'TURN {self.turn_order.turn_number} · {active_faction}{action_status}',
+        self.text('turn_status', f'ROUND {self.turn_order.round_number} · {active_faction}',
                   left - 370, self.height - 19, 9, ACCENT if self.turn_order.action_used else MUTED)
         turn_left, turn_right = left - 370, left - 233
         turn_bottom, turn_top = self.height - 58, self.height - 27
-        enabled = not self.movement.session
+        pending_commands = active_player.pending_commands if active_player else 0
+        enabled = not self.movement.session and not pending_commands
+        button_label = ('ALLOCATE COMMANDS' if pending_commands else
+                        'END TURN' if self.turn_order.action_used else 'PASS')
         arcade.draw_lrbt_rectangle_filled(turn_left, turn_right, turn_bottom, turn_top,
                                            (31, 78, 83) if enabled else (34, 41, 52))
         arcade.draw_lrbt_rectangle_outline(turn_left, turn_right, turn_bottom, turn_top,
                                             (77, 151, 151) if enabled else (61, 75, 92), 1)
-        self.text('pass_turn_button', 'PASS TURN', turn_left + 31, turn_bottom + 10, 10,
+        self.text('pass_turn_button', button_label, turn_left + 10, turn_bottom + 10, 9,
                   INK if enabled else MUTED)
         self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled else None
         if self.movement.session:
@@ -415,8 +428,8 @@ class BoardWindow(arcade.Window):
                 self.movement.activate(sol_player, target.position)
                 self.selected = target.position
                 self.on_draw()
-                assert all(self.labels[('action_status', index)].text == 'Wait' for index in (4, 5, 6, 7, 8, 9, 10, 11, 12, 13)), \
-                    {index: self.labels[('action_status', index)].text for index in range(14)}
+                assert all(self.labels[('action_status', index)].text == 'Wait' for index in range(3, 13)), \
+                    {index: self.labels[('action_status', index)].text for index in range(13)}
                 source = self.movement.session.sources[home.position]
                 production_planet = target.planets[0]
                 target.units.append(Unit('smoke-production-base', 'spacedock', 'sol', sol_player.color_code,
@@ -452,13 +465,13 @@ class BoardWindow(arcade.Window):
                            for unit in target.units)
                 self.focus_view = True
                 self.on_draw()
-                step_statuses = [self.labels[('action_status', index)].text for index in range(14)]
+                step_statuses = [self.labels[('action_status', index)].text for index in range(13)]
                 assert step_statuses.count('Current') == 1
-                assert self.labels[('action_step', 12)].text == 'STEP 5 · PRODUCTION'
-                assert all(self.labels[('action_status', index)].text == 'Skipped' for index in (4, 5, 7))
-                assert self.labels[('action_status', 6)].text == 'In progress'
-                assert self.labels[('action_status', 8)].text == 'Current'
-                assert all(self.labels[('action_status', index)].text == 'Wait' for index in (9, 10, 11, 12, 13))
+                assert self.labels[('action_step', 11)].text == 'STEP 5 · PRODUCTION'
+                assert all(self.labels[('action_status', index)].text == 'Skipped' for index in (4, 6))
+                assert self.labels[('action_status', 5)].text == 'In progress'
+                assert self.labels[('action_status', 7)].text == 'Current'
+                assert all(self.labels[('action_status', index)].text == 'Wait' for index in (9, 10, 11, 12))
                 arcade.get_image().save(preview_dir / 'cargo-preview.png')
                 self.focus_view = False
                 self.on_draw()
@@ -475,10 +488,10 @@ class BoardWindow(arcade.Window):
                 assert self.movement.session and self.movement.session.stage == 'production'
                 assert target.planet_owners[planet_id] == 'sol'
                 assert next(card for card in sol_player.planets if card.planet.planet_id == planet_id).exhausted
-                step_statuses = [self.labels[('action_status', index)].text for index in range(14)]
+                step_statuses = [self.labels[('action_status', index)].text for index in range(13)]
                 assert step_statuses.count('Current') == 1
-                assert self.labels[('action_step', 12)].text == 'STEP 5 · PRODUCTION'
-                assert self.labels[('action_status', 12)].text == 'In progress'
+                assert self.labels[('action_step', 11)].text == 'STEP 5 · PRODUCTION'
+                assert self.labels[('action_status', 11)].text == 'In progress'
                 arcade.get_image().save(preview_dir / 'production-preview.png')
                 infantry_plus = next(hit for hit in self.movement_panel.hits
                                      if hit[0] == ('production_unit', 'infantry', 1))
@@ -678,15 +691,54 @@ class BoardWindow(arcade.Window):
                 self.on_draw()
                 arcade.get_image().save(preview_dir / 'movement-preview.png')
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
+            # The first round wraps only after every player passes. The completed round
+            # clears board tokens, refreshes planets, and grants each player's commands.
+            sol_player.planets[0].exhausted = True
+            target.command_tokens.add('sol')
             self.on_draw()
             arcade.get_image().save(preview_dir / 'board-preview.png')
-            expected_next = self.player_panel.players[1]
-            bounds = self.turn_button_hit
-            self.on_mouse_press((bounds[0] + bounds[1]) / 2,
-                                (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
-            assert self.turn_order.active_player is expected_next
-            assert self.player_panel.player is expected_next
-            print(f'PASS: {len(self.board)} tile objects; movement, token controls, space and ground combat, and turn passing checked')
+            self.turn_order.mark_action_completed()
+            self.on_draw()
+            assert self.labels['pass_turn_button'].text == 'END TURN'
+            expected_players = self.player_panel.players
+            for index, expected_player in enumerate(expected_players):
+                self.on_draw()
+                if index:
+                    assert self.labels['pass_turn_button'].text == 'PASS'
+                bounds = self.turn_button_hit
+                assert bounds
+                self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                    (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                if index < len(expected_players) - 1:
+                    assert self.turn_order.active_player is expected_players[index + 1]
+                    assert self.turn_order.passed_indices == set(range(index + 1))
+            assert self.turn_order.round_number == 2
+            assert self.turn_order.active_player is expected_players[0]
+            assert not any(tile.command_tokens for tile in self.board.values())
+            assert all(not card.exhausted for player in expected_players for card in player.planets)
+            assert [player.pending_commands for player in expected_players] == [
+                player.round_command_gain() for player in expected_players]
+            self.on_draw()
+            assert self.turn_button_hit is None
+            self.on_draw()
+            pending_control = next(control for control in self.player_panel.controls
+                                   if control.action[0] == 'pending')
+            self.on_mouse_press(pending_control.left + pending_control.width / 2,
+                                pending_control.bottom + pending_control.height / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            for pool in ('tactical', 'fleet', 'strategic'):
+                self.on_draw()
+                pool_control = next(control for control in self.player_panel.controls
+                                    if control.action == ('pool', pool))
+                self.on_mouse_press(pool_control.left + pool_control.width / 2,
+                                    pool_control.bottom + pool_control.height / 2,
+                                    arcade.MOUSE_BUTTON_LEFT, 0)
+            assert expected_players[0].pending_commands == 0
+            self.on_draw()
+            assert self.turn_button_hit is not None
+            assert self.labels['pass_turn_button'].text == 'PASS'
+            assert self.player_panel.player is expected_players[0]
+            print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, refresh, and command allocation checked')
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):
@@ -843,6 +895,8 @@ class BoardWindow(arcade.Window):
             now = time.monotonic()
             if self.last_click[0] == picked and now - self.last_click[1] < .33:
                 try:
+                    if self.turn_order.active_player and self.turn_order.active_player.pending_commands and not self.smoke:
+                        raise MovementError('Allocate all new command tokens before taking an action.')
                     if self.turn_order.action_used and not self.smoke:
                         raise MovementError('Your action is complete. Pass the turn to continue.')
                     self.movement.activate(self.player_panel.player, picked)

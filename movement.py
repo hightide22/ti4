@@ -200,7 +200,7 @@ class MovementController:
             ships = []
             for unit in origin.units:
                 if unit.owner == player.faction and capital_ship(unit):
-                    path = self.route(origin, target, unit, player)
+                    path = (target.position,) if origin is target else self.route(origin, target, unit, player)
                     if path:
                         ships.append(unit)
                         routes[unit.unit_id] = path
@@ -260,7 +260,12 @@ class MovementController:
                             if session.target.planets else {})
         next_stage = ('space_combat' if self.hostile_space_factions(session.target, session.player.faction)
                       else 'invasion')
-        self._check_fleet_limit(session, next_stage)
+        moved_capital_ships = any(capital_ship(unit) for source in session.sources.values()
+                                  for unit in session.ships(source))
+        if moved_capital_ships:
+            self._check_fleet_limit(session, next_stage)
+        else:
+            self.continue_after_movement(session, next_stage)
         return len(transfers)
 
     @staticmethod
@@ -288,10 +293,16 @@ class MovementController:
             session.stage = 'complete'
             self.finish()
 
+    def continue_after_movement(self, session, next_stage):
+        if next_stage == 'space_combat':
+            self.start_combat(session)
+        else:
+            session.stage = 'invasion'
+
     def toggle_overflow_ship(self, unit_id):
         session = self.session
         if not session or session.stage != 'fleet_overflow':
-            raise MovementError('Fleet supply is not being checked')
+            raise MovementError('Fleet limit is not being checked')
         ships = {unit.unit_id for unit in self.fleet_ships(session)}
         if unit_id not in ships:
             raise MovementError('This ship cannot be removed from the fleet')
@@ -303,7 +314,7 @@ class MovementController:
     def resolve_fleet_overflow(self):
         session = self.session
         if not session or session.stage != 'fleet_overflow':
-            raise MovementError('Fleet supply is not being checked')
+            raise MovementError('Fleet limit is not being checked')
         if len(session.overflow_selected) != session.overflow_required:
             raise MovementError(f'Select exactly {session.overflow_required} ships to destroy')
         destroyed = set(session.overflow_selected)
@@ -491,7 +502,8 @@ class MovementController:
     def prepare_production(self, session):
         sites = self.production_sites(session)
         if not sites:
-            self._check_fleet_limit(session, 'complete')
+            session.stage = 'complete'
+            self.finish()
             return False
         session.production_sites = sites
         session.production_limit = sum(value for _, value in sites)
@@ -586,7 +598,11 @@ class MovementController:
                 session.target.units.append(Unit(unit_id, kind, session.player.faction,
                                                  session.player.color_code, location))
         session.stage = 'complete'
-        self._check_fleet_limit(session, 'complete')
+        if any(UNIT_TYPES[kind]['ship'] and kind != 'fighter' and count
+               for kind, count in session.production_choices.items()):
+            self._check_fleet_limit(session, 'complete')
+        else:
+            self.finish()
 
     def skip_production(self):
         session = self.session
@@ -596,7 +612,7 @@ class MovementController:
             if card.planet.planet_id in session.production_planets:
                 card.exhausted = False
         session.stage = 'complete'
-        self._check_fleet_limit(session, 'complete')
+        self.finish()
 
     def landing_forces(self, session):
         return [unit for unit in session.target.units if unit.owner == session.player.faction and

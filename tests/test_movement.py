@@ -77,6 +77,42 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(self.player.planets, original_cards)
         self.assertEqual(self.home.units, original_units)
 
+    def test_active_system_can_load_infantry_to_move_between_its_planets(self):
+        target = next(tile for tile in self.controller.neighbors(self.home)
+                      if len(tile.planets) >= 2 and not tile.command_tokens and
+                      not any(unit.owner != self.player.faction and
+                              unit.location.region == Region.SPACE for unit in tile.units))
+        source_planet, destination_planet = target.planets[:2]
+        carrier = Unit('local-planet-transfer-carrier', 'carrier', self.player.faction,
+                       self.player.color_code, UnitLocation(Region.SPACE))
+        infantry = Unit('local-planet-transfer-infantry', 'infantry', self.player.faction,
+                        self.player.color_code,
+                        UnitLocation(Region.PLANET, planet_id=source_planet.planet_id))
+        target.units.extend((carrier, infantry))
+
+        session = self.controller.activate(self.player, target.position)
+        self.assertIn(target.position, session.sources)
+        source = session.sources[target.position]
+        self.assertIn(carrier, source.ships)
+        self.assertIn(infantry, source.passengers)
+        session.toggle(carrier.unit_id)
+        session.toggle(infantry.unit_id)
+        self.controller.confirm()
+
+        self.assertEqual(session.stage, 'invasion')
+        self.assertEqual(infantry.location.region, Region.TRANSPORT)
+        self.controller.cycle_landing(infantry.unit_id)
+        self.controller.cycle_landing(infantry.unit_id)
+        self.assertEqual(session.landings[infantry.unit_id], destination_planet.planet_id)
+        self.controller.establish_control()
+        self.assertEqual(infantry.location,
+                         UnitLocation(Region.PLANET, planet_id=destination_planet.planet_id))
+        self.assertIsNone(self.controller.session)
+        self.assertTrue(self.controller.undo())
+        self.assertEqual(infantry.location,
+                         UnitLocation(Region.PLANET, planet_id=source_planet.planet_id))
+        self.assertIn(carrier, target.units)
+
     def test_cancel_activation_restores_tactical_token(self):
         tactical = self.player.command_pools['tactical']
         self.controller.activate(self.player, self.target.position)

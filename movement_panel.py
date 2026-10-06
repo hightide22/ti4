@@ -88,7 +88,6 @@ class MovementPanel:
             ('STEP 1 · ACTIVATION', 'Done'),
             ('STEP 2 · MOVEMENT', 'In progress' if stage == 'movement' or overflow_after_move else 'Done' if movement_done else 'Waiting'),
             ('  Move Ships', ('Done' if ships_selected else 'Skipped') if movement_done else 'Current'),
-            ('  Fleet Supply', 'Current' if overflow_current and overflow_after_move else 'Wait' if not movement_done else 'Done'),
             ('  Space Cannon Offense', 'Skipped' if movement_done else 'Wait'),
             ('STEP 3 · SPACE COMBAT', 'In progress' if combat_current else 'Done' if combat_resolved else 'Skipped' if movement_done else 'Wait'),
             ('STEP 4 · INVASION', 'Done' if production_reached else ('In progress' if ground_current or (invasion_current and has_forces) else ('Current' if invasion_current else 'Wait'))),
@@ -97,8 +96,8 @@ class MovementPanel:
             ('  Space Cannon Defense', 'Skipped' if ground_current or production_reached else 'Wait' if not invasion_reached or (invasion_current and has_forces) else 'Skipped'),
             ('  Ground Combat', 'In progress' if ground_current else 'Done' if session.ground_planets and production_reached else 'Wait' if not invasion_reached or (invasion_current and has_forces) else 'Skipped'),
             ('  Establish Control', ('Done' if landing_assigned else 'Skipped') if production_reached else 'Wait' if ground_current else 'Current' if invasion_current and not has_forces else 'Wait'),
-            ('STEP 5 · PRODUCTION', 'Done' if overflow_after_production or stage == 'complete' else 'In progress' if production_current else 'Skipped' if production_reached and not has_production else 'Wait'),
-            ('  Produce Units', 'Done' if overflow_after_production or stage == 'complete' else 'Current' if production_current else 'Skipped' if production_reached and not has_production else 'Wait'),
+            ('STEP 5 · PRODUCTION', 'In progress' if production_current or overflow_after_production else 'Done' if stage == 'complete' else 'Skipped' if production_reached and not has_production else 'Wait'),
+            ('  Produce Units', 'In progress' if overflow_after_production else 'Done' if stage == 'complete' else 'Current' if production_current else 'Skipped' if production_reached and not has_production else 'Wait'),
         )
         for index, (label, status) in enumerate(rows):
             current = status == 'Current'
@@ -128,7 +127,7 @@ class MovementPanel:
         y = start + self.scroll
         try:
             if session.stage == 'movement':
-                window.text('move_sources', f'SOURCES IN RANGE · {len(session.sources)}', x, y, 11, ACCENT)
+                window.text('move_sources', f'SOURCES FOR THIS ACTIVATION · {len(session.sources)}', x, y, 11, ACCENT)
                 y -= 28
                 if not session.sources:
                     window.text('move_empty', 'No ships can reach this system', x, y - 15, 12, MUTED)
@@ -173,7 +172,7 @@ class MovementPanel:
                 y -= 25
             elif session.stage == 'fleet_overflow':
                 ships = window.movement.fleet_ships(session)
-                window.text('fleet_overflow_title', 'FLEET SUPPLY', x, y, 11, ACCENT)
+                window.text('fleet_overflow_title', 'FLEET LIMIT CHECK', x, y, 11, ACCENT)
                 y -= 20
                 window.text('fleet_overflow_count',
                             f'Destroy {session.overflow_required} of {len(ships)} non-fighter ships',

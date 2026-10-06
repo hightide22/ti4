@@ -45,6 +45,24 @@ class PlayerTests(unittest.TestCase):
         self.assertEqual(sum(player.command_pools.values()), 8)
         self.assertEqual(player.command_pools, {'tactical': 0, 'fleet': 3, 'strategic': 5})
 
+    def test_round_commands_are_allocated_into_pools(self):
+        sol = self.players['sol']
+        hacan = self.players['hacan']
+        self.assertEqual(sol.round_command_gain(), 3)
+        self.assertEqual(hacan.round_command_gain(), 2)
+        before = dict(sol.command_pools)
+        sol.receive_round_commands()
+        self.assertEqual(sol.pending_commands, 3)
+        self.assertTrue(sol.allocate_command('fleet'))
+        self.assertTrue(sol.allocate_command('tactical'))
+        self.assertTrue(sol.allocate_command('strategic'))
+        self.assertEqual(sol.pending_commands, 0)
+        self.assertEqual(sol.command_pools, {
+            'tactical': before['tactical'] + 1,
+            'fleet': before['fleet'] + 1,
+            'strategic': before['strategic'] + 1,
+        })
+
     def test_player_states_are_independent(self):
         self.players['sol'].planets[0].flip()
         self.players['sol'].change_currency('commodities', 4)

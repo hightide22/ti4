@@ -24,6 +24,7 @@ class PlayerState:
     planets: list[PlanetCard] = field(default_factory=list)
     trade_goods: int = 0
     commodities: int = 0
+    pending_commands: int = 0
     command_pools: dict[str, int] = field(default_factory=lambda: {
         'tactical': 3, 'fleet': 3, 'strategic': 2})
     technologies: frozenset[str] = frozenset()
@@ -42,6 +43,21 @@ class PlayerState:
         if source == target or not self.command_pools[source]:
             return False
         self.command_pools[source] -= 1
+        self.command_pools[target] += 1
+        return True
+
+    def round_command_gain(self):
+        return 3 if self.faction == 'sol' else 2
+
+    def receive_round_commands(self):
+        self.pending_commands += self.round_command_gain()
+
+    def allocate_command(self, target):
+        if target not in self.command_pools:
+            raise ValueError('Unknown command pool')
+        if not self.pending_commands:
+            return False
+        self.pending_commands -= 1
         self.command_pools[target] += 1
         return True
 

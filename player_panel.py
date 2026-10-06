@@ -79,9 +79,17 @@ class PlayerPanel:
             if self.source_pool is None:
                 if self.player.command_pools[target]:
                     self.source_pool = target
+            elif self.source_pool == 'pending':
+                if self.player.allocate_command(target):
+                    self.source_pool = 'pending' if self.player.pending_commands else None
             else:
                 self.player.transfer_command(self.source_pool, target)
                 self.source_pool = None
+        elif action == 'pending':
+            if self.source_pool == 'pending':
+                self.source_pool = None
+            elif self.player.pending_commands:
+                self.source_pool = 'pending'
         elif action == 'cards':
             self.card_offset = max(0, min(len(self.player.planets) - 1, self.card_offset + args[0]))
 
@@ -155,8 +163,20 @@ class PlayerPanel:
             window.text(('pool_count', pool), str(count), left + 48, y + 31, 20, ACCENT)
             window.text(('pool_name', pool), pool.title(), left + 9, y + 9, 11, INK)
             self.controls.append(Control(('pool', pool), left, y, cell_width, 61))
-        hint = 'Choose destination' if self.source_pool else 'Commands: source → destination'
-        window.text('pool_help', hint, x, 13, 11, MUTED)
+        if self.player.pending_commands:
+            pending_bottom, pending_height = 3, 24
+            selected_pending = self.source_pool == 'pending'
+            arcade.draw_lrbt_rectangle_filled(x, x + width, pending_bottom, pending_bottom + pending_height,
+                                              (34, 72, 88) if selected_pending else (23, 39, 57))
+            arcade.draw_lrbt_rectangle_outline(x, x + width, pending_bottom, pending_bottom + pending_height,
+                                               (75, 164, 152) if selected_pending else (54, 75, 97), 1)
+            window.text('pending_command_help',
+                        f'New commands: {self.player.pending_commands} · click to allocate to a pool',
+                        x + 8, pending_bottom + 7, 10, ACCENT if selected_pending else INK, width - 16)
+            self.controls.append(Control(('pending',), x, pending_bottom, width, pending_height))
+        else:
+            hint = 'Choose destination' if self.source_pool else 'Commands: source → destination'
+            window.text('pool_help', hint, x, 13, 11, MUTED)
 
     def trait_image(self, planet):
         if planet.faction_homeworld:
