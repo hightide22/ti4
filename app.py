@@ -208,6 +208,7 @@ class BoardWindow(arcade.Window):
                 player.receive_round_commands()
                 for card in player.planets:
                     card.exhausted = False
+            self.turn_order.begin_command_allocation()
         self.player_panel.active = self.turn_order.active_index
         self.player_panel.source_pool = None
         self.player_panel.card_offset = 0
@@ -265,12 +266,13 @@ class BoardWindow(arcade.Window):
         self.text('focus_button', 'Galaxy view' if self.focus_view else 'Detail view', left - 212, self.height - 46, 12, ACCENT)
         active_player = self.turn_order.active_player
         active_faction = active_player.faction.upper() if active_player else 'NO PLAYER'
-        self.text('turn_status', f'ROUND {self.turn_order.round_number} · {active_faction}',
+        allocation_status = ' · COMMAND ALLOCATION' if self.turn_order.command_allocation else ''
+        self.text('turn_status', f'ROUND {self.turn_order.round_number} · {active_faction}{allocation_status}',
                   left - 370, self.height - 19, 9, ACCENT if self.turn_order.action_used else MUTED)
         turn_left, turn_right = left - 370, left - 233
         turn_bottom, turn_top = self.height - 58, self.height - 27
         pending_commands = active_player.pending_commands if active_player else 0
-        enabled = not self.movement.session and not pending_commands
+        enabled = not self.movement.session and not pending_commands and not self.turn_order.command_allocation
         button_label = ('ALLOCATE COMMANDS' if pending_commands else
                         'END TURN' if self.turn_order.action_used else 'PASS')
         arcade.draw_lrbt_rectangle_filled(turn_left, turn_right, turn_bottom, turn_top,
@@ -701,39 +703,59 @@ class BoardWindow(arcade.Window):
             self.on_draw()
             assert self.labels['pass_turn_button'].text == 'END TURN'
             expected_players = self.player_panel.players
-            for index, expected_player in enumerate(expected_players):
+            bounds = self.turn_button_hit
+            self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert self.turn_order.active_player is expected_players[1]
+            assert not self.turn_order.passed_indices
+            assert self.turn_order.round_number == 1
+            for pass_index, expected_player in enumerate((expected_players[1], expected_players[2], expected_players[0])):
                 self.on_draw()
-                if index:
-                    assert self.labels['pass_turn_button'].text == 'PASS'
+                assert self.player_panel.player is expected_player
+                assert self.labels['pass_turn_button'].text == 'PASS'
                 bounds = self.turn_button_hit
                 assert bounds
                 self.on_mouse_press((bounds[0] + bounds[1]) / 2,
                                     (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
-                if index < len(expected_players) - 1:
-                    assert self.turn_order.active_player is expected_players[index + 1]
-                    assert self.turn_order.passed_indices == set(range(index + 1))
+                if pass_index < 2:
+                    assert self.turn_order.active_player is (expected_players[2] if pass_index == 0 else expected_players[0])
+                    assert expected_players.index(expected_player) in self.turn_order.passed_indices
             assert self.turn_order.round_number == 2
             assert self.turn_order.active_player is expected_players[0]
             assert not any(tile.command_tokens for tile in self.board.values())
             assert all(not card.exhausted for player in expected_players for card in player.planets)
             assert [player.pending_commands for player in expected_players] == [
                 player.round_command_gain() for player in expected_players]
+            expected_pool_counts = [(player, dict(player.command_pools)) for player in expected_players]
             self.on_draw()
             assert self.turn_button_hit is None
-            self.on_draw()
-            pending_control = next(control for control in self.player_panel.controls
-                                   if control.action[0] == 'pending')
-            self.on_mouse_press(pending_control.left + pending_control.width / 2,
-                                pending_control.bottom + pending_control.height / 2,
-                                arcade.MOUSE_BUTTON_LEFT, 0)
-            for pool in ('tactical', 'fleet', 'strategic'):
+            assert self.turn_order.command_allocation
+            for player in expected_players:
                 self.on_draw()
-                pool_control = next(control for control in self.player_panel.controls
-                                    if control.action == ('pool', pool))
-                self.on_mouse_press(pool_control.left + pool_control.width / 2,
-                                    pool_control.bottom + pool_control.height / 2,
+                assert self.player_panel.player is player
+                commands_to_allocate = player.pending_commands
+                pending_control = next(control for control in self.player_panel.controls
+                                       if control.action[0] == 'pending')
+                self.on_mouse_press(pending_control.left + pending_control.width / 2,
+                                    pending_control.bottom + pending_control.height / 2,
                                     arcade.MOUSE_BUTTON_LEFT, 0)
-            assert expected_players[0].pending_commands == 0
+                for command_index in range(commands_to_allocate):
+                    pool = ('tactical', 'fleet', 'strategic')[command_index % 3]
+                    self.on_draw()
+                    pool_control = next(control for control in self.player_panel.controls
+                                        if control.action == ('pool', pool))
+                    self.on_mouse_press(pool_control.left + pool_control.width / 2,
+                                        pool_control.bottom + pool_control.height / 2,
+                                        arcade.MOUSE_BUTTON_LEFT, 0)
+                assert player.pending_commands == 0
+                self.on_draw()
+                previous_pool_counts = next(counts for expected_player, counts in expected_pool_counts
+                                             if expected_player is player)
+                assert sum(player.command_pools.values()) == (
+                    sum(previous_pool_counts.values()) + player.round_command_gain())
+            assert not self.turn_order.command_allocation
+            assert all(player.pending_commands == 0 for player in expected_players)
+            assert self.turn_order.active_player is expected_players[0]
             self.on_draw()
             assert self.turn_button_hit is not None
             assert self.labels['pass_turn_button'].text == 'PASS'
@@ -842,7 +864,18 @@ class BoardWindow(arcade.Window):
                                    if control.contains(x, y) and control.action[0] == 'player'), None)
             if not self.smoke and player_control and player_control.action[1] != self.turn_order.active_index:
                 return
+            panel_control = next((control for control in reversed(self.player_panel.controls)
+                                  if control.contains(x, y)), None)
+            if self.turn_order.command_allocation and (
+                    not panel_control or panel_control.action[0] not in ('pool', 'pending')):
+                return
             self.player_panel.handle_click(x, y)
+            if self.turn_order.command_allocation and self.player_panel.player and \
+                    self.player_panel.player.pending_commands == 0:
+                self.turn_order.finish_player_command_allocation()
+                self.player_panel.active = self.turn_order.active_index
+                self.player_panel.source_pool = None
+                self.player_panel.card_offset = 0
             return
         if self.turn_button_hit and self.turn_button_hit[0] <= x <= self.turn_button_hit[1] and \
                 self.turn_button_hit[2] <= y <= self.turn_button_hit[3]:
@@ -895,6 +928,8 @@ class BoardWindow(arcade.Window):
             now = time.monotonic()
             if self.last_click[0] == picked and now - self.last_click[1] < .33:
                 try:
+                    if self.turn_order.command_allocation and not self.smoke:
+                        raise MovementError('Finish command allocation before taking an action.')
                     if self.turn_order.active_player and self.turn_order.active_player.pending_commands and not self.smoke:
                         raise MovementError('Allocate all new command tokens before taking an action.')
                     if self.turn_order.action_used and not self.smoke:

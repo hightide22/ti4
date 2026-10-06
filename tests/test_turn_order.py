@@ -9,23 +9,38 @@ class TurnOrderTests(unittest.TestCase):
         turns = TurnOrder(players)
 
         self.assertIs(turns.active_player, players[0])
+        turns.mark_action_completed()
         self.assertFalse(turns.end_turn())
         self.assertIs(turns.active_player, players[1])
+        self.assertFalse(turns.passed_indices)
+        turns.mark_action_completed()
         self.assertFalse(turns.end_turn())
         self.assertIs(turns.active_player, players[2])
-        self.assertTrue(turns.end_turn())
+        turns.mark_action_completed()
+        self.assertFalse(turns.end_turn())
         self.assertIs(turns.active_player, players[0])
+        turns.mark_action_completed()
+        turns.end_turn()
+        turns.mark_action_completed()
+        turns.end_turn()
+        self.assertIs(turns.active_player, players[2])
+        self.assertFalse(turns.action_used)
+        self.assertFalse(turns.end_turn())  # Jol-Nar passes.
+        self.assertEqual(turns.passed_indices, {2})
+        self.assertIs(turns.active_player, players[0])
+        turns.mark_action_completed()
+        turns.end_turn()
+        self.assertIs(turns.active_player, players[1])
+        self.assertFalse(turns.end_turn())  # Hacan passes.
+        self.assertEqual(turns.passed_indices, {1, 2})
+        self.assertIs(turns.active_player, players[0])
+        turns.mark_action_completed()
+        self.assertFalse(turns.end_turn())  # Sol gets another turn while others are passed.
+        self.assertIs(turns.active_player, players[0])
+        self.assertFalse(turns.action_used)
+        self.assertTrue(turns.end_turn())  # Sol passes; only now does the round end.
         self.assertEqual(turns.round_number, 2)
         self.assertFalse(turns.passed_indices)
-
-    def test_one_completed_action_per_turn_resets_when_turn_passes(self):
-        turns = TurnOrder([object(), object()])
-
-        self.assertTrue(turns.mark_action_completed())
-        self.assertFalse(turns.mark_action_completed())
-        turns.end_turn()
-        self.assertFalse(turns.action_used)
-        self.assertTrue(turns.mark_action_completed())
 
     def test_players_who_passed_are_skipped_until_round_ends(self):
         players = [object(), object(), object()]
@@ -44,6 +59,25 @@ class TurnOrderTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             turns.end_turn()
+
+    def test_all_players_allocate_round_commands_before_turns_resume(self):
+        players = [type('Player', (), {'pending_commands': count})()
+                   for count in (3, 2, 2)]
+        turns = TurnOrder(players)
+
+        turns.begin_command_allocation()
+        self.assertTrue(turns.command_allocation)
+        self.assertIs(turns.active_player, players[0])
+        players[0].pending_commands = 0
+        self.assertFalse(turns.finish_player_command_allocation())
+        self.assertIs(turns.active_player, players[1])
+        players[1].pending_commands = 0
+        self.assertFalse(turns.finish_player_command_allocation())
+        self.assertIs(turns.active_player, players[2])
+        players[2].pending_commands = 0
+        self.assertTrue(turns.finish_player_command_allocation())
+        self.assertFalse(turns.command_allocation)
+        self.assertIs(turns.active_player, players[0])
 
 
 if __name__ == '__main__':
