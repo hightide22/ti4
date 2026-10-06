@@ -232,7 +232,6 @@ class MovementTests(unittest.TestCase):
         self.player.command_pools['fleet'] = 6
         defender = Unit('hacan-test-dread', 'dreadnought', 'hacan', 'ylw', UnitLocation(Region.SPACE))
         self.target.units.append(defender)
-        home_units = list(self.home.units)
         session = self.controller.activate(self.player, self.target.position)
         source = session.sources[self.home.position]
         carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
@@ -262,9 +261,38 @@ class MovementTests(unittest.TestCase):
         self.assertIsNone(self.controller.session)
 
         self.assertTrue(self.controller.undo())
-        self.assertEqual(self.home.units, home_units)
+        self.assertIs(self.controller.session, session)
+        self.assertEqual(session.stage, 'invasion')
         self.assertIn(defender, self.target.units)
-        self.assertFalse(defender.damaged)
+        self.assertTrue(defender.damaged)
+        self.assertNotIn(carrier, self.home.units)
+        self.assertNotIn(carrier, self.target.units)
+
+    def test_undo_after_combat_and_production_returns_to_production_checkpoint(self):
+        planet = self.home.planets[0]
+        base = Unit('test-undo-production-base', 'spacedock', self.player.faction,
+                    self.player.color_code, UnitLocation(Region.PLANET, planet_id=planet.planet_id))
+        self.home.units.append(base)
+        session = self.controller.activate(self.player, self.home.position)
+        self.controller.confirm()
+        session.rolled_any_dice = True  # Represents a combat roll earlier in this activation.
+        self.controller.establish_control()
+        self.assertEqual(session.stage, 'production')
+        self.controller.adjust_production('infantry', 1)
+        self.controller.toggle_production_planet(planet.planet_id)
+        self.controller.produce()
+        self.assertIsNone(self.controller.session)
+        self.assertTrue(any(unit.kind == 'infantry' and unit.unit_id.startswith('sol-built-')
+                            for unit in self.home.units))
+
+        self.assertTrue(self.controller.undo())
+        self.assertIs(self.controller.session, session)
+        self.assertEqual(session.stage, 'production')
+        self.assertFalse(any(unit.kind == 'infantry' and unit.unit_id.startswith('sol-built-')
+                             for unit in self.home.units))
+        self.assertEqual(session.production_choices, {})
+        self.assertEqual(session.production_planets, set())
+        self.assertFalse(self.player.planets[0].exhausted)
 
     def test_space_cannon_fires_before_combat_and_damages_entering_fleet(self):
         self.target = next(tile for tile in self.controller.neighbors(self.home)

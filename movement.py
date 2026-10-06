@@ -73,6 +73,51 @@ class Snapshot:
 
 
 @dataclass
+class SessionCheckpoint:
+    snapshot: Snapshot
+    stage: str
+    landings: dict[str, str | None] = field(default_factory=dict)
+    bombard_targets: dict[str, str | None] = field(default_factory=dict)
+
+    @classmethod
+    def capture(cls, controller, session, stage):
+        return cls(Snapshot.capture(controller.board, session.player, controller.players),
+                   stage, dict(session.landings), dict(session.bombard_targets))
+
+    def restore(self, session):
+        self.snapshot.restore()
+        session.stage = self.stage
+        session.landings = dict(self.landings)
+        session.outcome = ''
+        if self.stage == 'invasion':
+            session.landed_planets.clear()
+            session.captured_planets.clear()
+            session.ground_planets.clear()
+            session.ground_planet_index = 0
+            session.defense_checked = False
+            session.defense_log.clear()
+        elif self.stage == 'bombardment':
+            session.bombard_targets = dict(self.bombard_targets)
+            session.bombard_rolls.clear()
+            session.bombard_log.clear()
+            session.bombardment_resolved = False
+        elif self.stage == 'production':
+            session.production_choices.clear()
+            session.production_planets.clear()
+            session.trade_goods_to_spend = 0
+            session.overflow_required = 0
+            session.overflow_selected.clear()
+            session.overflow_next_stage = None
+
+
+@dataclass
+class UndoEntry:
+    snapshot: Snapshot
+    resumed_session: object | None = None
+    checkpoint: SessionCheckpoint | None = None
+
+
+@dataclass
 class Session:
     player: object
     target: object
@@ -117,6 +162,10 @@ class Session:
     ground_planet_index: int = 0
     landed_planets: list[str] = field(default_factory=list)
     captured_planets: list[str] = field(default_factory=list)
+    rolled_any_dice: bool = False
+    bombardment_checkpoint: SessionCheckpoint | None = None
+    invasion_checkpoint: SessionCheckpoint | None = None
+    production_checkpoint: SessionCheckpoint | None = None
 
     @property
     def choices(self):
@@ -161,7 +210,7 @@ class MovementController:
         self.board = board
         self.players = list(players)
         self.session = None
-        self.history = []
+        self.history: list[UndoEntry] = []
 
     def neighbors(self, tile):
         neighbors = list(self.board.neighbors(tile.position))
@@ -170,6 +219,11 @@ class MovementController:
                              if other is not tile and set(tile.wormholes) & set(other.wormholes)
                              and other not in neighbors)
         return neighbors
+
+    @staticmethod
+    def roll_d10(session):
+        session.rolled_any_dice = True
+        return random.randint(1, 10)
 
     def route(self, origin, target, unit, player):
         if player.faction in origin.command_tokens or origin is target or unit.move_value <= 0:
@@ -335,7 +389,7 @@ class MovementController:
         if not shooters:
             return
         for source, cannon, profile in shooters:
-            dice = [random.randint(1, 10) for _ in range(int(profile.get('spaceCannonDieCount') or 1))]
+            dice = [self.roll_d10(session) for _ in range(int(profile.get('spaceCannonDieCount') or 1))]
             hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
             session.cannon_log.append(
                 f'{cannon.owner.upper()} PDS in tile {source.system_id}: {dice} → {hits} hit(s)')
@@ -376,7 +430,7 @@ class MovementController:
                 if not profile.get('afbHitsOn'):
                     continue
                 for _ in range(int(profile.get('afbDieCount') or 1)):
-                    value = random.randint(1, 10)
+                    value = self.roll_d10(session)
                     rolls.append({'unit_id': ship.unit_id, 'kind': ship.kind, 'value': value,
                                   'hit': value >= int(profile['afbHitsOn'])})
             session.afb_rolls[faction] = rolls
@@ -465,6 +519,7 @@ class MovementController:
             session.bombardment_cancelled = False
             session.bombard_targets = {unit.unit_id: None for unit in bombers}
             session.bombardment_resolved = False
+            session.bombardment_checkpoint = SessionCheckpoint.capture(self, session, 'bombardment')
             session.stage = 'bombardment'
             return
         else:
@@ -499,7 +554,7 @@ class MovementController:
             profile = unit_profile(ship)
             rolls = []
             for _ in range(int(profile.get('bombardDieCount') or 1)):
-                value = random.randint(1, 10)
+                value = self.roll_d10(session)
                 rolls.append({'unit_id': unit_id, 'kind': ship.kind, 'planet_id': planet_id,
                               'value': value, 'hit': value >= int(profile['bombardHitsOn'])})
             session.bombard_rolls.extend(rolls)
@@ -682,7 +737,7 @@ class MovementController:
             for unit in self.combat_units(session, faction):
                 profile = unit_profile(unit)
                 for _ in range(int(profile.get('combatDieCount') or 1)):
-                    value = random.randint(1, 10)
+                    value = self.roll_d10(session)
                     rolls.append({'unit_id': unit.unit_id, 'kind': unit.kind, 'value': value,
                                   'hit': value >= int(profile.get('combatHitsOn') or 10)})
             session.combat_rolls[faction] = rolls
@@ -734,6 +789,7 @@ class MovementController:
             return False
         session.production_sites = sites
         session.production_limit = sum(value for _, value in sites)
+        session.production_checkpoint = SessionCheckpoint.capture(self, session, 'production')
         session.production_choices.clear()
         session.production_planets.clear()
         session.trade_goods_to_spend = 0
@@ -858,6 +914,7 @@ class MovementController:
         session = self.session
         if not session or session.stage != 'invasion':
             raise MovementError('Invasion is not active')
+        session.invasion_checkpoint = SessionCheckpoint.capture(self, session, 'invasion')
         target, player = session.target, session.player
         landed_planets = []
         for unit in self.landing_forces(session):
@@ -905,7 +962,7 @@ class MovementController:
                 continue
             for cannon in cannons:
                 profile = unit_profile(cannon)
-                dice = [random.randint(1, 10)
+                dice = [self.roll_d10(session)
                         for _ in range(int(profile.get('spaceCannonDieCount') or 1))]
                 hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
                 session.defense_log.append(
@@ -969,7 +1026,15 @@ class MovementController:
 
     def finish(self):
         if self.session and self.session.stage == 'complete':
-            self.history.append(self.session.snapshot)
+            session = self.session
+            checkpoint = None
+            if session.rolled_any_dice:
+                checkpoint = (session.production_checkpoint or session.invasion_checkpoint or
+                              session.bombardment_checkpoint)
+            if checkpoint:
+                self.history.append(UndoEntry(checkpoint.snapshot, session, checkpoint))
+            else:
+                self.history.append(UndoEntry(session.snapshot))
             self.session = None
             return True
         return False
@@ -982,9 +1047,25 @@ class MovementController:
         return False
 
     def undo(self):
-        if self.cancel():
-            return True
+        if self.session:
+            session = self.session
+            if session.rolled_any_dice:
+                checkpoint = None
+                if session.stage in ('production', 'fleet_overflow'):
+                    checkpoint = session.production_checkpoint
+                elif session.stage in ('bombardment',):
+                    checkpoint = session.bombardment_checkpoint
+                elif session.stage in ('invasion', 'ground_combat'):
+                    checkpoint = session.invasion_checkpoint
+                if checkpoint:
+                    checkpoint.restore(session)
+                    return True
+            return self.cancel()
         if self.history:
-            self.history.pop().restore()
+            entry = self.history.pop()
+            entry.snapshot.restore()
+            if entry.resumed_session and entry.checkpoint:
+                entry.checkpoint.restore(entry.resumed_session)
+                self.session = entry.resumed_session
             return True
         return False

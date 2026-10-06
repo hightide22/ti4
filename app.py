@@ -226,7 +226,7 @@ class BoardWindow(arcade.Window):
         history_size = len(self.movement.history)
         if history_size > self.turn_history_size:
             self.turn_order.mark_action_completed()
-        elif history_size < self.turn_history_size and self.turn_order.action_used:
+        elif history_size < self.turn_history_size and self.turn_order.action_used and not self.movement.session:
             self.turn_order.action_used = False
         self.turn_history_size = history_size
 
@@ -737,6 +737,9 @@ class BoardWindow(arcade.Window):
                                             (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
                     assert self.movement.session is None
                     self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
+                    assert self.movement.session is ground_session
+                    assert ground_session.stage == 'invasion'
+                    self.movement.cancel()
                     assert self.movement.session is None
                     assert ground_defender in ground_target.units
                     ground_target.units.remove(ground_defender)
