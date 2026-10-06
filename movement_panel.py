@@ -187,16 +187,18 @@ class MovementPanel:
                 if not session.sources:
                     window.text('move_empty', 'No ships can reach this system', x, y - 15, 12, MUTED)
                     y -= 45
-                for source in session.sources.values():
+                for source_index, source in enumerate(session.sources.values()):
                     title = f'Tile {source.tile.system_id} · {source.tile.name.split("/")[0]}'
-                    source_top = y + 17
-                    if self.hovered_source_position == source.tile.position:
-                        arcade.draw_lrbt_rectangle_filled(x - 4, x + width, y - 5, y + 19,
-                                                          (54, 74, 64))
-                        arcade.draw_lrbt_rectangle_outline(x - 4, x + width, y - 5, y + 19,
-                                                           GOLD, 1)
-                    window.text(('move_source', source.tile.position), title, x, y, 13, INK)
-                    y = self.rows(window, session, source, source.ships, x, y - 13, width) - 8
+                    source_top = y + 25
+                    hovered = self.hovered_source_position == source.tile.position
+                    header_color = (54, 74, 64) if hovered else ((22, 39, 56) if source_index % 2 else (19, 35, 52))
+                    header_border = GOLD if hovered else (47, 69, 89)
+                    arcade.draw_lrbt_rectangle_filled(x - 8, x + width + 8, y - 7, y + 19,
+                                                      header_color)
+                    arcade.draw_lrbt_rectangle_outline(x - 8, x + width + 8, y - 7, y + 19,
+                                                       header_border, 1.5 if hovered else 1)
+                    window.text(('move_source', source.tile.position), title, x + 5, y, 13, INK)
+                    y = self.rows(window, session, source, source.ships, x, y - 17, width) - 8
                     used, capacity = session.cargo_values(source)
                     window.text(('move_capacity', source.tile.position),
                                 f'Cargo {used}/{capacity} · select ground forces to load',
@@ -208,9 +210,14 @@ class MovementPanel:
                     if carried:
                         window.text(('move_aboard', source.tile.position), f'Already aboard: {len(carried)} (included)', x, y - 16, 11, MUTED)
                         y -= 26
-                    y -= 23
-                    arcade.draw_line(x, y + 12, x + width, y + 12, (41, 60, 80), 1)
-                    self.source_hits.append((source.tile.position, x - 4, x + width, y, source_top))
+                    y -= 13
+                    source_bottom = y - 8
+                    arcade.draw_lrbt_rectangle_outline(x - 8, x + width + 8, source_bottom,
+                                                       source_top, header_border if hovered else (41, 60, 80),
+                                                       1.5 if hovered else 1)
+                    self.source_hits.append((source.tile.position, x - 8, x + width + 8,
+                                             source_bottom, source_top))
+                    y = source_bottom - 22
             elif session.stage == 'bombardment':
                 window.text('bombardment_title', 'BOMBARDMENT TARGETS', x, y, 11, ACCENT)
                 y -= 23
