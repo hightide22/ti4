@@ -17,6 +17,11 @@ def capital_ship(unit):
     return UNIT_TYPES[unit.kind]['ship'] and unit.kind != 'fighter'
 
 
+def cargo_cost(unit):
+    value = unit_profile(unit).get('capacityUsed')
+    return int(value) if value is not None else 1
+
+
 @dataclass
 class Source:
     tile: object
@@ -115,7 +120,8 @@ class Session:
         return [u for u in source.tile.units if u.location.region == Region.TRANSPORT and u.location.carrier_id in ids]
 
     def cargo_values(self, source):
-        return len(self.passengers(source)) + len(self.carried(source)), sum(u.capacity for u in self.ships(source))
+        cargo = self.passengers(source) + self.carried(source)
+        return sum(cargo_cost(unit) for unit in cargo), sum(u.capacity for u in self.ships(source))
 
     def toggle(self, unit_id):
         unit = self.choices.get(unit_id)
@@ -125,7 +131,9 @@ class Session:
         trial = self.selected ^ {unit_id}
         ships = [u for u in source.ships if u.unit_id in trial]
         cargo = [u for u in source.passengers if u.unit_id in trial]
-        used = len(cargo) + len(self.carried(source, ships))
+        if unit in source.passengers and unit_id not in self.selected and not ships:
+            raise MovementError('Select a ship before loading ground forces or fighters')
+        used = sum(cargo_cost(unit) for unit in cargo + self.carried(source, ships))
         capacity = sum(u.capacity for u in ships)
         if used > capacity:
             raise MovementError('Not enough capacity in this source system. Select a transport or remove passengers first.')
@@ -227,16 +235,19 @@ class MovementController:
             ships = session.ships(source)
             passengers = session.passengers(source)
             carried = session.carried(source)
-            if len(passengers) + len(carried) > sum(u.capacity for u in ships):
+            if sum(cargo_cost(unit) for unit in passengers + carried) > sum(u.capacity for u in ships):
                 raise MovementError('Transport capacity exceeded')
-            remaining = {ship.unit_id: ship.capacity - sum(u.location.carrier_id == ship.unit_id for u in carried) for ship in ships}
+            remaining = {ship.unit_id: ship.capacity - sum(cargo_cost(unit) for unit in carried
+                                                              if unit.location.carrier_id == ship.unit_id)
+                         for ship in ships}
             transfers.extend((source.tile, ship, UnitLocation(Region.SPACE)) for ship in ships)
             transfers.extend((source.tile, u, u.location) for u in carried)
             for unit in passengers:
-                carrier_id = next((key for key, slots in remaining.items() if slots > 0), None)
+                required = cargo_cost(unit)
+                carrier_id = next((key for key, slots in remaining.items() if slots >= required), None)
                 if carrier_id is None:
                     raise MovementError('Transport capacity exceeded')
-                remaining[carrier_id] -= 1
+                remaining[carrier_id] -= required
                 location = UnitLocation(Region.SPACE) if unit.kind == 'fighter' else UnitLocation(Region.TRANSPORT, carrier_id=carrier_id)
                 transfers.append((source.tile, unit, location))
         # Apply only after the entire selection has passed validation.

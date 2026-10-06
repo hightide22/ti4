@@ -138,7 +138,9 @@ class MovementPanel:
                     window.text(('move_source', source.tile.position), title, x, y, 13, INK)
                     y = self.rows(window, session, source, source.ships, x, y - 13, width) - 8
                     used, capacity = session.cargo_values(source)
-                    window.text(('move_capacity', source.tile.position), f'Cargo {used}/{capacity} · choose passengers', x, y - 14, 11, ACCENT)
+                    window.text(('move_capacity', source.tile.position),
+                                f'Cargo {used}/{capacity} · select ground forces to load',
+                                x, y - 14, 10, ACCENT, width)
                     y -= 27
                     if source.passengers:
                         y = self.rows(window, session, source, source.passengers, x, y, width, passenger=True)

@@ -323,6 +323,53 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(target.planet_owners[planet.planet_id], 'hacan')
         self.assertNotIn(planet.planet_id, {card.planet.planet_id for card in self.player.planets})
 
+    def test_loaded_infantry_can_capture_one_planet_and_fight_on_another(self):
+        target = next(tile for tile in self.board.neighbors(self.home.position)
+                      if len(tile.planets) >= 2 and not tile.command_tokens)
+        first_planet, contested_planet = target.planets[:2]
+        hacan = next(player for player in self.players if player.faction == 'hacan')
+        defender = Unit('hacan-second-planet-defender', 'infantry', 'hacan', hacan.color_code,
+                        UnitLocation(Region.PLANET, planet_id=contested_planet.planet_id))
+        target.units.append(defender)
+        target.planet_owners[contested_planet.planet_id] = 'hacan'
+        hacan.planets.append(PlanetCard(contested_planet))
+        original_sol_cards = list(self.player.planets)
+
+        session = self.controller.activate(self.player, target.position)
+        source = session.sources[self.home.position]
+        carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
+        infantry = [unit for unit in source.passengers if unit.kind == 'infantry'][:2]
+        session.toggle(carrier.unit_id)
+        for unit in infantry:
+            session.toggle(unit.unit_id)
+        self.assertEqual(session.cargo_values(source), (2, carrier.capacity))
+        self.controller.confirm()
+        self.controller.cycle_landing(infantry[0].unit_id)
+        self.controller.cycle_landing(infantry[1].unit_id)
+        self.controller.cycle_landing(infantry[1].unit_id)
+        self.controller.establish_control()
+
+        self.assertEqual(target.planet_owners[first_planet.planet_id], 'sol')
+        self.assertEqual(session.stage, 'ground_combat')
+        self.assertEqual(session.combat_planet_id, contested_planet.planet_id)
+        with patch('movement.random.randint', side_effect=(10, 1)):
+            self.controller.advance_combat()
+        self.controller.assign_combat_hit('hacan', 'infantry')
+        self.controller.advance_combat()
+
+        self.assertIsNone(self.controller.session)
+        self.assertEqual(target.planet_owners[first_planet.planet_id], 'sol')
+        self.assertEqual(target.planet_owners[contested_planet.planet_id], 'sol')
+        self.assertEqual(infantry[0].location.planet_id, first_planet.planet_id)
+        self.assertEqual(infantry[1].location.planet_id, contested_planet.planet_id)
+        self.assertTrue(next(card for card in self.player.planets
+                             if card.planet.planet_id == contested_planet.planet_id).exhausted)
+
+        self.assertTrue(self.controller.undo())
+        self.assertEqual(self.player.planets, original_sol_cards)
+        self.assertEqual(target.planet_owners[contested_planet.planet_id], 'hacan')
+        self.assertIn(defender, target.units)
+
     def test_debug_command_token_uses_tactical_reserve(self):
         tactical = self.player.command_pools['tactical']
         self.controller.add_command_token(self.player, self.target.position)
