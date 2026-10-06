@@ -73,15 +73,16 @@ class MovementPanel:
         landing_assigned = any(planet_id is not None for planet_id in session.landings.values())
         has_forces = bool(session.landings)
         invasion_current = stage == 'invasion'
+        ground_current = stage == 'ground_combat'
         overflow_current = stage == 'fleet_overflow'
         production_current = stage == 'production'
         overflow_after_move = overflow_current and session.overflow_next_stage == 'invasion'
         overflow_after_production = overflow_current and session.overflow_next_stage == 'complete'
         has_production = bool(window.movement.production_sites(session))
         combat_current = stage == 'space_combat'
-        combat_resolved = bool(session.combat_round and stage in ('invasion', 'production', 'complete'))
+        combat_resolved = session.space_combat_resolved
         movement_reached = movement_done or overflow_after_move
-        invasion_reached = invasion_current or production_current or stage == 'complete' or overflow_after_production
+        invasion_reached = invasion_current or ground_current or production_current or stage == 'complete' or overflow_after_production
         production_reached = production_current or stage == 'complete' or overflow_after_production
         rows = (
             ('STEP 1 · ACTIVATION', 'Done'),
@@ -90,12 +91,12 @@ class MovementPanel:
             ('  Fleet Supply', 'Current' if overflow_current and overflow_after_move else 'Wait' if not movement_done else 'Done'),
             ('  Space Cannon Offense', 'Skipped' if movement_done else 'Wait'),
             ('STEP 3 · SPACE COMBAT', 'In progress' if combat_current else 'Done' if combat_resolved else 'Skipped' if movement_done else 'Wait'),
-            ('STEP 4 · INVASION', 'Done' if production_reached else ('In progress' if invasion_current and has_forces else ('Current' if invasion_current else 'Wait'))),
+            ('STEP 4 · INVASION', 'Done' if production_reached else ('In progress' if ground_current or (invasion_current and has_forces) else ('Current' if invasion_current else 'Wait'))),
             ('  Bombardment', 'Skipped' if invasion_reached else 'Wait'),
-            ('  Commit Ground Forces', ('Done' if landing_assigned else 'Skipped') if production_reached else ('Current' if invasion_current and has_forces else 'Skipped' if invasion_current else 'Wait')),
-            ('  Space Cannon Defense', 'Wait' if not invasion_reached or (invasion_current and has_forces) else 'Skipped'),
-            ('  Ground Combat', 'Wait' if not invasion_reached or (invasion_current and has_forces) else 'Skipped'),
-            ('  Establish Control', ('Done' if landing_assigned else 'Skipped') if production_reached else 'Current' if invasion_current and not has_forces else 'Wait'),
+            ('  Commit Ground Forces', ('Done' if landing_assigned else 'Skipped') if production_reached or ground_current else ('Current' if invasion_current and has_forces else 'Skipped' if invasion_current else 'Wait')),
+            ('  Space Cannon Defense', 'Skipped' if ground_current or production_reached else 'Wait' if not invasion_reached or (invasion_current and has_forces) else 'Skipped'),
+            ('  Ground Combat', 'In progress' if ground_current else 'Done' if session.ground_planets and production_reached else 'Wait' if not invasion_reached or (invasion_current and has_forces) else 'Skipped'),
+            ('  Establish Control', ('Done' if landing_assigned else 'Skipped') if production_reached else 'Wait' if ground_current else 'Current' if invasion_current and not has_forces else 'Wait'),
             ('STEP 5 · PRODUCTION', 'Done' if overflow_after_production or stage == 'complete' else 'In progress' if production_current else 'Skipped' if production_reached and not has_production else 'Wait'),
             ('  Produce Units', 'Done' if overflow_after_production or stage == 'complete' else 'Current' if production_current else 'Skipped' if production_reached and not has_production else 'Wait'),
         )

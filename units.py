@@ -93,7 +93,7 @@ def unit_profiles():
     definitions = {}
     for filename in ('baseUnits.json', 'pok.json'):
         for data in json.loads((RESOURCES / 'data/units' / filename).read_text(encoding='utf-8')):
-            if data.get('source') == 'base':
+            if filename == 'baseUnits.json' or data.get('source') == 'base' or data.get('faction'):
                 definitions[data['id']] = data
     factions = {f['alias']: f for f in json.loads((RESOURCES / 'data/factions/base.json').read_text(encoding='utf-8'))}
     return definitions, factions
@@ -257,7 +257,7 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
     fleet = []
     for (region, planet_id, owner, kind), members in groups.items():
         size = UNIT_TYPES[kind]["size"]
-        if kind in ('infantry', 'fighter') and len(members) >= 3:
+        if kind in ('infantry', 'fighter', 'mech') and len(members) >= 3:
             visible = [(tuple([unit]), None) for unit in members[:2]] + [(tuple(members[2:]), len(members))]
         elif len(members) < GROUP_THRESHOLD:
             visible = [(tuple([unit]), None) for unit in members]
@@ -275,7 +275,7 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
             consolidated = defaultdict(list)
             for members, _, _ in entries:
                 consolidated[(members[0].owner, members[0].kind)].extend(members)
-            entries = [(tuple(members), min(UNIT_TYPES[members[0].kind]["size"], 42), len(members) if members[0].kind in ('infantry', 'fighter') and len(members) >= 3 else None) for members in consolidated.values()]
+            entries = [(tuple(members), min(UNIT_TYPES[members[0].kind]["size"], 42), len(members) if members[0].kind in ('infantry', 'fighter', 'mech') and len(members) >= 3 else None) for members in consolidated.values()]
         count = len(entries)
         columns = min(3, count)
         rows = math.ceil(count / columns)

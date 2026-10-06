@@ -43,7 +43,7 @@ class UnitRenderer:
         # Layout runs on a worker while gameplay can move or destroy units. Give
         # the worker a consistent snapshot instead of the live mutable tile.
         units = tuple(replace(unit) for unit in tuple(tile.units))
-        signature = tuple((u.unit_id, u.kind, u.owner, u.location) for u in units)
+        signature = tuple((u.unit_id, u.kind, u.owner, u.location, u.damaged) for u in units)
         key = tile, detailed
         cached = self.layouts.get(key)
         if cached and cached[0] == signature:

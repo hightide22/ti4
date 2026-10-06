@@ -280,7 +280,7 @@ class BoardWindow(arcade.Window):
             set(self.movement.session.production_planets)
             if self.movement.session and self.movement.session.stage == 'production' else set())
         self.player_panel.draw(self)
-        if self.movement.session and self.movement.session.stage == 'space_combat':
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat'):
             self.combat_panel.draw(self, self.movement.session)
 
     def on_update(self, delta_time):
@@ -617,6 +617,64 @@ class BoardWindow(arcade.Window):
                     self.player_panel.active = self.player_panel.players.index(sol_player)
                     assert enemy_ship in combat_target.units
                     combat_target.units.remove(enemy_ship)
+
+                    # Draw the ground-combat modal after assigning a landed force.
+                    sol_home = next(tile for tile in self.board.values()
+                                    if any(unit.owner == 'sol' and unit.kind == 'carrier' for unit in tile.units))
+                    ground_target = next(tile for tile in self.board.neighbors(sol_home.position)
+                                         if tile.planets and not tile.command_tokens and
+                                         not any(unit.owner != 'sol' and unit.location.region == Region.SPACE
+                                                 for unit in tile.units))
+                    planet = ground_target.planets[0]
+                    previous_owner = ground_target.planet_owners.get(planet.planet_id)
+                    hacan_cards_before = list(hacan_player.planets)
+                    ground_defender = Unit('smoke-ground-defender', 'infantry', 'hacan',
+                                           hacan_player.color_code,
+                                           UnitLocation(Region.PLANET, planet_id=planet.planet_id))
+                    ground_target.planet_owners[planet.planet_id] = 'hacan'
+                    ground_target.units.append(ground_defender)
+                    hacan_player.planets.append(PlanetCard(planet))
+                    self.player_panel.active = self.player_panel.players.index(sol_player)
+                    ground_session = self.movement.activate(sol_player, ground_target.position)
+                    ground_source = ground_session.sources[sol_home.position]
+                    ground_carrier = next(unit for unit in ground_source.ships if unit.kind == 'carrier')
+                    ground_infantry = next(unit for unit in ground_source.passengers if unit.kind == 'infantry')
+                    ground_session.toggle(ground_carrier.unit_id)
+                    ground_session.toggle(ground_infantry.unit_id)
+                    self.movement.confirm()
+                    self.movement.cycle_landing(ground_infantry.unit_id)
+                    self.movement.establish_control()
+                    assert ground_session.stage == 'ground_combat'
+                    self.selected = ground_target.position
+                    self.on_draw()
+                    assert self.labels['combat_modal_title'].text == 'GROUND COMBAT'
+                    arcade.get_image().save(preview_dir / 'ground-combat-preview.png')
+                    from unittest.mock import patch
+                    with patch('movement.random.randint', return_value=10):
+                        bounds = self.combat_panel.advance_hit
+                        self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                            (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                        self.on_draw()
+                        for faction, kind in (('sol', 'infantry'), ('hacan', 'infantry')):
+                            action = ('assign_hit', faction, kind)
+                            bounds = next((hit[1:] for hit in self.combat_panel.assignment_hits
+                                           if hit[0] == action))
+                            self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                                (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                            self.on_draw()
+                        bounds = self.combat_panel.advance_hit
+                        self.on_mouse_press((bounds[0] + bounds[1]) / 2,
+                                            (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert self.movement.session is None
+                    self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
+                    assert self.movement.session is None
+                    assert ground_defender in ground_target.units
+                    ground_target.units.remove(ground_defender)
+                    if previous_owner is None:
+                        ground_target.planet_owners.pop(planet.planet_id, None)
+                    else:
+                        ground_target.planet_owners[planet.planet_id] = previous_owner
+                    hacan_player.planets[:] = hacan_cards_before
                 self.on_draw()
                 arcade.get_image().save(preview_dir / 'movement-preview.png')
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
@@ -628,7 +686,7 @@ class BoardWindow(arcade.Window):
                                 (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
             assert self.turn_order.active_player is expected_next
             assert self.player_panel.player is expected_next
-            print(f'PASS: {len(self.board)} tile objects; board, player panel and movement activation / undo checked')
+            print(f'PASS: {len(self.board)} tile objects; movement, token controls, space and ground combat, and turn passing checked')
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):
@@ -662,7 +720,7 @@ class BoardWindow(arcade.Window):
             return
         if self.token_context and self.token_context[0] != self.selected:
             self.token_context = None
-        if self.movement.session and self.movement.session.stage == 'space_combat':
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat'):
             action = self.combat_panel.hit_test(x, y)
             if action:
                 try:

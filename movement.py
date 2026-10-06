@@ -92,6 +92,13 @@ class Session:
     combat_hits: dict[str, int] = field(default_factory=dict)
     combat_assignments: dict[str, list[str]] = field(default_factory=dict)
     combat_needs_resolution: bool = False
+    combat_type: str = 'space'
+    space_combat_resolved: bool = False
+    combat_planet_id: str | None = None
+    ground_planets: list[str] = field(default_factory=list)
+    ground_planet_index: int = 0
+    landed_planets: list[str] = field(default_factory=list)
+    captured_planets: list[str] = field(default_factory=list)
 
     @property
     def choices(self):
@@ -309,6 +316,9 @@ class MovementController:
             self.finish()
 
     def start_combat(self, session):
+        session.combat_type = 'space'
+        session.space_combat_resolved = False
+        session.combat_planet_id = None
         session.combat_factions = (session.player.faction,) + self.hostile_space_factions(
             session.target, session.player.faction)
         session.combat_round = 0
@@ -318,7 +328,28 @@ class MovementController:
         session.combat_needs_resolution = False
         session.stage = 'space_combat' if len(session.combat_factions) > 1 else 'invasion'
 
+    def start_ground_combat(self, session, planet_id):
+        session.combat_type = 'ground'
+        session.combat_planet_id = planet_id
+        defenders = tuple(sorted({unit.owner for unit in session.target.units
+                                  if unit.owner != session.player.faction and
+                                  unit.location.region == Region.PLANET and
+                                  unit.location.planet_id == planet_id and
+                                  unit.kind in ('infantry', 'mech')}))
+        session.combat_factions = (session.player.faction,) + defenders
+        session.combat_round = 0
+        session.combat_rolls.clear()
+        session.combat_hits.clear()
+        session.combat_assignments.clear()
+        session.combat_needs_resolution = False
+        session.stage = 'ground_combat'
+
     def combat_units(self, session, faction):
+        if session.combat_type == 'ground':
+            return [unit for unit in session.target.units if unit.owner == faction and
+                    unit.location.region == Region.PLANET and
+                    unit.location.planet_id == session.combat_planet_id and
+                    unit.kind in ('infantry', 'mech')]
         return [unit for unit in session.target.units if unit.owner == faction and
                 unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
 
@@ -342,7 +373,7 @@ class MovementController:
 
     def assign_combat_hit(self, faction, kind):
         session = self.session
-        if not session or session.stage != 'space_combat' or not session.combat_needs_resolution:
+        if not session or session.stage not in ('space_combat', 'ground_combat') or not session.combat_needs_resolution:
             raise MovementError('Roll combat dice before assigning hits')
         hits = session.combat_hits.get(faction, 0)
         assignments = session.combat_assignments.setdefault(faction, [])
@@ -361,8 +392,8 @@ class MovementController:
 
     def advance_combat(self):
         session = self.session
-        if not session or session.stage != 'space_combat':
-            raise MovementError('Space combat is not active')
+        if not session or session.stage not in ('space_combat', 'ground_combat'):
+            raise MovementError('Combat is not active')
         if session.combat_needs_resolution:
             if not self.combat_assignments_complete(session):
                 raise MovementError('Assign all available hits before continuing')
@@ -382,7 +413,10 @@ class MovementController:
             own_alive = bool(self.combat_units(session, session.player.faction))
             enemies_alive = any(self.combat_units(session, faction)
                                 for faction in session.combat_factions if faction != session.player.faction)
-            if not own_alive or not enemies_alive:
+            if session.combat_type == 'ground' and (not own_alive or not enemies_alive):
+                self.finish_ground_battle(session, own_alive, enemies_alive)
+            elif not own_alive or not enemies_alive:
+                session.space_combat_resolved = True
                 live_forces = {unit.unit_id for unit in self.landing_forces(session)}
                 session.landings = {unit_id: planet_id for unit_id, planet_id in session.landings.items()
                                     if unit_id in live_forces}
@@ -571,36 +605,79 @@ class MovementController:
         if not session or session.stage != 'invasion':
             raise MovementError('Invasion is not active')
         target, player = session.target, session.player
-        landed = []
+        landed_planets = []
         for unit in self.landing_forces(session):
             planet_id = session.landings.get(unit.unit_id)
             if planet_id is None:
                 continue
             unit.location = UnitLocation(Region.PLANET, planet_id=planet_id)
-            landed.append((unit, planet_id))
-        captured = []
-        for _, planet_id in landed:
-            if target.planet_owners.get(planet_id) == player.faction:
-                continue
-            if any(u.location.region == Region.PLANET and u.location.planet_id == planet_id and
-                   u.owner != player.faction and u.kind in ('infantry', 'mech') for u in target.units):
-                continue
-            target.planet_owners[planet_id] = player.faction
-            for unit in list(target.units):
-                if unit.owner != player.faction and unit.location.region == Region.PLANET and \
-                        unit.location.planet_id == planet_id and unit.kind in ('pds', 'spacedock'):
-                    target.units.remove(unit)
-            for other in self.players:
-                other.planets[:] = [card for card in other.planets if card.planet.planet_id != planet_id]
-            planet = next(planet for planet in target.planets if planet.planet_id == planet_id)
-            player.planets.append(PlanetCard(planet, exhausted=True))
-            captured.append(planet.name)
-        if not landed:
+            if planet_id not in landed_planets:
+                landed_planets.append(planet_id)
+        session.landed_planets = landed_planets
+        session.captured_planets = []
+        session.ground_planets = []
+        session.ground_planet_index = 0
+        for planet_id in landed_planets:
+            defenders = [unit for unit in target.units if unit.owner != player.faction and
+                         unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
+                         unit.kind in ('infantry', 'mech')]
+            if not defenders:
+                self.capture_planet(session, planet_id)
+            else:
+                session.ground_planets.append(planet_id)
+        if not landed_planets:
             session.outcome = 'No ground forces landed. No planets changed control.'
+            self.prepare_production(session)
+        elif session.ground_planets:
+            self.start_ground_combat(session, session.ground_planets[0])
         else:
-            session.outcome = ('Landed forces on ' + ', '.join(next(p.name for p in target.planets if p.planet_id == pid)
-                               for _, pid in landed) + '. ' +
-                               ('Captured: ' + ', '.join(captured) + '.' if captured else 'Control did not change.'))
+            self.finish_invasion(session)
+
+    def capture_planet(self, session, planet_id):
+        target, player = session.target, session.player
+        if target.planet_owners.get(planet_id) == player.faction:
+            return
+        target.planet_owners[planet_id] = player.faction
+        for unit in list(target.units):
+            if unit.owner != player.faction and unit.location.region == Region.PLANET and \
+                    unit.location.planet_id == planet_id and unit.kind in ('pds', 'spacedock'):
+                target.units.remove(unit)
+        for other in self.players:
+            other.planets[:] = [card for card in other.planets if card.planet.planet_id != planet_id]
+        planet = next(planet for planet in target.planets if planet.planet_id == planet_id)
+        player.planets.append(PlanetCard(planet, exhausted=True))
+        if planet_id not in session.captured_planets:
+            session.captured_planets.append(planet_id)
+
+    def finish_ground_battle(self, session, attackers_alive, defenders_alive):
+        planet_id = session.combat_planet_id
+        if attackers_alive and not defenders_alive:
+            self.capture_planet(session, planet_id)
+        session.ground_planet_index += 1
+        while session.ground_planet_index < len(session.ground_planets):
+            next_planet = session.ground_planets[session.ground_planet_index]
+            defenders = [unit for unit in session.target.units if unit.owner != session.player.faction and
+                         unit.location.region == Region.PLANET and unit.location.planet_id == next_planet and
+                         unit.kind in ('infantry', 'mech')]
+            attackers = [unit for unit in session.target.units if unit.owner == session.player.faction and
+                         unit.location.region == Region.PLANET and unit.location.planet_id == next_planet and
+                         unit.kind in ('infantry', 'mech')]
+            if defenders and attackers:
+                self.start_ground_combat(session, next_planet)
+                return
+            if attackers and not defenders:
+                self.capture_planet(session, next_planet)
+            session.ground_planet_index += 1
+        session.stage = 'invasion'
+        self.finish_invasion(session)
+
+    def finish_invasion(self, session):
+        planets = {planet.planet_id: planet for planet in session.target.planets}
+        landed_names = [planets[planet_id].name for planet_id in session.landed_planets]
+        captured_names = [planets[planet_id].name for planet_id in session.captured_planets]
+        session.outcome = ('Landed forces on ' + ', '.join(landed_names) + '. ' +
+                           ('Captured: ' + ', '.join(captured_names) + '.' if captured_names else
+                            'Control did not change.'))
         self.prepare_production(session)
 
     def finish(self):

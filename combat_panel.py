@@ -99,8 +99,15 @@ class CombatPanel:
         left, bottom = (window.width - width) / 2, (window.height - height) / 2
         arcade.draw_lrbt_rectangle_filled(left, left + width, bottom, bottom + height, (13, 24, 39))
         arcade.draw_lrbt_rectangle_outline(left, left + width, bottom, bottom + height, (75, 138, 166), 2)
-        window.text('combat_modal_title', 'SPACE COMBAT', left + 24, bottom + height - 31, 18, ACCENT)
-        subtitle = f'Round {session.combat_round}' if session.combat_round else 'Roll one die per combat die'
+        title = 'GROUND COMBAT' if session.combat_type == 'ground' else 'SPACE COMBAT'
+        window.text('combat_modal_title', title, left + 24, bottom + height - 31, 18, ACCENT)
+        if session.combat_type == 'ground':
+            planet = next(planet for planet in session.target.planets
+                          if planet.planet_id == session.combat_planet_id)
+            round_label = f'Round {session.combat_round}' if session.combat_round else 'Roll one die per combat die'
+            subtitle = f'{planet.name} · {round_label}'
+        else:
+            subtitle = f'Round {session.combat_round}' if session.combat_round else 'Roll one die per combat die'
         window.text('combat_round', subtitle, left + 24, bottom + height - 58, 11, MUTED)
         factions = session.combat_factions
         defenders = factions[1:]
@@ -116,7 +123,8 @@ class CombatPanel:
 
         if session.combat_needs_resolution:
             complete = window.movement.combat_assignments_complete(session)
-            label = 'Resolve Hits · Continue' if complete else 'Assign hits to your ships'
+            units_label = 'ground forces' if session.combat_type == 'ground' else 'ships'
+            label = 'Resolve Hits · Continue' if complete else f'Assign hits to your {units_label}'
             color = (31, 94, 100) if complete else (34, 45, 59)
         else:
             complete = True
@@ -134,8 +142,10 @@ class CombatPanel:
             remaining = sum(max(0, min(session.combat_hits.get(faction, 0),
                                        window.movement.combat_hit_capacity(session, faction)) -
                                 len(session.combat_assignments.get(faction, []))) for faction in factions)
-            window.text('combat_help', f'Click ship groups to assign incoming hits · {remaining} left',
+            unit_label = 'ground forces' if session.combat_type == 'ground' else 'ship groups'
+            window.text('combat_help', f'Click {unit_label} to assign incoming hits · {remaining} left',
                         left + 20, bottom + 37, 9, MUTED, width - 40)
         else:
-            window.text('combat_help', 'A gold die is a hit. Ships that survive fire in the next round.',
+            survivors = 'Ground forces' if session.combat_type == 'ground' else 'Ships'
+            window.text('combat_help', f'A gold die is a hit. {survivors} that survive fire in the next round.',
                         left + 20, bottom + 37, 9, MUTED, width - 40)

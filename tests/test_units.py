@@ -52,6 +52,22 @@ class UnitTests(unittest.TestCase):
                 self.assertEqual(placements[-1].badge_count, count)
             self.assertEqual(len(system_inventory(tile)["fleet"]["fighter"]), count)
 
+    def test_ground_groups_show_three_icons_and_a_count_from_three_units(self):
+        tile = self.homes[1]
+        planet_id = tile.planets[0].planet_id
+        for kind in ('infantry', 'mech'):
+            for count in (1, 2, 3, 5):
+                tile.units = [Unit(f'{kind}-{index}', kind, 'sol', 'blu',
+                                   UnitLocation(Region.PLANET, planet_id=planet_id))
+                              for index in range(count)]
+                placements = layout_units(tile, True)
+                self.assertEqual(len(placements), min(count, 3))
+                self.assertEqual(sum(len(placement.units) for placement in placements), count)
+                if count < 3:
+                    self.assertTrue(all(placement.badge_count is None for placement in placements))
+                else:
+                    self.assertEqual(placements[-1].badge_count, count)
+
     def test_inventory_separates_planet_garrisons(self):
         tile = self.homes[16]
         inventory = system_inventory(tile)
