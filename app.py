@@ -73,6 +73,8 @@ class BoardWindow(arcade.Window):
         self.turn_order = TurnOrder(self.player_panel.players, strategy_enabled=not smoke)
         self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
         self.strategy_panel = StrategyPanel()
+        self.dragging_modal = None
+        self.strategy_hover_system = None
         self.strategy_view = False
         self.roster = PlayerRoster()
         self.show_planet_control = True
@@ -207,6 +209,8 @@ class BoardWindow(arcade.Window):
 
     @property
     def planet_hover_system(self):
+        if self.strategy_modal:
+            return self.strategy_hover_system
         planet_id = self.player_panel.hovered_planet_id
         if planet_id is None:
             return None
@@ -458,10 +462,12 @@ class BoardWindow(arcade.Window):
             set(self.strategy.session.payment_planets) if self.strategy.session and self.strategy.session.stage == 'leadership'
             else set(self.movement.session.production_planets)
             if self.movement.session and self.movement.session.stage == 'production' else set())
-        self.player_panel.draw(self)
+        self.player_panel.draw(self, show_details=False)
         self.roster.draw(self)
         if not self.strategy_modal:
             self.roster.draw_details(self)
+        if self.player_panel.hovered_planet is not None:
+            self.player_panel.draw_details(self)
         if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
             self.combat_panel.draw(self, self.movement.session)
         if self.strategy_modal:
@@ -949,6 +955,11 @@ class BoardWindow(arcade.Window):
     def on_mouse_motion(self, x, y, dx, dy):
         self.roster.hover(x, y)
         self.player_panel.hover(x, y)
+        if self.strategy_modal:
+            self.strategy_panel.update_hover(x, y)
+            self.strategy_hover_system = self.strategy_panel.hover_system
+        else:
+            self.strategy_hover_system = None
         self.hover = None if self.focus_view else self.pick(x, y)
         hit = self.unit_renderer.hit_test(x, y) if x < self.width - self.sidebar and self.player_panel.HEIGHT <= y < self.height - 80 else None
         inventory_hit = self.system_panel.hit_test(x, y)
@@ -958,6 +969,9 @@ class BoardWindow(arcade.Window):
         self.sync_turn_action()
         if self.strategy_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
+                if self.strategy_panel.drag_header(x, y):
+                    self.dragging_modal = 'strategy'
+                    return
                 action = self.strategy_panel.hit_test(x, y)
                 if action:
                     self.handle_strategy_action(action)
@@ -997,6 +1011,9 @@ class BoardWindow(arcade.Window):
         if self.token_context and self.token_context[0] != self.selected:
             self.token_context = None
         if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
+            if self.combat_panel.drag_header(x, y):
+                self.dragging_modal = 'combat'
+                return
             action = self.combat_panel.hit_test(x, y)
             if action:
                 try:
@@ -1173,12 +1190,26 @@ class BoardWindow(arcade.Window):
                 self.last_click = (picked, now)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+        if self.dragging_modal:
+            if buttons & arcade.MOUSE_BUTTON_LEFT:
+                panel = self.strategy_panel if self.dragging_modal == 'strategy' else self.combat_panel
+                panel.move(dx, dy)
+                if self.dragging_modal == 'strategy':
+                    self.strategy_panel.update_hover(x, y)
+                    self.strategy_hover_system = self.strategy_panel.hover_system
+            else:
+                self.dragging_modal = None
+            return
         if self.strategy_modal or x < self.roster.WIDTH:
             return
         if not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and x < self.width - self.sidebar and y >= self.player_panel.HEIGHT:
             scale = self.fit_scale * self.zoom
             self.map_center[0] -= dx / scale
             self.map_center[1] -= dy / scale
+
+    def on_mouse_release(self, x, y, button, modifiers):
+        if button == arcade.MOUSE_BUTTON_LEFT:
+            self.dragging_modal = None
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
         if self.strategy_modal:

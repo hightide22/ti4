@@ -13,6 +13,18 @@ class CombatPanel:
         self.advance_hit = None
         self.assignment_hits = []
         self.action_hits = []
+        self.offset = [0.0, 0.0]
+        self.bounds = None
+
+    def drag_header(self, x, y):
+        if not self.bounds:
+            return False
+        left, right, bottom, top = self.bounds
+        return left <= x <= min(right, left + 370) and top - 68 <= y <= top - 8
+
+    def move(self, dx, dy):
+        self.offset[0] += dx
+        self.offset[1] += dy
 
     def hit_test(self, x, y):
         if self.advance_hit and self.advance_hit[0] <= x <= self.advance_hit[1] and self.advance_hit[2] <= y <= self.advance_hit[3]:
@@ -102,7 +114,11 @@ class CombatPanel:
         arcade.draw_lrbt_rectangle_filled(0, window.width, 0, window.height, (3, 7, 14, 218))
         width = min(1180, window.width - 56)
         height = min(760, window.height - 56)
-        left, bottom = (window.width - width) / 2, (window.height - height) / 2
+        base_left, base_bottom = (window.width - width) / 2, (window.height - height) / 2
+        left = max(0, min(window.width - width, base_left + self.offset[0]))
+        bottom = max(0, min(window.height - height, base_bottom + self.offset[1]))
+        self.offset[:] = [left - base_left, bottom - base_bottom]
+        self.bounds = (left, left + width, bottom, bottom + height)
         arcade.draw_lrbt_rectangle_filled(left, left + width, bottom, bottom + height, (13, 24, 39))
         arcade.draw_lrbt_rectangle_outline(left, left + width, bottom, bottom + height, (75, 138, 166), 2)
         title = 'GROUND COMBAT' if session.combat_type == 'ground' else 'SPACE COMBAT'

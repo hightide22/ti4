@@ -30,18 +30,47 @@ class StrategyPanel:
         self.page = 0
         self.page_key = None
         self.bounds = None
+        self.offset = [0.0, 0.0]
+        self.mouse = None
+        self.hover_action = None
+        self.hover_system = None
+        self.hover_system_hits = []
+
+    def drag_header(self, x, y):
+        if not self.bounds:
+            return False
+        left, right, bottom, top = self.bounds
+        return left <= x <= min(right, left + 390) and top - 72 <= y <= top - 8
+
+    def move(self, dx, dy):
+        self.offset[0] += dx
+        self.offset[1] += dy
+
+    def update_hover(self, x, y):
+        self.mouse = (x, y)
+        self.hover_action = next((a for a, l, r, b, t in reversed(self.hits)
+                                  if l <= x <= r and b <= y <= t), None)
+        self.hover_system = next((position for l, r, b, t, position in reversed(self.hover_system_hits)
+                                  if l <= x <= r and b <= y <= t), None)
 
     def hit_test(self, x, y):
         return next((a for a, l, r, b, t in reversed(self.hits) if l <= x <= r and b <= y <= t), None)
 
     def button(self, w, action, label, x, y, width, enabled=True, selected=False):
+        hovered = action == self.hover_action
         arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + 32,
-                                         (37, 85, 89) if selected else CARD if enabled else (28, 33, 43))
+                                         (48, 113, 117) if hovered else (37, 85, 89) if selected else CARD if enabled else (28, 33, 43))
         arcade.draw_lrbt_rectangle_outline(x, x + width, y, y + 32,
-                                          ACCENT if selected else (58, 86, 104), 1)
+                                          ACCENT if selected or hovered else (58, 86, 104), 2 if hovered else 1)
         w.text(('strategy_button', action), label, x + 9, y + 10, 10, INK if enabled else MUTED)
         if enabled:
             self.hits.append((action, x, x + width, y, y + 32))
+            if action and action[0] == 'build':
+                planet_id = action[1]
+                position = next((tile.position for tile in w.board.values()
+                                 if any(p.planet_id == planet_id for p in tile.planets)), None)
+                if position is not None:
+                    self.hover_system_hits.append((x, x + width, y, y + 32, position))
 
     def options(self, w, options, x, y, width, size=5):
         self.page = min(self.page, max(0, (len(options) - 1) // size))
@@ -54,12 +83,17 @@ class StrategyPanel:
 
     def draw(self, w, turn, left=None):
         self.hits.clear()
+        self.hover_system_hits.clear()
         s = w.strategy.session
         draft = turn.strategy_selection
         width = min(1060 if draft else 830, w.width - 48)
         height = min(730, w.height - 48) if draft else min(555, w.height - w.player_panel.HEIGHT - 48)
-        x = (w.width - width) / 2
-        bottom = (w.height - height) / 2 if draft else w.player_panel.HEIGHT + (w.height - w.player_panel.HEIGHT - height) / 2
+        base_x = (w.width - width) / 2
+        base_bottom = (w.height - height) / 2 if draft else w.player_panel.HEIGHT + (w.height - w.player_panel.HEIGHT - height) / 2
+        x = max(0, min(w.width - width, base_x + self.offset[0]))
+        floor = 0 if draft else w.player_panel.HEIGHT
+        bottom = max(floor, min(w.height - height, base_bottom + self.offset[1]))
+        self.offset[:] = [x - base_x, bottom - base_bottom]
         top = bottom + height
         self.bounds = (x, x + width, bottom, top)
         arcade.draw_lrbt_rectangle_filled(0, w.width, w.player_panel.HEIGHT if not draft else 0, w.height, (4, 9, 18, 205))
@@ -67,9 +101,13 @@ class StrategyPanel:
         arcade.draw_lrbt_rectangle_outline(x, x + width, bottom, top, (78, 138, 156), 2)
         if draft:
             self.draw_draft(w, turn, x, bottom, width, height)
+            if self.mouse:
+                self.update_hover(*self.mouse)
             return
         if not s:
             self.draw_owned(w, turn, x, bottom, width, height)
+            if self.mouse:
+                self.update_hover(*self.mouse)
             return
         key = (s.card, s.player.faction, s.stage, s.builds_left)
         if key != self.page_key:
@@ -85,6 +123,8 @@ class StrategyPanel:
         self.draw_stage(w, s, rx, y, rw, bottom)
         if w.movement_error:
             w.text('strategy_error', w.movement_error, x + 22, bottom + 18, 10, (248, 151, 130), width - 44)
+        if self.mouse:
+            self.update_hover(*self.mouse)
 
     def draw_draft(self, w, turn, x, bottom, width, height):
         top = bottom + height

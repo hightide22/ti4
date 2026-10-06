@@ -103,7 +103,7 @@ class PlayerPanel:
             return self.player.planets[self.hovered_planet].planet.planet_id
         return None
 
-    def draw(self, window):
+    def draw(self, window, show_details=True):
         self.controls.clear()
         width = window.width - window.sidebar
         height = self.HEIGHT
@@ -136,7 +136,7 @@ class PlayerPanel:
             self.button(window, ('cards', 1), '>', reserve_left - 37, 103, 24, height=22)
         for slot, index in enumerate(range(self.card_offset, min(len(self.player.planets), self.card_offset + slots))):
             self.draw_planet(window, index, 16 + slot * (card_width + gap), 12, card_width, 86)
-        if self.hovered_planet is not None and self.hovered_planet < len(self.player.planets):
+        if show_details and self.hovered_planet is not None and self.hovered_planet < len(self.player.planets):
             self.draw_details(window)
 
     def draw_currencies(self, window, x, y, width):
