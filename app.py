@@ -1418,6 +1418,15 @@ class BoardWindow(arcade.Window):
                 self.last_click = (picked, now)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+        if (not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and
+                self.roster.WIDTH <= x < self.width - self.sidebar and
+                self.player_panel.HEIGHT <= y < self.height - 80):
+            scale = self.fit_scale * self.zoom
+            self.map_center[0] -= dx / scale
+            self.map_center[1] -= dy / scale
+            self.target_map_center[0] -= dx / scale
+            self.target_map_center[1] -= dy / scale
+            return
         if self.dragging_modal:
             if buttons & arcade.MOUSE_BUTTON_LEFT:
                 if self.dragging_modal == 'strategy_card':
@@ -1433,12 +1442,6 @@ class BoardWindow(arcade.Window):
             return
         if self.strategy_modal or (self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection')) or x < self.roster.WIDTH:
             return
-        if not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and x < self.width - self.sidebar and y >= self.player_panel.HEIGHT:
-            scale = self.fit_scale * self.zoom
-            self.map_center[0] -= dx / scale
-            self.map_center[1] -= dy / scale
-            self.target_map_center[0] -= dx / scale
-            self.target_map_center[1] -= dy / scale
 
     def on_mouse_release(self, x, y, button, modifiers):
         if button == arcade.MOUSE_BUTTON_LEFT:

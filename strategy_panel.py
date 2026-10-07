@@ -312,13 +312,16 @@ class StrategyPanel:
                 if s.selected_system is not None:
                     title = f'{w.board[s.selected_system].name} selected · choose a planet next'
                 w.text('strategy_map_help', title, x, y, 13, INK if eligible else MUTED, width)
+                if s.stage in ('diplomacy_system', 'diplomacy_secondary_system') and eligible:
+                    w.text('diplomacy_pan_hint', 'Right/middle-drag to pan the map',
+                           x, y - 40, 9, MUTED, width)
             if not eligible and s.stage != 'warfare_system':
                 self.button(w, ('continue',), 'CONTINUE', x, foot, width)
             elif not eligible:
                 w.text('strategy_no_system', 'No eligible systems.', x, y, 12, MUTED)
                 self.button(w, ('continue',), 'CONTINUE', x, foot, width)
         elif s.stage == 'ready_planets':
-            choices = [c for c in s.player.planets if c.exhausted]
+            choices = ctl.readyable_planets(s.player)
             ready_title = (f'Ready planets · {len(s.ready_planets)}/2' if width < 250 else
                            f'Ready up to 2 planets · selected {len(s.ready_planets)}/2')
             w.text('strategy_ready_title', ready_title, x, y, 12, GOLD, width)

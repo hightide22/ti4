@@ -155,18 +155,43 @@ def main():
                                if diplomacy_owner.faction in tile.planet_owners.values() and tile.number != 18)
         remote_system = next(tile for tile in w.board.values()
                              if tile.position != selected_system.position and tile.planets and
-                             diplomacy_owner.faction not in tile.planet_owners.values())
+                             not tile.planet_owners)
+        stale_system = next(tile for tile in w.board.values()
+                            if tile.position not in (selected_system.position, remote_system.position)
+                            and tile.planets and not tile.planet_owners)
         remote_planet = remote_system.planets[0]
         remote_system.planet_owners[remote_planet.planet_id] = diplomacy_owner.faction
         remote_card = PlanetCard(remote_planet, exhausted=True)
+        stale_card = PlanetCard(stale_system.planets[0], exhausted=True)
         diplomacy_owner.planets.append(remote_card)
+        diplomacy_owner.planets.append(stale_card)
         for planet_card in diplomacy_owner.planets:
             planet_card.exhausted = True
         w.strategy.start(2)
         w.sync_strategy_actor()
-        w.strategy.select_system(selected_system.position)
+        render('diplomacy-map-selection')
+        before_pan = tuple(w.map_center)
+        w.on_mouse_drag(w.roster.WIDTH + 160, 420, 28, -16, arcade.MOUSE_BUTTON_MIDDLE, 0)
+        assert tuple(w.map_center) != before_pan, 'The map should pan while the Diplomacy window is open.'
+        sx, sy = w.screen(selected_system.position)
+        bounds = w.strategy_panel.bounds
+        assert not (bounds[0] <= sx <= bounds[1] and bounds[2] <= sy <= bounds[3]), \
+            'The selected controlled system should remain clickable beside the modal.'
+        assert w.pick(sx, sy) == selected_system.position
+        w.on_mouse_press(sx, sy, arcade.MOUSE_BUTTON_LEFT, 0)
+        assert w.strategy.session.stage == 'ready_planets'
+        assert w.strategy.session.selected_system == selected_system.position
+        assert all(player.faction in selected_system.command_tokens
+                   for player in w.player_panel.players if player is not diplomacy_owner)
         render('diplomacy-ready-planets')
         remote_action = ('ready_planet', remote_planet.planet_id)
+        displayed_planets = {hit[0][1] for hit in w.strategy_panel.hits if hit[0][0] == 'ready_planet'}
+        controlled_exhausted = {card.planet.planet_id for card in diplomacy_owner.planets
+                                if card.exhausted and
+                                w.strategy.planet_system(card.planet.planet_id).planet_owners.get(
+                                    card.planet.planet_id) == diplomacy_owner.faction}
+        assert displayed_planets == controlled_exhausted
+        assert stale_card.planet.planet_id not in displayed_planets
         remote_hit = next(hit for hit in w.strategy_panel.hits if hit[0] == remote_action)
         _, left, right, card_bottom, card_top = remote_hit
         w.on_mouse_motion((left + right) / 2, (card_bottom + card_top) / 2, 0, 0)

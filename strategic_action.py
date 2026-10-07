@@ -91,7 +91,7 @@ class StrategyController:
             return 'No token in the strategy pool.'
         if s.card == 1 and not command_tokens_in_reinforcements(s.player, self.board):
             return 'No command tokens remain in reinforcements.'
-        if s.card == 2 and not any(card.exhausted for card in s.player.planets):
+        if s.card == 2 and not self.readyable_planets(s.player):
             return 'No exhausted planets to ready.'
         if s.card == 3 and (not self.action_cards or not self.action_cards.can_draw(s.player, 2)):
             return 'Your hand is full or the action-card deck is empty.'
@@ -195,7 +195,8 @@ class StrategyController:
             if s.player.faction not in tile.planet_owners.values():
                 raise ValueError('Choose a system with a planet you control.')
             if s.stage == 'diplomacy_secondary_system' and not any(
-                    card.exhausted and self.planet_system(card.planet.planet_id) is tile for card in s.player.planets):
+                    self.planet_system(card.planet.planet_id) is tile
+                    for card in self.readyable_planets(s.player)):
                 raise ValueError('Choose a system with an exhausted planet you control.')
             if s.stage == 'diplomacy_system':
                 for player in self.turn.players:
@@ -233,8 +234,8 @@ class StrategyController:
         if s.stage == 'diplomacy_secondary_system':
             return {tile.position for tile in self.board.values()
                     if any(
-                        card.exhausted and self.planet_system(card.planet.planet_id) is tile
-                        for card in s.player.planets)}
+                        self.planet_system(card.planet.planet_id) is tile
+                        for card in self.readyable_planets(s.player))}
         if s.stage == 'warfare_system':
             return {tile.position for tile in self.board.values() if s.player.faction in tile.command_tokens}
         if s.stage == 'construction':
@@ -245,6 +246,17 @@ class StrategyController:
     def planet_system(self, planet_id):
         return next((tile for tile in self.board.values()
                      if any(planet.planet_id == planet_id for planet in tile.planets)), None)
+
+    def readyable_planets(self, player=None):
+        player = player or self.player
+        result = []
+        for card in player.planets:
+            planet_id = card.planet.planet_id
+            tile = self.planet_system(planet_id)
+            if (card.exhausted and tile is not None and
+                    tile.planet_owners.get(planet_id) == player.faction):
+                result.append(card)
+        return result
 
     def buildable_planets(self, selected_only=True):
         s = self.session
@@ -283,8 +295,8 @@ class StrategyController:
 
     def toggle_ready(self, planet_id):
         s = self.session
-        card = next((c for c in s.player.planets if c.planet.planet_id == planet_id), None)
-        if s.stage != 'ready_planets' or not card or not card.exhausted:
+        if s.stage != 'ready_planets' or not any(
+                card.planet.planet_id == planet_id for card in self.readyable_planets(s.player)):
             return
         if planet_id in s.ready_planets:
             s.ready_planets.remove(planet_id)
@@ -294,7 +306,9 @@ class StrategyController:
     def confirm_ready(self):
         s = self.session
         for card in s.player.planets:
-            if card.planet.planet_id in s.ready_planets:
+            tile = self.planet_system(card.planet.planet_id)
+            if (card.planet.planet_id in s.ready_planets and tile and
+                    tile.planet_owners.get(card.planet.planet_id) == s.player.faction):
                 card.exhausted = False
         self._participant_done()
 
