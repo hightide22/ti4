@@ -30,6 +30,7 @@ PANEL = (14, 23, 38)
 INK = (223, 232, 244)
 MUTED = (130, 151, 177)
 ACCENT = (100, 207, 224)
+COLLAPSED_SIDEBAR_WIDTH = 38
 
 
 def world(position):
@@ -77,6 +78,8 @@ class BoardWindow(arcade.Window):
         self.strategy_hover_system = None
         self.strategy_view = False
         self.roster = PlayerRoster()
+        self.inspector_visible = True
+        self.inspector_toggle_hit = None
         self.show_planet_control = True
         self.control_toggle_hit = None
         self.turn_history_size = 0
@@ -105,7 +108,20 @@ class BoardWindow(arcade.Window):
 
     @property
     def sidebar(self):
+        if not self.inspector_visible:
+            return COLLAPSED_SIDEBAR_WIDTH
         return min(340, max(320, self.width * .24))
+
+    def toggle_inspector(self):
+        center = self.map_center[:]
+        zoom = self.zoom
+        target_zoom = self.target_zoom
+        self.inspector_visible = not self.inspector_visible
+        self.fit()
+        self.map_center = center
+        self.zoom, self.target_zoom = zoom, target_zoom
+        self.system_panel.reset()
+        self.movement_panel.reset()
 
     @property
     def viewport_center(self):
@@ -454,6 +470,13 @@ class BoardWindow(arcade.Window):
                       (self.width - self.sidebar) / 2, self.height * .55, 13, MUTED)
         left = self.width - self.sidebar
         arcade.draw_lrbt_rectangle_filled(left, self.width, 0, self.height, PANEL)
+        tab_bottom = self.height - 110
+        if self.inspector_visible:
+            toggle_left, toggle_right = left - 17, left + 17
+            toggle_glyph = '›'
+        else:
+            toggle_left, toggle_right = left + 2, self.width - 2
+            toggle_glyph = '‹'
         arcade.draw_lrbt_rectangle_filled(0, left, self.height - 80, self.height, (10, 17, 29))
         self.text('title', 'TWILIGHT IMPERIUM IV', 30, self.height - 34, 21)
         self.text('subtitle', f'Game board · {len(self.board.home_tiles)} players · {len(self.board)} systems', 30, self.height - 61, 12, MUTED)
@@ -489,7 +512,16 @@ class BoardWindow(arcade.Window):
         self.text('pass_turn_button', button_label, turn_left + 10, turn_bottom + 10, 9,
                   INK if enabled else MUTED)
         self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled else None
-        if self.movement.session:
+        if not self.inspector_visible:
+            self.system_panel.hits.clear()
+            self.system_panel.remove_token_hit = None
+            self.system_panel.add_token_hit = None
+            self.system_panel.strategy_tab_hit = None
+            self.movement_panel.hits.clear()
+            self.movement_panel.buttons.clear()
+            self.movement_panel.route_hits.clear()
+            self.movement_panel.source_hits.clear()
+        elif self.movement.session:
             self.movement_panel.draw(self, self.movement.session, left)
             if self.movement_error:
                 self.text('movement_error', self.movement_error, left + 18, 112, 10, (245, 142, 128), self.sidebar - 36)
@@ -498,6 +530,13 @@ class BoardWindow(arcade.Window):
             if self.movement_error:
                 self.text('movement_error', self.movement_error, left + 18, 34, 10,
                           (245, 142, 128), self.sidebar - 36)
+        arcade.draw_lrbt_rectangle_filled(toggle_left, toggle_right, tab_bottom, tab_bottom + 36,
+                                           (25, 45, 63))
+        arcade.draw_lrbt_rectangle_outline(toggle_left, toggle_right, tab_bottom, tab_bottom + 36,
+                                            (77, 151, 151), 1)
+        self.text('inspector_toggle_glyph', toggle_glyph,
+                  (toggle_left + toggle_right) / 2 - 5, tab_bottom + 7, 19, ACCENT)
+        self.inspector_toggle_hit = (toggle_left, toggle_right, tab_bottom, tab_bottom + 36)
         self.player_panel.production_planets = (
             set(self.strategy.session.payment_planets) if self.strategy.session and self.strategy.session.stage == 'leadership'
             else set(self.movement.session.production_planets)
@@ -1034,6 +1073,11 @@ class BoardWindow(arcade.Window):
                 else:
                     self.strategy_tray_click(x, y)
             return
+        if button == arcade.MOUSE_BUTTON_LEFT and self.inspector_toggle_hit and all((
+                self.inspector_toggle_hit[0] <= x <= self.inspector_toggle_hit[1],
+                self.inspector_toggle_hit[2] <= y <= self.inspector_toggle_hit[3])):
+            self.toggle_inspector()
+            return
         if self.roster.WIDTH > x and self.player_panel.HEIGHT <= y < self.height - 80:
             action = self.roster.hit_test(x, y)
             if button == arcade.MOUSE_BUTTON_LEFT and action and not self.movement.session:
@@ -1280,6 +1324,8 @@ class BoardWindow(arcade.Window):
         if x < self.width - self.sidebar and y < self.player_panel.HEIGHT:
             return
         if x >= self.width - self.sidebar:
+            if not self.inspector_visible:
+                return
             if self.movement.session:
                 self.movement_panel.scroll_by(-scroll_y * 40)
             else:
