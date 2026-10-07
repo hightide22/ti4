@@ -35,7 +35,7 @@ class ActionCardPanel:
         player = next(p for p in participants if p.faction == self.player_faction)
         hand = player.action_cards
         width = min(650, window.width - 48)
-        row_height = 74
+        row_height = 90
         visible_rows = max(1, (len(hand) + 1) // 2)
         has_tabs = len(participants) > 1
         height = min(window.height - 48, 96 + visible_rows * row_height + (36 if has_tabs else 0))
@@ -80,8 +80,8 @@ class ActionCardPanel:
                                                 'effect': 'This card is not implemented yet.'})
             playable = bool(window.action_cards.can_play(player.faction, alias, session))
             fill = SELECTED if playable else CARD
-            arcade.draw_lrbt_rectangle_filled(x, x + cell_width, card_y - 62, card_y, fill)
-            arcade.draw_lrbt_rectangle_outline(x, x + cell_width, card_y - 62, card_y,
+            arcade.draw_lrbt_rectangle_filled(x, x + cell_width, card_y - 78, card_y, fill)
+            arcade.draw_lrbt_rectangle_outline(x, x + cell_width, card_y - 78, card_y,
                                                ACCENT if playable else BORDER, 2 if playable else 1)
             status = 'PLAY NOW' if playable else 'WAIT'
             window.text(('action_card_status', index), status, x + cell_width - 73,
@@ -89,8 +89,8 @@ class ActionCardPanel:
             window.text(('action_card_name', index), card.get('name', alias), x + 10,
                         card_y - 18, 11, INK, cell_width - 100)
             window.text(('action_card_window', index), card['window'], x + 10,
-                        card_y - 36, 8, ACCENT if playable else MUTED, cell_width - 20)
+                        card_y - 39, 8, ACCENT if playable else MUTED, cell_width - 20)
             window.text(('action_card_effect', index), card['effect'], x + 10,
-                        card_y - 52, 8, INK if playable else MUTED, cell_width - 20)
+                        card_y - 59, 8, INK if playable else MUTED, cell_width - 20)
             if playable:
-                self.hits.append((('play', index), x, x + cell_width, card_y - 62, card_y))
+                self.hits.append((('play', index), x, x + cell_width, card_y - 78, card_y))

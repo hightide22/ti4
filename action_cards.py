@@ -108,8 +108,7 @@ class ActionCardController:
         combat_start = self._combat_start(session)
         if alias == 'flank_speed':
             return (faction == session.player.faction and session.stage == 'movement' and
-                    not session.strategic_production and
-                    any(source.ships for source in session.sources.values()))
+                    not session.strategic_production)
         if alias == 'morale_boost':
             return combat_start
         if alias == 'fighter_prototype':

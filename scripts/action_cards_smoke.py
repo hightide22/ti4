@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import arcade
 
 from app import BoardWindow
+from movement import capital_ship
 from units import Region, Unit, UnitLocation
 from ui_theme import VARIANT
 
@@ -29,21 +30,33 @@ def main():
         window.player_panel.active = window.player_panel.players.index(player)
         home = next(tile for tile in window.board.values()
                     if any(unit.owner == player.faction for unit in tile.units))
-        target = next(tile for tile in window.movement.neighbors(home)
+        target = next(tile for tile in window.board.values()
                       if not tile.command_tokens and
-                      any(window.movement.route(home, tile, unit, player)
-                          for unit in home.units if unit.owner == player.faction))
+                      not any(window.movement.route(origin, tile, unit, player)
+                              for origin in window.board.values() for unit in origin.units
+                              if unit.owner == player.faction and
+                              capital_ship(unit)) and
+                      any(window.movement.route(origin, tile, unit, player, move_bonus=1)
+                          for origin in window.board.values() for unit in origin.units
+                          if unit.owner == player.faction and
+                          capital_ship(unit)))
         player.action_cards[:] = ['flank_speed']
         window.movement.activate(player, target.position)
         window.selected = target.position
+        assert not window.movement.session.sources
         window.on_draw()
         control = next(hit for hit in window.movement_panel.buttons if hit[0] == ('action_cards',))
         click(window, control)
         assert window.action_card_panel.open
+        target_label = window.labels['move_target']
+        target_layout = (target_label.x, target_label.y, target_label.font_size)
         playable = next(hit for hit in window.action_card_panel.hits if hit[0] == ('play', 0))
         arcade.get_image().save(output / 'action-cards-movement.png')
         click(window, playable)
+        target_label = window.labels['move_target']
+        assert (target_label.x, target_label.y, target_label.font_size) == target_layout
         assert window.movement.session.movement_bonus == 1
+        assert window.movement.session.sources
         assert player.action_cards == []
 
         session = window.movement.session

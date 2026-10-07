@@ -102,6 +102,7 @@ class BoardWindow(arcade.Window):
         self.hover = None
         self.zoom = self.target_zoom = 1.0
         self.map_center = [0.0, 0.0]
+        self.target_map_center = [0.0, 0.0]
         self.frames = 0
         self.smoke = smoke
         rng = random.Random(4)
@@ -121,7 +122,39 @@ class BoardWindow(arcade.Window):
         xs, ys = zip(*coords)
         self.fit_scale = min((self.width - self.sidebar - self.roster.WIDTH - 80) / (max(xs) - min(xs) + 2), (self.height - 180 - self.player_panel.HEIGHT) / (max(ys) - min(ys) + math.sqrt(3)))
         self.map_center = [(max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2]
+        self.target_map_center = self.map_center[:]
         self.zoom = self.target_zoom = 1.0
+
+    def player_system_positions(self, player):
+        """List systems containing a player's planets, units, home system or command token."""
+        if player is None:
+            return []
+        faction = player.faction
+        return [tile.position for tile in self.board.values()
+                if (tile.player == faction or faction in tile.planet_owners.values() or
+                    faction in tile.command_tokens or
+                    any(unit.owner == faction for unit in tile.units))]
+
+    def frame_player_systems(self, player):
+        """Smoothly frame every map system that currently contains this player's assets."""
+        positions = self.player_system_positions(player)
+        if not positions:
+            return
+        coords = [world(position) for position in positions]
+        xs, ys = zip(*coords)
+        bounds_width = max(xs) - min(xs) + 2
+        bounds_height = max(ys) - min(ys) + math.sqrt(3)
+        available_width = max(1, self.width - self.sidebar - self.roster.WIDTH - 80)
+        available_height = max(1, self.height - 180 - self.player_panel.HEIGHT)
+        required_scale = min(available_width / bounds_width, available_height / bounds_height)
+        self.target_zoom = min(3.5, max(.55, required_scale / self.fit_scale))
+        self.target_map_center = [(max(xs) + min(xs)) / 2,
+                                  (max(ys) + min(ys)) / 2]
+        center = self.target_map_center
+        self.selected = min(positions, key=lambda position: math.dist(world(position), center))
+        self.system_panel.reset()
+        self.focus_view = False
+        self.focus_zoom = 1.0
 
     def screen(self, position):
         x, y = world(position)
@@ -447,6 +480,7 @@ class BoardWindow(arcade.Window):
                 self.turn_order.begin_strategy_phase()
                 self.strategy_view = True
         self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
+        self.frame_player_systems(self.turn_order.active_player)
         self.player_panel.source_pool = None
         self.player_panel.card_offset = 0
         self.player_panel.hovered_planet = None
@@ -524,7 +558,8 @@ class BoardWindow(arcade.Window):
         self.text('title', 'TWILIGHT / IV', 22, self.height - 31, 18)
         self.text('subtitle', f'{VARIANT}  /  {len(self.board.home_tiles)} players', 22, self.height - 55, 10, MUTED)
         self.text('zoom', f'{self.focus_zoom if self.focus_view else self.zoom:.1f}×', left - 62, self.height - 75, 11, ACCENT)
-        control_left, control_right = left - 42, left - 4
+        turn_left, turn_right = left - 250, left - 115
+        control_left, control_right = turn_right + 8, turn_right + 46
         control_bottom = self.height - 58
         button(self, 'control_toggle', '', control_left, control_bottom,
                control_right - control_left, 34, selected=self.show_planet_control)
@@ -536,18 +571,12 @@ class BoardWindow(arcade.Window):
         if self.show_planet_control:
             arcade.draw_circle_filled(icon_x, icon_y, 2.5, icon_color)
         self.control_toggle_hit = (control_left, control_right, self.height - 56, self.height - 24)
-        if control_left - 145 <= self.mouse_position[0] <= control_right and \
-                control_bottom - 5 <= self.mouse_position[1] <= control_bottom + 39:
-            self.text('control_toggle_hint',
-                      f'Planet borders: {"on" if self.show_planet_control else "off"}',
-                      control_left - 110, self.height - 104, 9, MUTED, max_width=105)
         active_player = self.turn_order.active_player
         active_faction = active_player.faction.upper() if active_player else 'NO PLAYER'
         allocation_status = (' · RESOLVING ' + self.strategy.player.faction.upper() if self.strategy.session else
                              ' · COMMAND ALLOCATION' if self.turn_order.command_allocation else '')
         self.text('turn_status', f'ROUND {self.turn_order.round_number} · {active_faction}{allocation_status}',
                   left - 370, self.height - 19, 9, ACCENT if self.turn_order.action_used else MUTED, max_width=364)
-        turn_left, turn_right = left - 250, left - 115
         turn_bottom, turn_top = self.height - 58, self.height - 27
         pending_commands = active_player.pending_commands if active_player else 0
         enabled = (not self.movement.session and not pending_commands and
@@ -599,6 +628,9 @@ class BoardWindow(arcade.Window):
         self.unit_renderer.update(delta_time)
         self.sync_turn_action()
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
+        for axis in range(2):
+            shift = (self.target_map_center[axis] - self.map_center[axis]) * min(1, delta_time * 7)
+            self.map_center[axis] += shift
         self.frames += 1
         if self.smoke and self.frames == 5:
             preview_dir = ROOT / 'previews'
@@ -1301,6 +1333,7 @@ class BoardWindow(arcade.Window):
                     self.turn_order.begin_strategy_phase()
                     self.strategy_view = True
                 self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
+                self.frame_player_systems(self.turn_order.active_player)
                 self.player_panel.source_pool = None
                 self.player_panel.card_offset = 0
             return
@@ -1394,6 +1427,8 @@ class BoardWindow(arcade.Window):
             scale = self.fit_scale * self.zoom
             self.map_center[0] -= dx / scale
             self.map_center[1] -= dy / scale
+            self.target_map_center[0] -= dx / scale
+            self.target_map_center[1] -= dy / scale
 
     def on_mouse_release(self, x, y, button, modifiers):
         if button == arcade.MOUSE_BUTTON_LEFT:

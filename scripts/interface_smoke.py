@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import arcade
-from app import BoardWindow
+from app import BoardWindow, world
 from movement import Session, Snapshot
 from units import Unit, UnitLocation, Region, unit_profile
 from ui_theme import VARIANT
@@ -24,6 +24,56 @@ def main():
             w.on_draw()
             if name:
                 arcade.get_image().save(output / f'{name}.png')
+
+        # The compact map toggle sits directly beside the turn button and has no
+        # detached hover caption. Turn handoffs reorder and frame the next player.
+        render('turn-order-first-player')
+        toggle_bounds = w.control_toggle_hit
+        turn_bounds = w.turn_button_hit
+        assert toggle_bounds[1] - toggle_bounds[0] <= 40
+        assert 0 <= toggle_bounds[0] - turn_bounds[1] <= 10
+        w.mouse_position = ((toggle_bounds[0] + toggle_bounds[1]) / 2,
+                            (toggle_bounds[2] + toggle_bounds[3]) / 2)
+        render()
+        assert 'control_toggle_hint' not in w.labels
+        order = w.turn_order
+        original_initiative = order.strategy_initiative[:]
+        order.strategy_initiative = [1, 2, 0]
+        order.active_index = 1
+        assert w.roster.player_indices(w) == [1, 2, 0]
+        order.strategy_initiative = original_initiative
+        order.active_index = 0
+        first_index = order.active_index
+        next_index = (first_index + 1) % len(order.players)
+        next_player = order.players[next_index]
+        order.mark_action_completed()
+        w.pass_turn()
+        assert order.active_player is next_player
+        assert w.roster.player_indices(w)[0] == next_index
+        next_positions = w.player_system_positions(next_player)
+        next_coords = [world(position) for position in next_positions]
+        assert next_coords
+        assert w.target_map_center == [
+            (min(x for x, _ in next_coords) + max(x for x, _ in next_coords)) / 2,
+            (min(y for _, y in next_coords) + max(y for _, y in next_coords)) / 2,
+        ]
+        center_x, center_y = w.viewport_center
+        scale = w.fit_scale * w.target_zoom
+        radius = scale
+        for position in next_positions:
+            x, y = world(position)
+            screen_x = center_x + (x - w.target_map_center[0]) * scale
+            screen_y = center_y + (y - w.target_map_center[1]) * scale
+            assert w.roster.WIDTH <= screen_x - radius
+            assert screen_x + radius <= w.width - w.sidebar
+            assert w.player_panel.HEIGHT <= screen_y - radius
+            assert screen_y + radius <= w.height - 80
+        render('turn-order-next-player')
+        order.active_index = first_index
+        order.action_used = False
+        w.player_panel.active = first_index
+        w.frame_player_systems(order.active_player)
+        w.mouse_position = (-1, -1)
 
         player = w.player_panel.players[0]
         home = next(t for t in w.board.values() if any(u.owner == player.faction for u in t.units))

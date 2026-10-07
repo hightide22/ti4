@@ -44,6 +44,32 @@ class PlayerRoster:
         if previous != self.hovered:
             self.detail_offset = 0
 
+    @staticmethod
+    def player_indices(w):
+        """Return the visible roster order starting with the next player to act."""
+        order = w.turn_order
+        count = len(order.players)
+        if not count:
+            return []
+        if order.strategy_selection and order.strategy_pick_order:
+            upcoming = order.strategy_pick_order[order.strategy_pick_cursor:]
+            indices = list(dict.fromkeys(upcoming))
+            indices.extend(index for index in range(count) if index not in indices)
+            return indices
+
+        if order.command_allocation:
+            sequence = list(range(count))
+        else:
+            sequence = list(order.strategy_initiative or range(count))
+        active_index = order.active_index
+        if active_index in sequence:
+            start = sequence.index(active_index)
+            sequence = sequence[start:] + sequence[:start]
+        if not order.command_allocation:
+            sequence = ([index for index in sequence if index not in order.passed_indices] +
+                        [index for index in sequence if index in order.passed_indices])
+        return sequence
+
     def draw(self, w):
         self.hits.clear()
         top, bottom = w.height - 80, w.player_panel.HEIGHT
@@ -51,8 +77,10 @@ class PlayerRoster:
         arcade.draw_line(self.WIDTH, bottom, self.WIDTH, top, BORDER, 1)
         w.text('roster_title', 'PLAYERS / TURN ORDER', 14, top - 24, 10, MUTED)
         count = max(1, int((top - bottom - 45) // 113))
-        self.offset = min(self.offset, max(0, len(w.turn_order.players) - count))
-        for slot, index in enumerate(range(self.offset, min(len(w.turn_order.players), self.offset + count))):
+        indices = self.player_indices(w)
+        self.offset = min(self.offset, max(0, len(indices) - count))
+        visible_indices = indices[self.offset:self.offset + count]
+        for slot, index in enumerate(visible_indices):
             player = w.turn_order.players[index]
             row_top = top - 41 - slot * 113
             row_bottom = row_top - 104
@@ -77,7 +105,7 @@ class PlayerRoster:
             if w.turn_order.speaker is player:
                 w.player_panel.image('tokens/token_speaker.png', 183, row_top - 53, 34)
                 w.text(('speaker_badge', index), 'SPEAKER', 164, row_top - 81, 7, GOLD)
-        if len(w.turn_order.players) > count:
+        if len(indices) > count:
             w.text('roster_scroll', 'Scroll to see more players', 12, bottom + 8, 8, MUTED)
 
     def detail_lines(self, w, player):

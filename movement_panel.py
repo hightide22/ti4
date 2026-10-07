@@ -163,15 +163,18 @@ class MovementPanel:
         target = session.target
         window.text('move_header', 'WARFARE · SECONDARY PRODUCTION' if session.strategic_production else
                     'ACTIVATED SYSTEM', x, window.height - 26, 10, ACCENT)
-        window.text('move_target', target.name, x, window.height - 62, 14, INK, width)
+        # Keep a permanent title slot so the system name does not reflow when
+        # the contextual action-card button appears or disappears.
+        window.text('move_target', target.name, x, window.height - 62, 14, INK,
+                    max_width=width - 160)
         pool = 'strategic' if session.strategic_production else 'tactical'
         window.text('move_token', f'{session.player.faction.upper()} · {pool.title()} reserve: {session.player.command_pools[pool]}',
                     x, window.height - 90, 11, MUTED)
         playable_cards = window.action_cards.playable(session.player, session)
-        if playable_cards:
+        if session.player.action_cards:
             card_x, card_y = x + width - 151, window.height - 54
-            button(window, 'movement_action_cards', f'CARDS · {len(playable_cards)}',
-                   card_x, card_y, 133, 27, primary=True, size=9)
+            button(window, 'movement_action_cards', f'CARDS · {len(session.player.action_cards)}',
+                   card_x, card_y, 133, 27, primary=bool(playable_cards), size=9)
             self.buttons.append((('action_cards',), card_x, card_x + 133,
                                  card_y, card_y + 27))
         bottom = 164

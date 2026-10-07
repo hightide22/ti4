@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from action_cards import ActionCardController
 from board import load_board
-from movement import MovementController, Session, Snapshot
+from movement import MovementController, Session, Snapshot, capital_ship
 from player import create_players
 from strategic_action import StrategyController
 from turn_order import TurnOrder
@@ -19,24 +19,23 @@ class ActionCardTests(unittest.TestCase):
         self.sol = next(player for player in self.players if player.faction == 'sol')
 
     def test_flank_speed_unlocks_a_route_and_is_spent_on_play(self):
-        origin = next(tile for tile in self.board.values()
-                      if any(unit.owner == self.sol.faction and unit.kind == 'carrier'
-                             for unit in tile.units))
-        carrier = next(unit for unit in origin.units
-                       if unit.owner == self.sol.faction and unit.kind == 'carrier')
+        fleet = [(origin, unit) for origin in self.board.values() for unit in origin.units
+                 if unit.owner == self.sol.faction and capital_ship(unit)]
         target = next(tile for tile in self.board.values() if not tile.command_tokens and
-                      tile is not origin and
-                      self.movement.route(origin, tile, carrier, self.sol, 1) and
-                      not self.movement.route(origin, tile, carrier, self.sol, 0))
+                      not any(self.movement.route(origin, tile, unit, self.sol)
+                              for origin, unit in fleet) and
+                      any(self.movement.route(origin, tile, unit, self.sol, move_bonus=1)
+                          for origin, unit in fleet))
+        origin, ship = next((origin, unit) for origin, unit in fleet
+                            if self.movement.route(origin, target, unit, self.sol, move_bonus=1))
         session = self.movement.activate(self.sol, target.position)
         self.sol.action_cards.append('flank_speed')
-        self.assertFalse(origin.position in session.sources and
-                         carrier.unit_id in session.sources[origin.position].routes)
+        self.assertFalse(session.sources)
         self.assertTrue(self.cards.can_play(self.sol.faction, 'flank_speed', session))
 
         self.cards.play(self.sol, 0)
 
-        self.assertIn(carrier.unit_id, session.sources[origin.position].routes)
+        self.assertIn(ship.unit_id, session.sources[origin.position].routes)
         self.assertEqual(session.movement_bonus, 1)
         self.assertEqual(self.sol.action_cards, [])
         self.assertEqual(self.cards.discard, ['flank_speed'])
