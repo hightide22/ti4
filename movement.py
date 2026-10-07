@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from math import ceil
 import random
+from uuid import uuid4
 
 from player import PlanetCard
 from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile, unit_profiles
@@ -155,6 +156,10 @@ class Session:
     combat_rolls: dict[str, list[dict]] = field(default_factory=dict)
     combat_hits: dict[str, int] = field(default_factory=dict)
     combat_assignments: dict[str, list[str]] = field(default_factory=dict)
+    munitions_ready: set[str] = field(default_factory=set)
+    munitions_available: set[str] = field(default_factory=set)
+    munitions_spent_round: set[tuple[str, int]] = field(default_factory=set)
+    reroll_selected: dict[str, set[int]] = field(default_factory=dict)
     combat_needs_resolution: bool = False
     combat_type: str = 'space'
     space_combat_resolved: bool = False
@@ -292,6 +297,92 @@ class MovementController:
         player.command_pools['tactical'] -= 1
         tile.command_tokens.add(player.faction)
 
+    def orbital_drop(self, player, planet_id):
+        if player.faction != 'sol':
+            raise MovementError('Orbital Drop is a Sol faction ability')
+        if self.session:
+            raise MovementError('Finish the current action first')
+        if player.command_pools['strategic'] <= 0:
+            raise MovementError('Orbital Drop requires 1 token in the strategy pool')
+        target = next((tile for tile in self.board.values()
+                       if tile.planet_owners.get(planet_id) == player.faction and
+                       any(planet.planet_id == planet_id for planet in tile.planets)), None)
+        if target is None:
+            raise MovementError('Choose a planet you control')
+        infantry_count = sum(unit.owner == player.faction and unit.kind == 'infantry'
+                             for tile in self.board.values() for unit in tile.units)
+        if infantry_count + 2 > 12:
+            raise MovementError('Orbital Drop needs 2 infantry in your reinforcements')
+        snapshot = Snapshot.capture(self.board, player, self.players)
+        player.command_pools['strategic'] -= 1
+        for _ in range(2):
+            target.units.append(Unit(f'{player.faction}-orbital-{uuid4().hex}', 'infantry',
+                                     player.faction, player.color_code,
+                                     UnitLocation(Region.PLANET, planet_id=planet_id)))
+        self.history.append(UndoEntry(snapshot))
+        return target
+
+    @staticmethod
+    def fleet_supply(player):
+        return player.command_pools['fleet'] + (2 if player.faction == 'letnev' else 0)
+
+    @staticmethod
+    def combat_threshold(faction, profile):
+        return int(profile.get('combatHitsOn') or 10) + (1 if faction == 'jolnar' else 0)
+
+    def spend_munitions(self, faction):
+        session = self.session
+        if not session or session.stage != 'space_combat' or session.combat_type != 'space' or session.combat_needs_resolution:
+            raise MovementError('Munitions Reserves can only be used before a space-combat roll')
+        if faction != 'letnev' or faction not in session.combat_factions:
+            raise MovementError('Only the Barony of Letnev can use Munitions Reserves')
+        player = next((player for player in self.players if player.faction == faction), None)
+        if player is None or player.trade_goods < 2:
+            raise MovementError('Munitions Reserves costs 2 trade goods')
+        round_number = session.combat_round + 1
+        if (faction, round_number) in session.munitions_spent_round:
+            raise MovementError('Munitions Reserves has already been used this round')
+        player.trade_goods -= 2
+        session.munitions_spent_round.add((faction, round_number))
+        session.munitions_ready.add(faction)
+
+    def toggle_combat_reroll(self, faction, roll_index):
+        session = self.session
+        rolls = session.combat_rolls.get(faction, []) if session else []
+        if (not session or session.stage != 'space_combat' or not session.combat_needs_resolution or
+                faction not in session.munitions_available or roll_index < 0 or roll_index >= len(rolls)):
+            raise MovementError('No Munitions Reserves reroll is available for this die')
+        if rolls[roll_index].get('rerolled'):
+            raise MovementError('A die can only be rerolled once')
+        selected = session.reroll_selected.setdefault(faction, set())
+        if roll_index in selected:
+            selected.remove(roll_index)
+        else:
+            selected.add(roll_index)
+
+    def reroll_selected_combat_dice(self, faction):
+        session = self.session
+        selected = session.reroll_selected.get(faction, set()) if session else set()
+        if (not session or session.stage != 'space_combat' or not session.combat_needs_resolution or
+                faction not in session.munitions_available or not selected):
+            raise MovementError('Select at least one eligible die to reroll')
+        for index in sorted(selected):
+            roll = session.combat_rolls[faction][index]
+            value = self.roll_d10(session)
+            roll['value'] = value
+            roll['hit'] = value >= self.combat_threshold(faction, unit_profile(
+                next(unit for unit in session.target.units if unit.unit_id == roll['unit_id'])))
+            roll['rerolled'] = True
+        session.munitions_available.remove(faction)
+        session.reroll_selected.pop(faction, None)
+        outgoing_hits = {owner: sum(bool(roll['hit']) for roll in session.combat_rolls.get(owner, []))
+                         for owner in session.combat_factions}
+        session.combat_hits = {owner: sum(hits for shooter, hits in outgoing_hits.items()
+                                           if shooter != owner)
+                               for owner in session.combat_factions}
+        session.combat_assignments = {owner: [] for owner in session.combat_factions}
+        return len(selected)
+
     def confirm(self):
         session = self.session
         if not session:
@@ -347,7 +438,7 @@ class MovementController:
                 unit.location.region == Region.SPACE and capital_ship(unit)]
 
     def _check_fleet_limit(self, session, next_stage):
-        excess = max(0, len(self.fleet_ships(session)) - session.player.command_pools['fleet'])
+        excess = max(0, len(self.fleet_ships(session)) - self.fleet_supply(session.player))
         if excess:
             session.stage = 'fleet_overflow'
             session.overflow_required = excess
@@ -627,6 +718,9 @@ class MovementController:
         session.combat_rolls.clear()
         session.combat_hits.clear()
         session.combat_assignments.clear()
+        session.munitions_ready.clear()
+        session.munitions_available.clear()
+        session.reroll_selected.clear()
         session.combat_needs_resolution = False
         if len(session.combat_factions) > 1:
             session.stage = 'space_combat'
@@ -732,6 +826,7 @@ class MovementController:
         session.combat_rolls = {}
         session.combat_hits = {}
         session.combat_assignments = {faction: [] for faction in session.combat_factions}
+        session.reroll_selected.clear()
         outgoing_hits = {}
         for faction in session.combat_factions:
             rolls = []
@@ -740,9 +835,12 @@ class MovementController:
                 for _ in range(int(profile.get('combatDieCount') or 1)):
                     value = self.roll_d10(session)
                     rolls.append({'unit_id': unit.unit_id, 'kind': unit.kind, 'value': value,
-                                  'hit': value >= int(profile.get('combatHitsOn') or 10)})
+                                  'hit': value >= self.combat_threshold(faction, profile),
+                                  'rerolled': False})
             session.combat_rolls[faction] = rolls
             outgoing_hits[faction] = sum(result['hit'] for result in rolls)
+        session.munitions_available = set(session.munitions_ready)
+        session.munitions_ready.clear()
         session.combat_hits = {faction: sum(hits for shooter, hits in outgoing_hits.items()
                                              if shooter != faction)
                                for faction in session.combat_factions}

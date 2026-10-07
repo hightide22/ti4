@@ -41,6 +41,7 @@ class PlayerState:
     command_pools: dict[str, int] = field(default_factory=lambda: {
         'tactical': 3, 'fleet': 3, 'strategic': 2})
     technologies: frozenset[str] = frozenset()
+    action_cards: list[str] = field(default_factory=list)
 
     def change_currency(self, currency, amount):
         if currency not in ('trade_goods', 'commodities'):
@@ -85,7 +86,12 @@ def create_players(board, config):
     factions = {f['alias']: f for f in json.loads(
         (RESOURCES / 'data/factions/base.json').read_text(encoding='utf-8'))}
     players = []
-    for entry in config['tiles']:
+    if config.get('player_slots'):
+        entries_by_position = {(entry['q'], entry['r']): entry for entry in config['tiles']}
+        player_entries = [entries_by_position[tuple(position)] for position in config['player_slots']]
+    else:
+        player_entries = [entry for entry in config['tiles'] if entry.get('faction')]
+    for entry in player_entries:
         alias = entry.get('faction')
         if alias:
             faction = factions[alias]

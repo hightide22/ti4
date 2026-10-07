@@ -14,9 +14,11 @@ from strategy_panel import strategy_image, INK, MUTED, ACCENT, GOLD
 def player_reference():
     def read(path):
         return json.loads((RESOURCES / path).read_text(encoding='utf-8'))
+    cards = {card['alias']: card['name'] for card in read('data/action_cards/action_cards.json')
+             if card.get('source') == 'base'}
     return ({f['alias']: f for f in read('data/factions/base.json')},
             {a['id']: a for a in read('data/abilities/base.json')},
-            {t['alias']: t for t in read('data/technologies/pok.json')})
+            {t['alias']: t for t in read('data/technologies/pok.json')}, cards)
 
 
 class PlayerRoster:
@@ -77,7 +79,7 @@ class PlayerRoster:
             w.text('roster_scroll', 'Scroll to see more players', 12, bottom + 8, 8, MUTED)
 
     def detail_lines(self, w, player):
-        factions, abilities, techs = player_reference()
+        factions, abilities, techs, action_cards = player_reference()
         faction = factions.get(player.faction, {})
         on_board = sum(player.faction in t.command_tokens for t in w.board.values())
         lines = [(player.name, ACCENT),
@@ -97,7 +99,8 @@ class PlayerRoster:
             lines.append((f'{tech.get("name", tech_id)}: {tech.get("text", "")}', INK))
         if not player.technologies:
             lines.append(('None', INK))
-        lines.append(('Action cards: not implemented yet', MUTED))
+        lines.append((f'ACTION CARDS · {len(player.action_cards)}/7', MUTED))
+        lines.extend((action_cards.get(card, card), INK) for card in player.action_cards)
         return lines
 
     def draw_details(self, w):

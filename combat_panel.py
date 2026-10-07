@@ -13,6 +13,7 @@ class CombatPanel:
         self.advance_hit = None
         self.assignment_hits = []
         self.action_hits = []
+        self.reroll_die_hits = []
         self.offset = [0.0, 0.0]
         self.bounds = None
 
@@ -33,6 +34,10 @@ class CombatPanel:
                        if left <= x <= right and bottom <= y <= top), None)
         if action:
             return action
+        action = next((action for action, left, right, bottom, top in reversed(self.reroll_die_hits)
+                       if left <= x <= right and bottom <= y <= top), None)
+        if action:
+            return action
         return next((action for action, left, right, bottom, top in reversed(self.assignment_hits)
                      if left <= x <= right and bottom <= y <= top), None)
 
@@ -40,15 +45,15 @@ class CombatPanel:
         grouped = defaultdict(list)
         for unit in window.movement.combat_units(session, faction):
             profile = unit_profile(unit)
-            grouped[(unit.kind, int(profile.get('combatHitsOn') or 10),
+            grouped[(unit.kind, window.movement.combat_threshold(faction, profile),
                      int(profile.get('combatDieCount') or 1))].append(unit)
         return sorted(grouped.items(), key=lambda item: item[0][0])
 
-    def draw_die(self, window, x, y, value, hit, size=19):
+    def draw_die(self, window, x, y, value, hit, size=19, selected=False):
         fill = (220, 174, 73) if hit else (43, 58, 76)
-        border = (255, 226, 153) if hit else (90, 111, 137)
+        border = ACCENT if selected else (255, 226, 153) if hit else (90, 111, 137)
         arcade.draw_lrbt_rectangle_filled(x, x + size, y, y + size, fill)
-        arcade.draw_lrbt_rectangle_outline(x, x + size, y, y + size, border, 1)
+        arcade.draw_lrbt_rectangle_outline(x, x + size, y, y + size, border, 2 if selected else 1)
         window.text(('combat_die', x, y), str(value), x + 5, y + 4, 10, (19, 26, 36) if hit else INK)
 
     def draw_side(self, window, session, factions, x, y, width):
@@ -89,13 +94,17 @@ class CombatPanel:
                 damage = sum(unit.damaged for unit in group)
                 window.text(('combat_unit_damage', faction, kind),
                             f'{damage} damaged' if damage else '', x + 44, top - 30, 9, MUTED)
-                rolls = [roll for roll in session.combat_rolls.get(faction, [])
+                rolls = [(index, roll) for index, roll in enumerate(session.combat_rolls.get(faction, []))
                          if roll['kind'] == kind and roll['unit_id'] in {unit.unit_id for unit in group}]
                 dice_x, dice_y = x + min(185, width * .36), top - 54
-                for index, roll in enumerate(rolls):
+                for index, (roll_index, roll) in enumerate(rolls):
                     row, column = divmod(index, 10)
-                    self.draw_die(window, dice_x + column * 23, dice_y + row * 22,
-                                  roll['value'], roll['hit'])
+                    die_x, die_y = dice_x + column * 23, dice_y + row * 22
+                    selected = roll_index in session.reroll_selected.get(faction, set())
+                    self.draw_die(window, die_x, die_y, roll['value'], roll['hit'], selected=selected)
+                    if faction in session.munitions_available and not roll.get('rerolled'):
+                        self.reroll_die_hits.append((('reroll_die', faction, roll_index),
+                                                     die_x, die_x + 19, die_y, die_y + 19))
                 assignments = session.combat_assignments.get(faction, [])
                 available = (session.combat_needs_resolution and
                              window.movement.combat_assignment_target(session, faction, kind) is not None)
@@ -111,6 +120,7 @@ class CombatPanel:
         self.advance_hit = None
         self.assignment_hits.clear()
         self.action_hits.clear()
+        self.reroll_die_hits.clear()
         arcade.draw_lrbt_rectangle_filled(0, window.width, 0, window.height, (3, 7, 14, 218))
         width = min(1180, window.width - 56)
         height = min(760, window.height - 56)
@@ -182,7 +192,7 @@ class CombatPanel:
                 window.text('retreat_no_options', 'No legal adjacent system remains.', left + 24,
                             bottom + 52, 10, MUTED)
             window.text('combat_help', 'Select a valid adjacent system for your fleet.',
-                        left + 20, bottom + 37, 9, MUTED, width - 40)
+                        left + 20, bottom + 73, 9, MUTED, width - 40)
         elif session.combat_needs_resolution:
             complete = window.movement.combat_assignments_complete(session)
             units_label = 'ground forces' if session.combat_type == 'ground' else 'ships'
@@ -217,8 +227,43 @@ class CombatPanel:
         elif session.stage == 'space_combat' and session.retreat_announced:
             window.text('retreat_declared', 'Retreat declared; choose destination after this round.',
                         left + 22, bottom + 75, 9, ACCENT, col_width)
+        letnev = next((player for player in window.player_panel.players if player.faction == 'letnev'), None)
+        if session.stage == 'space_combat' and session.combat_type == 'space' and letnev and \
+                'letnev' in session.combat_factions:
+            button_x, button_y, button_w, button_h = left + width - 235, bottom + 24, 215, 38
+            if not session.combat_needs_resolution:
+                round_number = session.combat_round + 1
+                can_spend = (letnev.trade_goods >= 2 and
+                             ('letnev', round_number) not in session.munitions_spent_round)
+                label = 'Munitions Reserves · 2 TG' if can_spend else 'Munitions Reserves unavailable'
+                fill = (31, 78, 83) if can_spend else (31, 39, 50)
+                border = (102, 207, 224) if can_spend else (48, 65, 82)
+                arcade.draw_lrbt_rectangle_filled(button_x, button_x + button_w, button_y,
+                                                   button_y + button_h, fill)
+                arcade.draw_lrbt_rectangle_outline(button_x, button_x + button_w, button_y,
+                                                    button_y + button_h, border, 1)
+                window.text('munitions_button', label, button_x + 9, button_y + 13, 9,
+                            INK if can_spend else MUTED, button_w - 18)
+                if can_spend:
+                    self.action_hits.append((('spend_munitions', 'letnev'), button_x,
+                                             button_x + button_w, button_y, button_y + button_h))
+            elif 'letnev' in session.munitions_available:
+                selected_count = len(session.reroll_selected.get('letnev', set()))
+                label = f'Re-roll {selected_count} dice' if selected_count else 'Select dice to re-roll'
+                enabled = selected_count > 0
+                fill = (31, 78, 83) if enabled else (31, 39, 50)
+                border = (102, 207, 224) if enabled else (48, 65, 82)
+                arcade.draw_lrbt_rectangle_filled(button_x, button_x + button_w, button_y,
+                                                   button_y + button_h, fill)
+                arcade.draw_lrbt_rectangle_outline(button_x, button_x + button_w, button_y,
+                                                    button_y + button_h, border, 1)
+                window.text('munitions_reroll_button', label, button_x + 9, button_y + 13, 9,
+                            INK if enabled else MUTED, button_w - 18)
+                if enabled:
+                    self.action_hits.append((('reroll_dice', 'letnev'), button_x,
+                                             button_x + button_w, button_y, button_y + button_h))
         if window.movement_error:
-            window.text('combat_error', window.movement_error, left + width / 2, bottom + 70, 10,
+            window.text('combat_error', window.movement_error, left + width / 2, bottom + 104, 10,
                         (245, 142, 128), width - 40)
         if session.stage == 'retreat_selection':
             pass
@@ -228,8 +273,8 @@ class CombatPanel:
                                 len(session.combat_assignments.get(faction, []))) for faction in factions)
             unit_label = 'ground forces' if session.combat_type == 'ground' else 'ship groups'
             window.text('combat_help', f'Click {unit_label} to assign incoming hits · {remaining} left',
-                        left + 20, bottom + 37, 9, MUTED, width - 40)
+                        left + 20, bottom + 77, 9, MUTED, width - 40)
         else:
             survivors = 'Ground forces' if session.combat_type == 'ground' else 'Ships'
             window.text('combat_help', f'A gold die is a hit. {survivors} that survive fire in the next round.',
-                        left + 20, bottom + 37, 9, MUTED, width - 40)
+                        left + 20, bottom + 77, 9, MUTED, width - 40)

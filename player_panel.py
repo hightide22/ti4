@@ -124,10 +124,31 @@ class PlayerPanel:
         self.draw_currencies(window, reserve_left, height - 17, reserve_width)
         self.draw_reserves(window, reserve_left, 32, reserve_width)
         leadership = window.strategy.session and window.strategy.session.stage == 'leadership'
-        help_text = ('PLANETS · Click to pay influence' if leadership else
+        help_text = ('ORBITAL DROP · Click a controlled planet' if window.orbital_drop_mode else
+                     'PLANETS · Click to pay influence' if leadership else
                      'PLANETS · Click to pay resources' if window.movement.session and window.movement.session.stage == 'production'
                      else 'PLANETS · Hover for details')
         window.text('planet_help', help_text, 16, 108, 11, MUTED)
+        active = window.turn_order.active_player
+        can_use_orbital_drop = (self.player is active and self.player.faction == 'sol' and
+                                self.player.command_pools['strategic'] > 0 and
+                                not window.turn_order.action_used and not window.turn_order.command_allocation and
+                                not window.turn_order.strategy_selection and not window.strategy.session and
+                                not window.movement.session)
+        can_trade = (self.player is active and not window.turn_order.command_allocation and
+                     not window.turn_order.strategy_selection and not window.strategy.session and
+                     not window.movement.session and not window.orbital_drop_mode)
+        if can_trade:
+            if self.player.faction == 'sol':
+                self.button(window, ('trade',), 'TRADE', width - 469, height - 45, 52, 24)
+                if can_use_orbital_drop or window.orbital_drop_mode:
+                    self.button(window, ('orbital_drop',), 'DROP', width - 411,
+                                height - 45, 54, 24, selected=window.orbital_drop_mode)
+            else:
+                self.button(window, ('trade',), 'TRADE', width - 469, height - 45, 111, 24)
+        elif can_use_orbital_drop or window.orbital_drop_mode:
+            self.button(window, ('orbital_drop',), 'CANCEL DROP' if window.orbital_drop_mode else 'ORBITAL DROP',
+                        width - 469, height - 45, 111, 24, selected=window.orbital_drop_mode)
         card_width, gap = 112, 8
         slots = max(1, int((reserve_left - 28) // (card_width + gap)))
         self.card_offset = min(self.card_offset, max(0, len(self.player.planets) - slots))
@@ -162,8 +183,10 @@ class PlayerPanel:
             sprite = 'fleet' if pool == 'fleet' else 'command'
             self.image(f'command_token/{sprite}_{self.player.color_code}.png', left + 23, y + 40, 29)
             self.image(f'factions/{self.player.faction}.png', left + 23, y + 38, 12)
-            window.text(('pool_count', pool), str(count), left + 48, y + 31, 20, ACCENT)
-            window.text(('pool_name', pool), pool.title(), left + 9, y + 9, 11, INK)
+            count_label = f'{count} + 2' if pool == 'fleet' and self.player.faction == 'letnev' else str(count)
+            pool_label = 'Fleet limit' if pool == 'fleet' and self.player.faction == 'letnev' else pool.title()
+            window.text(('pool_count', pool), count_label, left + 48, y + 31, 20, ACCENT)
+            window.text(('pool_name', pool), pool_label, left + 9, y + 9, 11, INK)
             self.controls.append(Control(('pool', pool), left, y, cell_width, 61))
         if self.player.pending_commands:
             pending_bottom, pending_height = 3, 24
@@ -199,13 +222,15 @@ class PlayerPanel:
         if hovered:
             y += 3
             arcade.draw_lrbt_rectangle_filled(x - 3, x + width + 3, y - 3, y + height + 3, (*ACCENT, 24))
+        orbital_target = (window.orbital_drop_mode and self.player is window.turn_order.active_player)
         background = ((76, 65, 38) if paying_for_production else
+                      (51, 56, 38) if orbital_target else
                       (29, 53, 68) if hovered else (19, 29, 43) if exhausted else CARD)
         arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + height, background)
         arcade.draw_lrbt_rectangle_outline(x, x + width, y, y + height,
-                                          GOLD if paying_for_production else ACCENT if hovered else
+                                          GOLD if paying_for_production or orbital_target else ACCENT if hovered else
                                           (64, 74, 90) if exhausted else (67, 133, 154),
-                                          2 if paying_for_production or hovered else 1)
+                                          2 if paying_for_production or orbital_target or hovered else 1)
         window.text(('planet_name', index), planet.name, x + 8, y + height - 19, 12, INK, width - 16)
         tint = (140, 150, 164, 170) if exhausted else None
         self.image(self.trait_image(planet), x + 21, y + 43, 25, tint)

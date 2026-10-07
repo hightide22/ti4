@@ -22,6 +22,10 @@ from turn_order import TurnOrder
 from strategy_panel import StrategyPanel
 from strategic_action import StrategyController
 from player_roster import PlayerRoster
+from main_menu import MainMenu
+from transactions import TransactionController, TransactionError
+from transaction_panel import TransactionPanel
+from action_card_deck import ActionCardDeck
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -58,20 +62,35 @@ class TileSprite(arcade.Sprite):
 
 
 class BoardWindow(arcade.Window):
-    def __init__(self, smoke=False, map_path=ROOT / 'maps/three_player.json'):
+    def __init__(self, smoke=False, map_path=ROOT / 'maps/three_player.json',
+                 show_menu=False, menu_smoke_test=False):
         display_width, display_height = arcade.get_display_size()
         super().__init__(min(1440, display_width), min(960, display_height),
-                         'Twilight Imperium IV — three-player board', resizable=True, vsync=True)
+                         'Twilight Imperium IV', resizable=True, vsync=True)
         self.set_minimum_size(min(1120, display_width), min(720, display_height))
         self.maximize()
-        self.map_config, self.board = load_board(map_path)
+        self.smoke = smoke
+        self.menu_smoke_test = menu_smoke_test
+        self.main_menu = MainMenu()
+        self.main_menu_visible = show_menu
+        self.frames = 0
+        rng = random.Random(4)
+        self.stars = [(rng.random(), rng.random(), rng.randrange(45, 100)) for _ in range(190)]
+        self.configure_game(map_path, self.main_menu.active_factions)
+
+    def configure_game(self, map_path, factions):
+        map_config = json.loads(Path(map_path).read_text(encoding='utf-8'))
+        slot_count = sum(bool(entry.get('faction')) for entry in map_config['tiles'])
+        self.map_config, self.board = load_board(
+            map_path, factions if len(factions) == slot_count else None)
         self.tile_sprites = {tile: TileSprite(tile) for tile in self.board.values()}
         self.labels = {}
         self.unit_renderer = UnitRenderer()
-        self.unit_renderer.blocking_layouts = smoke
+        self.unit_renderer.blocking_layouts = self.smoke
         self.system_panel = SystemPanel()
         self.player_panel = PlayerPanel(create_players(self.board, self.map_config))
-        self.turn_order = TurnOrder(self.player_panel.players, strategy_enabled=not smoke)
+        self.action_card_deck = ActionCardDeck()
+        self.turn_order = TurnOrder(self.player_panel.players, strategy_enabled=not self.smoke)
         self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
         self.strategy_panel = StrategyPanel()
         self.dragging_modal = None
@@ -86,6 +105,9 @@ class BoardWindow(arcade.Window):
         self.turn_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
         self.strategy = StrategyController(self.board, self.turn_order, self.movement)
+        self.transaction = TransactionController(self.board, self.player_panel.players,
+                                                self.turn_order, self.movement)
+        self.transaction_panel = TransactionPanel()
         self.movement_panel = MovementPanel()
         self.combat_panel = CombatPanel()
         self.movement_error = None
@@ -96,15 +118,18 @@ class BoardWindow(arcade.Window):
         self.focus_view = False
         self.focus_zoom = 1.0
         self.last_click = (None, 0.0)
+        self.orbital_drop_mode = False
         self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
         self.hover = None
         self.zoom = self.target_zoom = 1.0
         self.map_center = [0.0, 0.0]
-        self.frames = 0
-        self.smoke = smoke
-        rng = random.Random(4)
-        self.stars = [(rng.random(), rng.random(), rng.randrange(45, 100)) for _ in range(190)]
         self.fit()
+
+    def start_from_menu(self):
+        count = self.main_menu.player_count
+        map_path = ROOT / ('maps/three_player.json' if count == 3 else 'maps/four_player.json')
+        self.configure_game(map_path, self.main_menu.active_factions)
+        self.main_menu_visible = False
 
     @property
     def sidebar(self):
@@ -294,6 +319,10 @@ class BoardWindow(arcade.Window):
                 bool(self.strategy.session and self.strategy.session.stage != 'production') or
                 bool(self.strategy_view and not self.movement.session))
 
+    @property
+    def transaction_modal(self):
+        return bool(self.transaction.session)
+
     def sync_strategy_actor(self):
         player = self.strategy.player
         index = self.player_panel.players.index(player)
@@ -369,6 +398,32 @@ class BoardWindow(arcade.Window):
         except (ValueError, StopIteration) as error:
             self.movement_error = str(error) or 'This choice is no longer available.'
 
+    def handle_transaction_action(self, action):
+        if not action:
+            return
+        kind, *args = action
+        try:
+            if kind == 'cancel':
+                self.transaction.cancel()
+            elif kind == 'partner':
+                self.transaction.choose_partner(args[0])
+            elif kind == 'change':
+                self.transaction.change(args[0], args[1])
+            elif kind == 'toggle_card':
+                self.transaction.toggle_action_card(args[0], args[1])
+            elif kind == 'confirm':
+                self.transaction.confirm()
+            elif kind == 'back':
+                session = self.transaction.session
+                session.partner = None
+                session.give_trade_goods = session.give_commodities = 0
+                session.take_trade_goods = session.take_commodities = 0
+                session.give_action_cards.clear()
+                session.take_action_cards.clear()
+            self.movement_error = None
+        except (TransactionError, StopIteration) as error:
+            self.movement_error = str(error) or 'This transaction is no longer available.'
+
     def strategy_tray_click(self, x, y):
         session = self.strategy.session
         if not session or y >= self.player_panel.HEIGHT:
@@ -401,6 +456,10 @@ class BoardWindow(arcade.Window):
                 player.receive_round_commands()
                 for card in player.planets:
                     card.exhausted = False
+                if len(player.action_cards) < 7:
+                    action_card = self.action_card_deck.draw()
+                    if action_card:
+                        player.action_cards.append(action_card)
             self.turn_order.begin_command_allocation()
             self.strategy_view = False
             if not self.turn_order.command_allocation and self.turn_order.strategy_enabled:
@@ -425,6 +484,9 @@ class BoardWindow(arcade.Window):
 
     def on_draw(self):
         self.clear(BG)
+        if self.main_menu_visible:
+            self.main_menu.draw(self)
+            return
         star_bins = [[] for _ in range(6)]
         for sx, sy, brightness in self.stars:
             bucket = min(5, max(0, (brightness - 45) // 10))
@@ -551,8 +613,78 @@ class BoardWindow(arcade.Window):
             self.combat_panel.draw(self, self.movement.session)
         if self.strategy_modal:
             self.strategy_panel.draw(self, self.turn_order)
+        if self.transaction_modal:
+            self.transaction_panel.draw(self, self.transaction)
 
     def on_update(self, delta_time):
+        if self.main_menu_visible:
+            self.frames += 1
+            if self.menu_smoke_test and self.frames >= 2:
+                self.on_draw()
+                assert len(self.main_menu.hits) >= 7
+                preview_dir = ROOT / 'previews'
+                preview_dir.mkdir(exist_ok=True)
+                arcade.get_image().save(preview_dir / 'main-menu-preview.png')
+                hit = next(hit for hit in self.main_menu.hits if hit[0] == ('map', 4))
+                self.on_mouse_press((hit[1] + hit[2]) / 2, (hit[3] + hit[4]) / 2,
+                                    arcade.MOUSE_BUTTON_LEFT, 0)
+                self.on_draw()
+                hit = next(hit for hit in self.main_menu.hits if hit[0] == ('faction', 0, 1))
+                self.on_mouse_press((hit[1] + hit[2]) / 2, (hit[3] + hit[4]) / 2,
+                                    arcade.MOUSE_BUTTON_LEFT, 0)
+                assert len(set(self.main_menu.active_factions)) == 4
+                self.on_draw()
+                hit = next(hit for hit in self.main_menu.hits if hit[0] == ('start',))
+                self.on_mouse_press((hit[1] + hit[2]) / 2, (hit[3] + hit[4]) / 2,
+                                    arcade.MOUSE_BUTTON_LEFT, 0)
+                assert not self.main_menu_visible and len(self.board) == 37
+                assert tuple(player.faction for player in self.player_panel.players) == self.main_menu.active_factions
+                self.on_draw()
+                arcade.get_image().save(preview_dir / 'four-player-menu-start-preview.png')
+                letnev = next(player for player in self.player_panel.players if player.faction == 'letnev')
+                sol = next(player for player in self.player_panel.players if player.faction == 'sol')
+                letnev_home = next(tile for tile in self.board.values()
+                                   if any(unit.owner == 'letnev' and unit.kind == 'carrier' for unit in tile.units))
+                combat_target = next(tile for tile in self.movement.neighbors(letnev_home)
+                                     if 'supernova' not in tile.anomalies and 'gravity_rift' not in tile.anomalies)
+                combat_target.units.append(Unit('menu-smoke-enemy', 'cruiser', 'sol', sol.color_code,
+                                                UnitLocation(Region.SPACE)))
+                letnev.trade_goods = 2
+                battle = self.movement.activate(letnev, combat_target.position)
+                battle.toggle(battle.sources[letnev_home.position].ships[0].unit_id)
+                self.movement.confirm()
+                assert battle.stage == 'space_combat'
+                self.selected = combat_target.position
+                self.on_draw()
+                assert 'munitions_button' in self.labels
+                arcade.get_image().save(preview_dir / 'munitions-reserves-preview.png')
+                spend = next(hit for hit in self.combat_panel.action_hits
+                             if hit[0] == ('spend_munitions', 'letnev'))
+                self.on_mouse_press((spend[1] + spend[2]) / 2, (spend[3] + spend[4]) / 2,
+                                    arcade.MOUSE_BUTTON_LEFT, 0)
+                assert letnev.trade_goods == 0
+                from unittest.mock import patch
+                advance = self.combat_panel.advance_hit
+                with patch('movement.random.randint', return_value=1):
+                    self.on_mouse_press((advance[0] + advance[1]) / 2,
+                                        (advance[2] + advance[3]) / 2,
+                                        arcade.MOUSE_BUTTON_LEFT, 0)
+                self.on_draw()
+                die = next(hit for hit in self.combat_panel.reroll_die_hits
+                           if hit[0][0] == 'reroll_die' and hit[0][1] == 'letnev')
+                self.on_mouse_press((die[1] + die[2]) / 2, (die[3] + die[4]) / 2,
+                                    arcade.MOUSE_BUTTON_LEFT, 0)
+                self.on_draw()
+                reroll = next(hit for hit in self.combat_panel.action_hits
+                              if hit[0] == ('reroll_dice', 'letnev'))
+                with patch('movement.random.randint', return_value=10):
+                    self.on_mouse_press((reroll[1] + reroll[2]) / 2,
+                                        (reroll[3] + reroll[4]) / 2,
+                                        arcade.MOUSE_BUTTON_LEFT, 0)
+                assert battle.combat_rolls['letnev'][0]['value'] == 10
+                print('PASS: main menu, four-player start, long-range trade, Orbital Drop and Letnev rerolls checked')
+                self.close()
+            return
         self.unit_renderer.update(delta_time)
         self.sync_turn_action()
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
@@ -1004,6 +1136,7 @@ class BoardWindow(arcade.Window):
             assert not any(tile.command_tokens for tile in self.board.values())
             assert not self.token_hits
             assert all(not card.exhausted for player in expected_players for card in player.planets)
+            assert all(len(player.action_cards) == 1 for player in expected_players)
             assert [player.pending_commands for player in expected_players] == [
                 player.round_command_gain() for player in expected_players]
             expected_pool_counts = [(player, dict(player.command_pools)) for player in expected_players]
@@ -1040,10 +1173,69 @@ class BoardWindow(arcade.Window):
             assert self.turn_button_hit is not None
             assert self.labels['pass_turn_button'].text == 'PASS'
             assert self.player_panel.player is expected_players[0]
+            # Smoke-test the new trade modal, including Hacan's long-range option.
+            sol_player = expected_players[0]
+            hacan_player = next(player for player in expected_players if player.faction == 'hacan')
+            self.player_panel.active = expected_players.index(sol_player)
+            self.on_draw()
+            trade_control = next(control for control in self.player_panel.controls
+                                 if control.action == ('trade',))
+            self.on_mouse_press(trade_control.left + trade_control.width / 2,
+                                trade_control.bottom + trade_control.height / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            self.on_draw()
+            assert self.transaction_modal and self.labels['trade_title'].text == 'NEGOTIATE A TRANSACTION'
+            assert hacan_player in self.transaction.eligible_partners(sol_player)
+            sol_player.action_cards[:] = [self.action_card_deck.draw() for _ in range(7)]
+            hacan_player.action_cards[:] = [self.action_card_deck.draw() for _ in range(7)]
+            partner_hit = next(hit for hit in self.transaction_panel.hits
+                               if hit[0] == ('partner', 'hacan'))
+            self.on_mouse_press((partner_hit[1] + partner_hit[2]) / 2,
+                                (partner_hit[3] + partner_hit[4]) / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            self.on_draw()
+            assert 'trade_arbiter_header' in self.labels
+            assert sum(hit[0][0] == 'toggle_card' for hit in self.transaction_panel.hits) == 14
+            arcade.get_image().save(preview_dir / 'transaction-preview.png')
+            cancel_hit = next(hit for hit in self.transaction_panel.hits if hit[0] == ('cancel',))
+            self.on_mouse_press((cancel_hit[1] + cancel_hit[2]) / 2,
+                                (cancel_hit[3] + cancel_hit[4]) / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+
+            # Sol's component action is selectable from the dashboard and reversible.
+            self.on_draw()
+            drop_control = next(control for control in self.player_panel.controls
+                                if control.action == ('orbital_drop',))
+            planet_control = next(control for control in self.player_panel.controls
+                                  if control.action[0] == 'planet')
+            planet_id = sol_player.planets[planet_control.action[1]].planet.planet_id
+            target = next(tile for tile in self.board.values()
+                          if tile.planet_owners.get(planet_id) == 'sol')
+            before_count = sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                               unit.location.planet_id == planet_id for unit in target.units)
+            before_strategy = sol_player.command_pools['strategic']
+            self.on_mouse_press(drop_control.left + drop_control.width / 2,
+                                drop_control.bottom + drop_control.height / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            self.on_draw()
+            planet_control = next(control for control in self.player_panel.controls
+                                  if control.action[0] == 'planet')
+            self.on_mouse_press(planet_control.left + planet_control.width / 2,
+                                planet_control.bottom + planet_control.height / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            assert sol_player.command_pools['strategic'] == before_strategy - 1
+            assert sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                       unit.location.planet_id == planet_id for unit in target.units) == before_count + 2
+            self.on_key_press(arcade.key.Z, arcade.key.MOD_CTRL)
+            assert sol_player.command_pools['strategic'] == before_strategy
+            assert sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                       unit.location.planet_id == planet_id for unit in target.units) == before_count
             print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, refresh, and command allocation checked')
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):
+        if self.main_menu_visible:
+            return
         self.roster.hover(x, y)
         self.player_panel.hover(x, y)
         if self.strategy_modal:
@@ -1061,7 +1253,22 @@ class BoardWindow(arcade.Window):
         self.hovered_units = tuple(u.unit_id for u in hit.placement.units) if hit else tuple(u.unit_id for u in inventory_hit.units) if inventory_hit else ()
 
     def on_mouse_press(self, x, y, button, modifiers):
+        if self.main_menu_visible:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                action = self.main_menu.hit_test(x, y)
+                if action:
+                    if action[0] == 'map':
+                        self.main_menu.player_count = action[1]
+                    elif action[0] == 'faction':
+                        self.main_menu.select_faction(action[1], action[2])
+                    elif action[0] == 'start':
+                        self.start_from_menu()
+            return
         self.sync_turn_action()
+        if self.transaction_modal:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                self.handle_transaction_action(self.transaction_panel.hit_test(x, y))
+            return
         if self.strategy_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
                 if self.strategy_panel.drag_header(x, y):
@@ -1119,6 +1326,12 @@ class BoardWindow(arcade.Window):
                 try:
                     if action[0] == 'assign_hit':
                         self.movement.assign_combat_hit(action[1], action[2])
+                    elif action[0] == 'spend_munitions':
+                        self.movement.spend_munitions(action[1])
+                    elif action[0] == 'reroll_die':
+                        self.movement.toggle_combat_reroll(action[1], action[2])
+                    elif action[0] == 'reroll_dice':
+                        self.movement.reroll_selected_combat_dice(action[1])
                     elif action[0] == 'advance':
                         self.movement.advance_combat()
                     elif action[0] == 'announce_retreat':
@@ -1189,6 +1402,21 @@ class BoardWindow(arcade.Window):
                 self.sync_turn_action()
             return
         if x < left and y < self.player_panel.HEIGHT:
+            if self.orbital_drop_mode:
+                panel_control = next((control for control in reversed(self.player_panel.controls)
+                                      if control.contains(x, y)), None)
+                if panel_control and panel_control.action[0] == 'orbital_drop':
+                    self.orbital_drop_mode = False
+                elif panel_control and panel_control.action[0] == 'planet':
+                    active = self.turn_order.active_player
+                    planet_id = active.planets[panel_control.action[1]].planet.planet_id
+                    try:
+                        self.movement.orbital_drop(active, planet_id)
+                        self.orbital_drop_mode = False
+                        self.movement_error = None
+                    except MovementError as error:
+                        self.movement_error = str(error)
+                return
             player_control = next((control for control in reversed(self.player_panel.controls)
                                    if control.contains(x, y) and control.action[0] == 'player'), None)
             active_player_index = (self.player_panel.players.index(self.turn_order.active_player)
@@ -1201,6 +1429,16 @@ class BoardWindow(arcade.Window):
                     not panel_control or panel_control.action[0] not in ('pool', 'pending')):
                 return
             if panel_control and panel_control.action[0] in ('pool', 'pending') and not self.turn_order.command_allocation and not self.smoke:
+                return
+            if panel_control and panel_control.action[0] == 'orbital_drop':
+                self.orbital_drop_mode = True
+                return
+            if panel_control and panel_control.action[0] == 'trade':
+                try:
+                    self.transaction.open()
+                    self.movement_error = None
+                except TransactionError as error:
+                    self.movement_error = str(error)
                 return
             self.player_panel.handle_click(x, y)
             if self.turn_order.command_allocation and self.player_panel.player and \
@@ -1290,6 +1528,10 @@ class BoardWindow(arcade.Window):
                 self.last_click = (picked, now)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+        if self.main_menu_visible:
+            return
+        if self.transaction_modal:
+            return
         if self.dragging_modal:
             if buttons & arcade.MOUSE_BUTTON_LEFT:
                 panel = self.strategy_panel if self.dragging_modal == 'strategy' else self.combat_panel
@@ -1312,6 +1554,10 @@ class BoardWindow(arcade.Window):
             self.dragging_modal = None
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
+        if self.main_menu_visible:
+            return
+        if self.transaction_modal:
+            return
         if self.strategy_modal:
             self.strategy_panel.page = max(0, self.strategy_panel.page - int(scroll_y))
             return
@@ -1337,7 +1583,19 @@ class BoardWindow(arcade.Window):
             self.target_zoom = min(3.5, max(.55, self.target_zoom * 1.15 ** scroll_y))
 
     def on_key_press(self, symbol, modifiers):
+        if self.main_menu_visible:
+            if symbol in (arcade.key.ENTER, arcade.key.RETURN):
+                self.start_from_menu()
+            return
         self.sync_turn_action()
+        if self.transaction_modal:
+            if symbol == arcade.key.ESCAPE:
+                self.transaction.cancel()
+            return
+        if symbol == arcade.key.ESCAPE and self.orbital_drop_mode:
+            self.orbital_drop_mode = False
+            self.movement_error = None
+            return
         if self.strategy_modal or self.strategy.session:
             if symbol == arcade.key.ESCAPE:
                 if not self.strategy.session and not self.turn_order.strategy_selection:
@@ -1372,17 +1630,21 @@ class BoardWindow(arcade.Window):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--map', type=Path, default=ROOT / 'maps/three_player.json')
+    parser.add_argument('--map', type=Path)
     parser.add_argument('--validate', action='store_true')
     parser.add_argument('--smoke-test', action='store_true')
+    parser.add_argument('--menu-smoke-test', action='store_true')
     args = parser.parse_args()
+    map_path = args.map or ROOT / 'maps/three_player.json'
     if args.validate:
-        _, board = load_board(args.map)
+        _, board = load_board(map_path)
         for position in board:
             assert nearest_hex(*world(position)) == position
         print(f'PASS: {len(board)} tile objects, unique coordinates, all images present')
         return
-    BoardWindow(smoke=args.smoke_test, map_path=args.map)
+    BoardWindow(smoke=args.smoke_test or args.menu_smoke_test, map_path=map_path,
+                show_menu=args.menu_smoke_test or (args.map is None and not args.smoke_test),
+                menu_smoke_test=args.menu_smoke_test)
     arcade.run()
 
 

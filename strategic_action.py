@@ -73,7 +73,8 @@ class StrategyController:
 
     def secondary_cost(self):
         s = self.session
-        return 0 if s.card == 1 or (s.card == 5 and s.player.faction in s.free_trade) else 1
+        return 0 if (s.card == 1 or
+                     (s.card == 5 and (s.player.faction == 'hacan' or s.player.faction in s.free_trade))) else 1
 
     def secondary_unavailable(self):
         s = self.session

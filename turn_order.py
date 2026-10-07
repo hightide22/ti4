@@ -8,6 +8,7 @@ class TurnOrder:
         self.players = list(players)
         self.active_index = 0
         self.round_number = 1
+        self.turn_serial = 0
         self.action_used = False
         self.passed_indices: set[int] = set()
         self.command_allocation = False
@@ -134,6 +135,7 @@ class TurnOrder:
                 self.passed_indices.clear()
                 self.active_index = self.strategy_initiative[0] if self.strategy_initiative else 0
                 self.round_number += 1
+                self.turn_serial += 1
                 return True
         order = self.strategy_initiative if self.strategy_enabled and self.strategy_initiative else list(range(len(self.players)))
         current = order.index(self.active_index) if self.active_index in order else 0
@@ -141,6 +143,7 @@ class TurnOrder:
             next_index = order[(current + offset) % len(order)]
             if next_index not in self.passed_indices:
                 self.active_index = next_index
+                self.turn_serial += 1
                 return False
         raise RuntimeError('No eligible player found during turn rotation')
 

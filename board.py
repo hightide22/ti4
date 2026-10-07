@@ -192,8 +192,47 @@ class Board(Mapping[Position, Tile]):
         return [tile for tile in self.values() if tile.player is not None]
 
 
-def load_board(map_path: Path | str = ROOT / "maps/three_player.json") -> tuple[dict, Board]:
+def faction_unit_color(faction: dict) -> str:
+    """Pick the first faction-preferred component color that has the core sprites."""
+    from units import UNIT_TYPES
+
+    sprite_names = {unit['sprite'] for unit in UNIT_TYPES.values()}
+    for color in faction.get('preferredColours', ()):
+        if all((RESOURCES / 'units' / f'{color}_{sprite}.png').is_file()
+               for sprite in sprite_names):
+            return color
+    raise FileNotFoundError(f"No complete unit color set for {faction['alias']}")
+
+
+def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
+               factions: tuple[str, ...] | list[str] | None = None) -> tuple[dict, Board]:
     config = json.loads(Path(map_path).read_text(encoding="utf-8"))
+    if factions is not None:
+        faction_data = {f['alias']: f for f in json.loads(
+            (RESOURCES / 'data/factions/base.json').read_text(encoding='utf-8'))}
+        slot_positions = config.get('player_slots')
+        if slot_positions:
+            by_position = {(entry['q'], entry['r']): entry for entry in config['tiles']}
+            slots = [by_position[tuple(position)] for position in slot_positions]
+        else:
+            slots = [entry for entry in config['tiles'] if entry.get('faction')]
+        if len(factions) != len(slots):
+            raise ValueError(f"This map requires exactly {len(slots)} factions")
+        if len(set(factions)) != len(factions):
+            raise ValueError('Each player must choose a different faction')
+        colors = {
+            'sol': (106, 183, 255), 'jolnar': (185, 148, 248),
+            'letnev': (219, 111, 132), 'hacan': (244, 183, 87),
+        }
+        for entry, alias in zip(slots, factions):
+            faction = faction_data.get(alias)
+            if faction is None:
+                raise ValueError(f'Unknown faction: {alias}')
+            entry['id'] = faction['homeSystem']
+            entry['faction'] = alias
+            entry['player'] = f"Player {slots.index(entry) + 1} · {faction['factionName']}"
+            entry['color'] = colors.get(alias, (100, 207, 224))
+            entry['unit_color'] = faction_unit_color(faction)
     board = Board(TILES.from_entry(entry) for entry in config["tiles"])
     if not board:
         raise ValueError("Map must contain at least one tile")
