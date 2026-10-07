@@ -10,6 +10,7 @@ from board import RESOURCES
 from player import command_tokens_in_reinforcements
 from player_panel import Control
 from strategy_panel import strategy_image
+from action_cards import ACTION_CARD_DEFS
 
 
 @lru_cache(maxsize=1)
@@ -100,7 +101,9 @@ class PlayerRoster:
             lines.append((f'{tech.get("name", tech_id)}: {tech.get("text", "")}', INK))
         if not player.technologies:
             lines.append(('None', INK))
-        lines.append(('Action cards: not implemented yet', MUTED))
+        names = [ACTION_CARD_DEFS.get(alias, {}).get('name', alias) for alias in player.action_cards]
+        lines.append((f'ACTION CARDS · {len(names)}', MUTED))
+        lines.append((', '.join(names) if names else 'None', INK))
         return lines
 
     def draw_details(self, w):

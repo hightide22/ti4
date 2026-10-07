@@ -159,7 +159,19 @@ class CombatPanel:
             subtitle = f'{planet.name} · {round_label}'
         else:
             subtitle = f'Round {session.combat_round}' if session.combat_round else 'Roll one die per combat die'
+        if session.stage == 'combat_end':
+            subtitle = f'Round {session.combat_round} · End of combat round'
         window.text('combat_round', subtitle, left + 24, bottom + height - 58, 11, MUTED)
+        combat_players = [player for player in window.player_panel.players
+                          if player.faction in session.combat_factions]
+        playable_cards = sum(len(window.action_cards.playable(player, session))
+                             for player in combat_players)
+        if playable_cards:
+            card_x, card_y = left + width - 162, bottom + height - 68
+            button(window, 'combat_action_cards', f'CARDS · {playable_cards}',
+                   card_x, card_y, 138, 29, primary=True, size=9)
+            self.action_hits.append((('action_cards',), card_x, card_x + 138,
+                                     card_y, card_y + 29))
         factions = session.combat_factions
         defenders = factions[1:]
         col_gap = 22
@@ -233,7 +245,8 @@ class CombatPanel:
             color = SELECTED if complete else DISABLED
         else:
             complete = True
-            label = 'Roll Combat Dice' if not session.combat_round else 'Next Combat Round'
+            label = ('Finish Combat Round' if session.stage == 'combat_end' else
+                     'Roll Combat Dice' if not session.combat_round else 'Next Combat Round')
             color = SELECTED
         if session.stage == 'retreat_selection':
             self.advance_hit = None
@@ -270,6 +283,9 @@ class CombatPanel:
                                 len(session.combat_assignments.get(faction, []))) for faction in factions)
             unit_label = 'ground forces' if session.combat_type == 'ground' else 'ship groups'
             window.text('combat_help', f'Click {unit_label} to assign incoming hits · {remaining} left',
+                        left + 24, bottom + 99, 11, MUTED, width - 48)
+        elif session.stage == 'combat_end':
+            window.text('combat_help', 'Repair eligible units now, then continue to the next round.',
                         left + 24, bottom + 99, 11, MUTED, width - 48)
         else:
             survivors = 'Ground forces' if session.combat_type == 'ground' else 'Ships'

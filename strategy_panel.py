@@ -6,7 +6,7 @@ from ui_theme import (CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, DISABLED
 STRATEGY_CARDS = {
     1: ('Leadership', 'Buy command tokens for 3 influence each.'),
     2: ('Diplomacy', 'Ready up to 2 exhausted planets.'),
-    3: ('Politics', 'Action-card draws are not implemented yet.'),
+    3: ('Politics', 'Primary draws two cards and chooses the Speaker; secondary spends a Strategy token to draw two.'),
     4: ('Construction', 'Place a PDS or Space Dock on a controlled planet.'),
     5: ('Trade', 'Replenish your commodities.'),
     6: ('Warfare', 'Produce at one Space Dock in your home system.'),
@@ -244,8 +244,11 @@ class StrategyPanel:
             self.options(w, options, x, y - 47, width, rows)
             self.button(w, ('ready_confirm',), 'CONFIRM PLANETS', x, foot, width)
         elif s.stage == 'speaker':
+            if s.drawn_cards:
+                names = [w.action_cards.name_for(alias) for alias in s.drawn_cards]
+                w.text('politics_draw_result', f'Drew: {", ".join(names)}', x, y, 11, GOLD, width)
             self.options(w, [(('speaker', p.faction), p.name, False) for p in w.turn_order.players
-                             if p is not w.turn_order.speaker], x, y - 20, width, rows)
+                             if p is not w.turn_order.speaker], x, y - (43 if s.drawn_cards else 20), width, rows)
         elif s.stage == 'trade':
             w.text('strategy_trade_title', 'Select players for free secondary abilities:', x, y, 12, INK, width)
             self.options(w, [(('trade_toggle', p.faction), p.name, p.faction in s.free_trade)

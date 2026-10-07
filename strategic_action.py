@@ -25,11 +25,13 @@ class StrategyResolution:
     pool_source: str | None = None
     selected_system: tuple[int, int] | None = None
     pending_system: tuple[int, int] | None = None
+    drawn_cards: list[str] = field(default_factory=list)
 
 
 class StrategyController:
-    def __init__(self, board, turn, movement):
+    def __init__(self, board, turn, movement, action_cards=None):
         self.board, self.turn, self.movement = board, turn, movement
+        self.action_cards = action_cards
         self.session = None
 
     @property
@@ -54,6 +56,8 @@ class StrategyController:
                    7: 'placeholder', 8: 'placeholder'}[card]
         if card == 1:
             s.base_gain = min(3, command_tokens_in_reinforcements(player, self.board))
+        elif card == 3 and self.action_cards:
+            s.drawn_cards = self.action_cards.draw(player, 2)
 
     def _participant_done(self):
         s = self.session
@@ -81,7 +85,7 @@ class StrategyController:
 
     def secondary_unavailable(self):
         s = self.session
-        if s.card in (3, 7, 8):
+        if s.card in (7, 8):
             return 'This secondary ability is not implemented yet.'
         if s.player.command_pools['strategic'] < self.secondary_cost():
             return 'No token in the strategy pool.'
@@ -89,6 +93,8 @@ class StrategyController:
             return 'No command tokens remain in reinforcements.'
         if s.card == 2 and not any(card.exhausted for card in s.player.planets):
             return 'No exhausted planets to ready.'
+        if s.card == 3 and (not self.action_cards or not self.action_cards.can_draw(s.player, 2)):
+            return 'Your hand is full or the action-card deck is empty.'
         if s.card == 6 and not self.home_docks():
             return 'No controlled Space Dock in your home system.'
         return ''
@@ -104,9 +110,12 @@ class StrategyController:
         # Warfare pays when the player chooses a dock.
         if s.card not in (4, 6):
             s.player.command_pools['strategic'] -= self.secondary_cost()
-        s.stage = {1: 'leadership', 2: 'diplomacy_secondary_system', 4: 'construction',
+        s.stage = {1: 'leadership', 2: 'diplomacy_secondary_system', 3: 'action_cards', 4: 'construction',
                    5: 'trade_secondary', 6: 'production_site'}[s.card]
         s.builds_left = 1
+        if s.card == 3:
+            s.drawn_cards = self.action_cards.draw(s.player, 2)
+            self._participant_done()
         if s.card == 5:
             s.player.commodities = s.player.commodity_limit
             self._participant_done()

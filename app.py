@@ -24,6 +24,8 @@ from turn_order import TurnOrder
 from strategy_panel import StrategyPanel
 from strategic_action import StrategyController
 from player_roster import PlayerRoster
+from action_cards import ActionCardController
+from action_card_panel import ActionCardPanel
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -80,8 +82,12 @@ class BoardWindow(arcade.Window):
         self.control_toggle_hit = None
         self.turn_history_size = 0
         self.turn_button_hit = None
+        self.action_card_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
-        self.strategy = StrategyController(self.board, self.turn_order, self.movement)
+        self.action_cards = ActionCardController(self.player_panel.players, self.movement)
+        self.action_card_panel = ActionCardPanel()
+        self.strategy = StrategyController(self.board, self.turn_order, self.movement,
+                                           self.action_cards)
         self.movement_panel = MovementPanel()
         self.combat_panel = CombatPanel()
         self.movement_error = None
@@ -317,6 +323,7 @@ class BoardWindow(arcade.Window):
             elif kind == 'page':
                 self.strategy_panel.page = max(0, self.strategy_panel.page + args[0])
             elif kind == 'start':
+                self.action_card_panel.open = False
                 ctl.start(args[0])
                 self.sync_strategy_actor()
             elif session:
@@ -431,6 +438,7 @@ class BoardWindow(arcade.Window):
             self.clear_round_tokens()
             for player in self.turn_order.players:
                 player.receive_round_commands()
+                self.action_cards.draw(player, 1)
                 for card in player.planets:
                     card.exhausted = False
             self.turn_order.begin_command_allocation()
@@ -552,6 +560,15 @@ class BoardWindow(arcade.Window):
                turn_right - turn_left, turn_top - turn_bottom, primary=True,
                enabled=enabled, size=10)
         self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled else None
+        card_player = (self.movement.session.player if self.movement.session else active_player)
+        card_count = len(card_player.action_cards) if card_player else 0
+        playable_count = (len(self.action_cards.playable(card_player, self.movement.session))
+                          if card_player and self.movement.session else 0)
+        card_left, card_right = left - 370, left - 258
+        button(self, 'action_card_hand_button', f'CARDS · {card_count}',
+               card_left, turn_bottom, card_right - card_left, turn_top - turn_bottom,
+               primary=bool(playable_count), selected=self.action_card_panel.open, size=9)
+        self.action_card_button_hit = (card_left, card_right, turn_bottom, turn_top)
         if self.movement.session:
             self.movement_panel.draw(self, self.movement.session, left)
             if self.movement_error:
@@ -571,10 +588,12 @@ class BoardWindow(arcade.Window):
             self.roster.draw_details(self)
         if self.player_panel.hovered_planet is not None:
             self.player_panel.draw_details(self)
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection'):
             self.combat_panel.draw(self, self.movement.session)
         if self.strategy_modal:
             self.strategy_panel.draw(self, self.turn_order)
+        elif self.action_card_panel.open:
+            self.action_card_panel.draw(self)
 
     def on_update(self, delta_time):
         self.unit_renderer.update(delta_time)
@@ -1024,6 +1043,7 @@ class BoardWindow(arcade.Window):
                     assert expected_players.index(expected_player) in self.turn_order.passed_indices
             assert self.turn_order.round_number == 2
             assert self.turn_order.active_player is expected_players[0]
+            assert all(len(player.action_cards) == 1 for player in expected_players)
             assert not any(tile.command_tokens for tile in self.board.values())
             assert not self.token_hits
             assert all(not card.exhausted for player in expected_players for card in player.planets)
@@ -1107,7 +1127,35 @@ class BoardWindow(arcade.Window):
                     if not bounds or not (bounds[0] <= x <= bounds[1] and bounds[2] <= y <= bounds[3]):
                         self.strategy_map_click(x, y)
             return
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
+        if self.action_card_panel.open:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                action = self.action_card_panel.hit_test(x, y)
+                if action and action[0] == 'player':
+                    self.action_card_panel.player_faction = action[1]
+                elif action and action[0] == 'play':
+                    participants = ([p for p in self.player_panel.players
+                                     if p.faction in self.movement.session.combat_factions]
+                                    if self.movement.session and
+                                    self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection')
+                                    else [self.movement.session.player] if self.movement.session else
+                                    [self.turn_order.active_player])
+                    player = next((p for p in participants
+                                   if p and p.faction == self.action_card_panel.player_faction),
+                                  participants[0])
+                    try:
+                        self.action_cards.play(player, action[1])
+                        self.movement_error = None
+                    except ValueError as error:
+                        self.movement_error = str(error)
+                    self.action_card_panel.open = False
+                elif action and action[0] == 'close':
+                    self.action_card_panel.open = False
+                elif not (self.action_card_panel.bounds and
+                          self.action_card_panel.bounds[0] <= x <= self.action_card_panel.bounds[1] and
+                          self.action_card_panel.bounds[2] <= y <= self.action_card_panel.bounds[3]):
+                    self.action_card_panel.open = False
+            return
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection'):
             if button != arcade.MOUSE_BUTTON_LEFT:
                 return
             if self.combat_panel.drag_header(x, y):
@@ -1125,9 +1173,16 @@ class BoardWindow(arcade.Window):
                     elif action[0] == 'retreat_to':
                         self.movement.resolve_retreat(action[1])
                         self.movement_panel.reset()
+                    elif action[0] == 'action_cards':
+                        self.action_card_panel.open = True
                     self.movement_error = None
-                except MovementError as error:
+                except ValueError as error:
                     self.movement_error = str(error)
+            return
+        if button == arcade.MOUSE_BUTTON_LEFT and self.action_card_button_hit and \
+                self.action_card_button_hit[0] <= x <= self.action_card_button_hit[1] and \
+                self.action_card_button_hit[2] <= y <= self.action_card_button_hit[3]:
+            self.action_card_panel.open = True
             return
         if self.roster.WIDTH > x and self.player_panel.HEIGHT <= y < self.height - 80:
             action = self.roster.hit_test(x, y)
@@ -1180,6 +1235,8 @@ class BoardWindow(arcade.Window):
                         elif action[0] == 'unit':
                             self.movement.session.toggle(action[1])
                             self.movement_error = None
+                        elif action[0] == 'action_cards':
+                            self.action_card_panel.open = True
                         elif action[0] == 'confirm':
                             self.movement.confirm()
                             self.movement_error = None
@@ -1331,7 +1388,7 @@ class BoardWindow(arcade.Window):
             else:
                 self.dragging_modal = None
             return
-        if self.strategy_modal or (self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection')) or x < self.roster.WIDTH:
+        if self.strategy_modal or (self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection')) or x < self.roster.WIDTH:
             return
         if not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and x < self.width - self.sidebar and y >= self.player_panel.HEIGHT:
             scale = self.fit_scale * self.zoom
@@ -1343,7 +1400,7 @@ class BoardWindow(arcade.Window):
             self.dragging_modal = None
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection'):
             self.combat_panel.scroll_by(x, -scroll_y * 42)
             return
         if self.strategy_modal:
