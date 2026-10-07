@@ -1,7 +1,7 @@
 import unittest
 
 from board import load_board
-from player import create_players, command_tokens_in_play
+from player import PlanetCard, create_players, command_tokens_in_play
 from movement import MovementController
 from strategic_action import StrategyController
 from turn_order import TurnOrder
@@ -180,20 +180,27 @@ class StrategicActionTests(unittest.TestCase):
         c.decline_secondary()
         self.assertTrue(self.turn.action_used)
 
-    def test_diplomacy_does_not_ready_arbitrary_planets(self):
+    def test_diplomacy_readies_exhausted_planet_in_any_controlled_system(self):
         self.start_card(2, owner=1)
         for card in self.hacan.planets:
             card.exhausted = True
         c = self.controller
-        tile = next(t for t in self.board.values() if 'hacan' in t.planet_owners.values())
-        c.select_system(tile.position)
-        chosen = self.hacan.planets[1]
+        selected_system = next(t for t in self.board.values() if 'hacan' in t.planet_owners.values())
+        remote_system = next(t for t in self.board.values()
+                             if t.position != selected_system.position and t.planets and not t.planet_owners)
+        chosen = PlanetCard(remote_system.planets[0], exhausted=True)
+        self.hacan.planets.append(chosen)
+        remote_system.planet_owners[chosen.planet.planet_id] = self.hacan.faction
+        c.select_system(selected_system.position)
+        self.assertEqual(c.session.stage, 'ready_planets')
+        c.toggle_ready(self.sol.planets[0].planet.planet_id)
+        self.assertFalse(c.session.ready_planets, 'A planet controlled by another player must not be selectable.')
         c.toggle_ready(chosen.planet.planet_id)
-        self.assertTrue(all(p.exhausted for p in self.hacan.planets))
+        self.assertEqual(c.session.ready_planets, {chosen.planet.planet_id})
         c.confirm_ready()
         self.assertFalse(chosen.exhausted)
-        self.assertTrue(self.hacan.planets[0].exhausted)
-        self.assertEqual(tile.command_tokens, {'sol', 'jolnar'})
+        self.assertTrue(all(p.exhausted for p in self.hacan.planets if p is not chosen))
+        self.assertEqual(selected_system.command_tokens, {'sol', 'jolnar'})
 
     def test_completing_secondary_production_keeps_next_offer_and_owner_turn(self):
         self.start_card(6, owner=2)

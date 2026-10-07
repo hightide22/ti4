@@ -1,5 +1,6 @@
 """Central strategy-card draft and resolution dialogs."""
 import arcade
+from board import RESOURCES
 from ui_theme import (CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, DISABLED, DANGER,
                       surface, button, modal)
 
@@ -28,6 +29,9 @@ class StrategyPanel:
         self.page_key = None
         self.bounds = None
         self.offset = [0.0, 0.0]
+        self.card_offset = [0.0, 0.0]
+        self.card_bounds = None
+        self.card_session = None
         self.mouse = None
         self.hover_action = None
         self.hover_system = None
@@ -42,6 +46,16 @@ class StrategyPanel:
     def move(self, dx, dy):
         self.offset[0] += dx
         self.offset[1] += dy
+
+    def drag_card(self, x, y):
+        if not self.card_bounds:
+            return False
+        left, right, bottom, top = self.card_bounds
+        return left <= x <= right and bottom <= y <= top
+
+    def move_card(self, dx, dy):
+        self.card_offset[0] += dx
+        self.card_offset[1] += dy
 
     def update_hover(self, x, y):
         self.mouse = (x, y)
@@ -59,12 +73,53 @@ class StrategyPanel:
                primary=primary, selected=selected, enabled=enabled, size=11)
         if enabled:
             self.hits.append((action, x, x + width, y, y + 34))
-            if action and action[0] == 'build':
+            if action and action[0] in ('build', 'ready_planet'):
                 planet_id = action[1]
                 position = next((tile.position for tile in w.board.values()
                                  if any(p.planet_id == planet_id for p in tile.planets)), None)
                 if position is not None:
                     self.hover_system_hits.append((x, x + width, y, y + 32, position))
+
+    def planet_cards(self, w, session, choices, x, y, width, bottom):
+        footer = bottom + 53
+        rows = max(1, int((y - footer - 80) // 64))
+        columns = 2 if width >= 400 else 1
+        page_size = rows * columns
+        self.page = min(self.page, max(0, (len(choices) - 1) // page_size))
+        visible = choices[self.page * page_size:(self.page + 1) * page_size]
+        gap = 8
+        card_width = (width - gap * (columns - 1)) / columns
+        for index, card in enumerate(visible):
+            planet = card.planet
+            action = ('ready_planet', planet.planet_id)
+            row, column = divmod(index, columns)
+            left = x + column * (card_width + gap)
+            top = y - 48 - row * 64
+            card_bottom = top - 56
+            selected = planet.planet_id in session.ready_planets
+            hovered = self.hover_action == action
+            surface(left, left + card_width, card_bottom, top,
+                    SELECTED if selected or hovered else CARD,
+                    ACCENT if selected or hovered else BORDER)
+            w.text(('ready_planet_name', planet.planet_id), planet.name,
+                   left + 10, top - 20, 11, INK, max_width=card_width - 20)
+            w.text(('ready_planet_stats', planet.planet_id),
+                   f'RES {planet.resources}  ·  INF {planet.influence}',
+                   left + 10, top - 40, 9, GOLD if selected else MUTED,
+                   max_width=card_width - 96)
+            w.text(('ready_planet_state', planet.planet_id),
+                   'READY' if selected else 'EXHAUSTED',
+                   left + card_width - 68, top - 40, 8, ACCENT if selected else MUTED)
+            self.hits.append((action, left, left + card_width, card_bottom, top))
+            tile = w.strategy.planet_system(planet.planet_id)
+            if tile:
+                self.hover_system_hits.append((left, left + card_width, card_bottom, top, tile.position))
+        if len(choices) > page_size:
+            page_y = y - 48 - rows * 64
+            self.button(w, ('page', -1), '‹', x, page_y, 42, self.page > 0)
+            self.button(w, ('page', 1), f'{self.page + 1}/{(len(choices) + page_size - 1) // page_size}  ›',
+                        x + width - 88, page_y, 88,
+                        (self.page + 1) * page_size < len(choices))
 
     def options(self, w, options, x, y, width, size=5):
         self.page = min(self.page, max(0, (len(options) - 1) // size))
@@ -78,10 +133,11 @@ class StrategyPanel:
     def draw(self, w, turn, left=None):
         self.hits.clear()
         self.hover_system_hits.clear()
+        self.card_bounds = None
         s = w.strategy.session
         draft = turn.strategy_selection
         map_choice = bool(s and s.stage in ('construction', 'diplomacy_system',
-                                            'diplomacy_secondary_system', 'warfare_system'))
+                                            'diplomacy_secondary_system', 'ready_planets', 'warfare_system'))
         width = min(1060 if draft else 440 if map_choice else 830, w.width - 48)
         height = min(730, w.height - 48) if draft else min(555, w.height - w.player_panel.HEIGHT - 48)
         base_x = w.width - width - 16 if map_choice else (w.width - width) / 2
@@ -96,7 +152,8 @@ class StrategyPanel:
             arcade.draw_lrbt_rectangle_filled(0, w.width, w.player_panel.HEIGHT if not draft else 0,
                                               w.height, (4, 9, 18, 205))
         modal(x, x + width, bottom, top)
-        w.text('strategy_drag_hint', 'DRAG HEADER TO MOVE', x + width - 181, top - 22, 8, MUTED)
+        w.text('strategy_drag_hint', 'DRAG HEADER OR CARD TO MOVE',
+               x + width - 210, top - 22, 8, MUTED)
         if draft:
             self.draw_draft(w, turn, x, bottom, width, height)
             if self.mouse:
@@ -110,19 +167,43 @@ class StrategyPanel:
         key = (s.card, s.player.faction, s.stage, s.builds_left)
         if key != self.page_key:
             self.page, self.page_key = 0, key
+        if self.card_session is not s:
+            self.card_offset[:] = [0.0, 0.0]
+            self.card_session = s
         w.text('strategy_modal_title', f'{s.card} · {STRATEGY_CARDS[s.card][0].upper()}',
                x + 22, top - 31, 17, ACCENT)
         kind = 'PRIMARY' if s.primary else 'SECONDARY'
         w.text('strategy_actor', f'{s.player.name} / {kind} ABILITY', x + 22, top - 57, 11, GOLD)
-        w.player_panel.image(strategy_image(s.card), x + 111, top - 204, 234)
         w.text('strategy_queue', f'Action: {s.owner.faction.upper()}\nNext responses: {len(s.remaining)}',
                x + 24, bottom + 95, 10, MUTED, 177)
         rx, rw, y = x + 229, width - 251, top - 101
         self.draw_stage(w, s, rx, y, rw, bottom)
         if w.movement_error:
             w.text('strategy_error', w.movement_error, x + 22, bottom + 18, 10, DANGER, width - 44)
+        self.draw_strategy_card(w, s, x, top)
         if self.mouse:
             self.update_hover(*self.mouse)
+
+    def draw_strategy_card(self, w, session, x, top):
+        size = 234
+        art_path = strategy_image(session.card)
+        texture_path = RESOURCES / art_path
+        texture = w.player_panel.textures.get(texture_path)
+        if texture is None:
+            texture = arcade.load_texture(texture_path)
+            w.player_panel.textures[texture_path] = texture
+        image_width = size * texture.width / max(texture.width, texture.height)
+        image_height = size * texture.height / max(texture.width, texture.height)
+        center_x = x + 111 + self.card_offset[0]
+        center_y = top - 204 + self.card_offset[1]
+        center_x = min(max(center_x, image_width / 2), w.width - image_width / 2)
+        center_y = min(max(center_y, image_height / 2), w.height - image_height / 2)
+        self.card_offset[0] = center_x - (x + 111)
+        self.card_offset[1] = center_y - (top - 204)
+        w.player_panel.image(art_path, center_x, center_y, size)
+        left, right = center_x - image_width / 2, center_x + image_width / 2
+        bottom, upper = center_y - image_height / 2, center_y + image_height / 2
+        self.card_bounds = (left, right, bottom, upper)
 
     def draw_draft(self, w, turn, x, bottom, width, height):
         top = bottom + height
@@ -237,11 +318,14 @@ class StrategyPanel:
                 w.text('strategy_no_system', 'No eligible systems.', x, y, 12, MUTED)
                 self.button(w, ('continue',), 'CONTINUE', x, foot, width)
         elif s.stage == 'ready_planets':
-            options = [(('ready_planet', c.planet.planet_id), c.planet.name, c.planet.planet_id in s.ready_planets)
-                       for c in s.player.planets if c.exhausted and
-                       w.strategy.planet_system(c.planet.planet_id).position == s.selected_system]
-            w.text('strategy_ready_title', f'Ready up to 2 planets · selected {len(s.ready_planets)}/2', x, y, 12, GOLD)
-            self.options(w, options, x, y - 47, width, rows)
+            choices = [c for c in s.player.planets if c.exhausted]
+            ready_title = (f'Ready planets · {len(s.ready_planets)}/2' if width < 250 else
+                           f'Ready up to 2 planets · selected {len(s.ready_planets)}/2')
+            w.text('strategy_ready_title', ready_title, x, y, 12, GOLD, width)
+            if choices:
+                self.planet_cards(w, s, choices, x, y, width, bottom)
+            else:
+                w.text('strategy_no_exhausted_planets', 'No exhausted planets you control.', x, y - 54, 11, MUTED, width)
             self.button(w, ('ready_confirm',), 'CONFIRM PLANETS', x, foot, width)
         elif s.stage == 'speaker':
             if s.drawn_cards:

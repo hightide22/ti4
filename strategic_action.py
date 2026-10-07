@@ -284,8 +284,7 @@ class StrategyController:
     def toggle_ready(self, planet_id):
         s = self.session
         card = next((c for c in s.player.planets if c.planet.planet_id == planet_id), None)
-        if s.stage != 'ready_planets' or not card or not card.exhausted or \
-                self.planet_system(planet_id).position != s.selected_system:
+        if s.stage != 'ready_planets' or not card or not card.exhausted:
             return
         if planet_id in s.ready_planets:
             s.ready_planets.remove(planet_id)

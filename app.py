@@ -540,12 +540,15 @@ class BoardWindow(arcade.Window):
             self.outline(self.selected, ACCENT, 3)
             self.draw_route_preview(movement_route)
         if self.strategy.session and self.strategy.session.stage in (
-                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'ready_planets', 'warfare_system'):
             for position in self.strategy.selectable_systems():
                 self.outline(position, GOLD, 4)
             selected_system = self.strategy.session.selected_system
             if selected_system is not None:
                 self.outline(selected_system, ACCENT, 5)
+            hovered_system = self.strategy_hover_system
+            if hovered_system is not None and hovered_system != selected_system:
+                self.outline(hovered_system, (112, 230, 245), 5)
             pending_system = self.strategy.session.pending_system
             if pending_system is not None:
                 self.outline(pending_system, (255, 230, 128), 6)
@@ -1129,7 +1132,8 @@ class BoardWindow(arcade.Window):
                 'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'))
             bounds = self.strategy_panel.bounds
             over_modal = bounds and bounds[0] <= x <= bounds[1] and bounds[2] <= y <= bounds[3]
-            position = self.pick(x, y) if map_stage and not over_modal else None
+            over_strategy_card = self.strategy_panel.drag_card(x, y)
+            position = self.pick(x, y) if map_stage and not over_modal and not over_strategy_card else None
             self.strategy_hover_system = (position if position in self.strategy.selectable_systems()
                                           else self.strategy_panel.hover_system)
         else:
@@ -1147,6 +1151,9 @@ class BoardWindow(arcade.Window):
         self.sync_turn_action()
         if self.strategy_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
+                if self.strategy_panel.drag_card(x, y):
+                    self.dragging_modal = 'strategy_card'
+                    return
                 if self.strategy_panel.drag_header(x, y):
                     self.dragging_modal = 'strategy'
                     return
@@ -1413,9 +1420,12 @@ class BoardWindow(arcade.Window):
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         if self.dragging_modal:
             if buttons & arcade.MOUSE_BUTTON_LEFT:
-                panel = self.strategy_panel if self.dragging_modal == 'strategy' else self.combat_panel
-                panel.move(dx, dy)
-                if self.dragging_modal == 'strategy':
+                if self.dragging_modal == 'strategy_card':
+                    self.strategy_panel.move_card(dx, dy)
+                else:
+                    panel = self.strategy_panel if self.dragging_modal == 'strategy' else self.combat_panel
+                    panel.move(dx, dy)
+                if self.dragging_modal in ('strategy', 'strategy_card'):
                     self.strategy_panel.update_hover(x, y)
                     self.strategy_hover_system = self.strategy_panel.hover_system
             else:
