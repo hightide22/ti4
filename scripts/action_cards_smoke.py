@@ -17,6 +17,12 @@ def click(window, rect):
     window.on_draw()
 
 
+def hover(window, rect):
+    x, y = (rect[1] + rect[2]) / 2, (rect[3] + rect[4]) / 2
+    window.on_mouse_motion(x, y, 0, 0)
+    window.on_draw()
+
+
 def main():
     output = Path(__file__).resolve().parents[1] / 'previews' / VARIANT.lower()
     output.mkdir(parents=True, exist_ok=True)
@@ -59,6 +65,23 @@ def main():
         assert window.movement.session.sources
         assert player.action_cards == []
 
+        player.action_cards[:] = ['flank_speed', 'morale_boost', 'fighter_prototype',
+                                  'shields_holding', 'emergency_repairs', 'skilled_retreat',
+                                  'flank_speed']
+        window.action_card_panel.open = True
+        window.on_mouse_motion(-1, -1, 0, 0)
+        window.on_draw()
+        fan = window.action_card_panel.card_bounds
+        assert len(fan) == 7
+        assert fan[0][1] >= window.action_card_panel.bounds[0]
+        assert fan[-1][2] <= window.action_card_panel.bounds[1]
+        assert all(left[2] > right[1] for left, right in zip(fan, fan[1:]))
+        assert {'flank_speed', 'morale_boost', 'fighter_prototype', 'shields_holding',
+                'emergency_repairs', 'skilled_retreat'} <= set(window.action_card_panel._textures)
+        arcade.get_image().save(output / 'action-cards-full-hand.png')
+        window.action_card_panel.open = False
+        player.action_cards.clear()
+
         session = window.movement.session
         session.stage = 'space_combat'
         session.combat_type = 'space'
@@ -78,8 +101,14 @@ def main():
         click(window, combat_button)
         assert window.action_card_panel.open
         assert any(hit[0] == ('play', 0) for hit in window.action_card_panel.hits)
+        assert {'morale_boost', 'fighter_prototype'} <= set(window.action_card_panel._textures)
+        first_card = window.action_card_panel.card_bounds[0]
+        hover(window, first_card)
+        assert window.action_card_panel.hovered_card_index == first_card[0]
+        lifted_hit = next(hit for hit in window.action_card_panel.hits if hit[0] == ('play', first_card[0]))
+        assert lifted_hit[2] - lifted_hit[1] > first_card[2] - first_card[1]
         arcade.get_image().save(output / 'action-cards-combat.png')
-        play_button = next(hit for hit in window.action_card_panel.hits if hit[0] == ('play', 0))
+        play_button = lifted_hit
         click(window, play_button)
         assert session.combat_modifiers[player.faction] == 1
         assert player.action_cards == ['fighter_prototype']

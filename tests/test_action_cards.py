@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from action_cards import ActionCardController
+from action_card_panel import CARD_ART, CARD_IMAGES
 from board import load_board
 from movement import MovementController, Session, Snapshot, capital_ship
 from player import create_players
@@ -174,6 +175,12 @@ class ActionCardTests(unittest.TestCase):
         player.action_cards[:] = ['flank_speed'] * 6
         self.assertEqual(len(self.cards.draw(player, 2)), 1)
         self.assertEqual(len(player.action_cards), 7)
+
+
+class ActionCardArtworkTests(unittest.TestCase):
+    def test_all_shortlisted_cards_have_a_face_image(self):
+        self.assertEqual(len(CARD_IMAGES), 30)
+        self.assertTrue(all((CARD_ART / filename).is_file() for filename in CARD_IMAGES.values()))
 
 
 if __name__ == '__main__':

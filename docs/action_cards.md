@@ -38,3 +38,7 @@ The initial playable set is **Flank Speed**, **Morale Boost**, **Fighter Prototy
 | Fighter Conscription | Component action | Place fighters in eligible systems | Planned |
 
 This is a shortlist, not a complete deck list. Candidate names and timing windows were cross-checked against the game's pinned AsyncTI4 action-card data and the [Twilight Imperium action-card reference](https://twilight-imperium.fandom.com/wiki/Action_Cards). The timing-window convention is also described in the [Living Rules Reference, section 2](https://images-cdn.fantasyflightgames.com/filer_public/e3/ae/e3ae7182-66db-4d58-ad20-83a6b87dec25/ti4_living_rules_reference_v1_3_web.pdf).
+
+## Card artwork
+
+Face images for all 30 shortlisted cards are included in `assets/action_cards/`. The six implemented cards use their scans in the hand; the remaining images are ready as the rest of the shortlist is implemented. The files were taken from the English action-card textures in the public [TI4-TTPG repository](https://github.com/TI4-Online/TI4-TTPG/tree/main/prebuild/Textures/en/card/action). Twilight Imperium card artwork remains the property of its original rights holder.
