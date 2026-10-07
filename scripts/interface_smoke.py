@@ -1,6 +1,7 @@
 """Exercise dense, scrollable UI states at the minimum supported window size."""
 from pathlib import Path
 from copy import copy
+import math
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -50,6 +51,7 @@ def main():
         w.pass_turn()
         assert order.active_player is next_player
         assert w.roster.player_indices(w)[0] == next_index
+        previous_center = tuple(w.map_center)
         next_positions = w.player_system_positions(next_player)
         next_coords = [world(position) for position in next_positions]
         assert next_coords
@@ -57,6 +59,12 @@ def main():
             (min(x for x, _ in next_coords) + max(x for x, _ in next_coords)) / 2,
             (min(y for _, y in next_coords) + max(y for _, y in next_coords)) / 2,
         ]
+        previous_distance = math.dist(previous_center, w.target_map_center)
+        w.on_update(.016)
+        assert math.dist(w.map_center, w.target_map_center) < previous_distance
+        w.on_update(1.0)
+        assert w.map_center == w.target_map_center
+        assert w.target_zoom <= 1.6
         center_x, center_y = w.viewport_center
         scale = w.fit_scale * w.target_zoom
         radius = scale
@@ -73,6 +81,7 @@ def main():
         order.action_used = False
         w.player_panel.active = first_index
         w.frame_player_systems(order.active_player)
+        w.on_update(1.0)
         w.mouse_position = (-1, -1)
 
         player = w.player_panel.players[0]

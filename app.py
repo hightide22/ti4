@@ -147,7 +147,7 @@ class BoardWindow(arcade.Window):
         available_width = max(1, self.width - self.sidebar - self.roster.WIDTH - 80)
         available_height = max(1, self.height - 180 - self.player_panel.HEIGHT)
         required_scale = min(available_width / bounds_width, available_height / bounds_height)
-        self.target_zoom = min(3.5, max(.55, required_scale / self.fit_scale))
+        self.target_zoom = min(1.6, max(.55, required_scale / self.fit_scale))
         self.target_map_center = [(max(xs) + min(xs)) / 2,
                                   (max(ys) + min(ys)) / 2]
         center = self.target_map_center
