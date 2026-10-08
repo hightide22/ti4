@@ -138,7 +138,8 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(session.stage, 'production')
         self.assertEqual(session.production_limit,
                          sum(value for _, value in self.controller.production_sites(session)))
-        self.assertEqual(self.controller.unit_cost('mech', self.player), 2)
+        with self.assertRaises(MovementError):
+            self.controller.adjust_production('mech', 1)
         production_planet_id = session.production_sites[0][0]
         production_planet = next(planet for planet in self.home.planets
                                  if planet.planet_id == production_planet_id)
@@ -417,8 +418,7 @@ class MovementTests(unittest.TestCase):
         defenders = []
         for index, planet in enumerate(planets):
             target.planet_owners[planet.planet_id] = 'hacan'
-            defender_kind = 'mech' if index == 0 else 'infantry'
-            defender = Unit(f'hacan-defender-{planet.planet_id}', defender_kind, 'hacan', hacan.color_code,
+            defender = Unit(f'hacan-defender-{planet.planet_id}', 'infantry', 'hacan', hacan.color_code,
                             UnitLocation(Region.PLANET, planet_id=planet.planet_id))
             target.units.append(defender)
             defenders.append(defender)
@@ -444,12 +444,7 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(session.combat_planet_id, planets[0].planet_id)
         with patch('movement.random.randint', side_effect=(10, 1)):
             self.controller.advance_combat()
-        self.controller.assign_combat_hit('hacan', 'mech')
-        self.controller.advance_combat()
-        self.assertTrue(defenders[0].damaged)
-        with patch('movement.random.randint', side_effect=(10, 1)):
-            self.controller.advance_combat()
-        self.controller.assign_combat_hit('hacan', 'mech')
+        self.controller.assign_combat_hit('hacan', 'infantry')
         self.controller.advance_combat()
         self.assertEqual(session.stage, 'ground_combat')
         self.assertEqual(session.combat_planet_id, planets[1].planet_id)

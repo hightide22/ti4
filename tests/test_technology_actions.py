@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from board import load_board
-from movement import MovementController, MovementError, Session, Snapshot
+from movement import MovementController, Session, Snapshot
 from player import PlanetCard, create_players
 from technology_actions import TechnologyActions
 from turn_order import TurnOrder
@@ -20,26 +20,6 @@ class TechnologyActionTests(unittest.TestCase):
         self.home = next(tile for tile in self.board.values()
                          if any(unit.owner == 'sol' and unit.kind == 'spacedock'
                                 for unit in tile.units))
-
-    def test_sling_relay_produces_one_ship_and_exhausts_card(self):
-        self.sol.technologies |= {'sr'}
-        self.sol.command_pools['fleet'] += 1
-        dock = next(unit for unit in self.home.units if unit.kind == 'spacedock')
-        self.actions.use(self.sol, 'sr', dock.unit_id)
-        session = self.movement.session
-        self.assertTrue(session.sling_relay)
-        self.assertEqual(session.production_limit, 1)
-        self.assertIn('sr', self.sol.exhausted_technologies)
-        with self.assertRaisesRegex(MovementError, 'only a ship'):
-            self.movement.adjust_production('infantry', 1)
-        self.movement.adjust_production('cruiser', 1)
-        self.movement.toggle_production_planet('jord')
-        self.movement.produce()
-        self.assertIsNone(self.movement.session)
-        self.assertEqual(sum(unit.owner == 'sol' and unit.kind == 'cruiser'
-                             for unit in self.home.units), 1)
-        self.movement.undo()
-        self.assertNotIn('sr', self.sol.exhausted_technologies)
 
     def test_x89_destroys_all_infantry_on_selected_planet(self):
         self.sol.technologies |= {'x89_base'}
@@ -120,22 +100,6 @@ class TechnologyActionTests(unittest.TestCase):
         self.assertEqual(hacan.trade_goods, 0)
         self.assertEqual(self.sol.trade_goods, 3)
         self.assertFalse(turn.qdn_pending)
-
-    def test_bio_stims_readies_another_exhausted_technology_at_turn_end(self):
-        self.sol.technologies |= {'bs', 'aida'}
-        self.sol.exhausted_technologies.add('aida')
-        self.assertTrue(self.actions.begin_end_turn(self.sol))
-        self.actions.use(self.sol, 'bs', 'tech:aida')
-        self.assertIn('bs', self.sol.exhausted_technologies)
-        self.assertNotIn('aida', self.sol.exhausted_technologies)
-
-    def test_predictive_intelligence_can_redistribute_multiple_tokens(self):
-        self.sol.technologies |= {'pi'}
-        self.assertTrue(self.actions.begin_end_turn(self.sol))
-        self.actions.use(self.sol, 'pi', 'tactical:fleet')
-        self.actions.use(self.sol, 'pi', 'strategic:fleet')
-        self.assertEqual(self.sol.command_pools, {'tactical': 2, 'fleet': 5, 'strategic': 1})
-        self.assertIn('pi', self.sol.exhausted_technologies)
 
 
 if __name__ == '__main__':

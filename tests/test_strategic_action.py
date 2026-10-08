@@ -180,7 +180,7 @@ class StrategicActionTests(unittest.TestCase):
         c.decline_secondary()
         self.assertTrue(self.turn.action_used)
 
-    def test_diplomacy_readies_exhausted_planet_in_any_controlled_system(self):
+    def test_base_diplomacy_readies_chosen_system_then_secondary_any_planets(self):
         self.start_card(2, owner=1)
         for card in self.hacan.planets:
             card.exhausted = True
@@ -197,19 +197,24 @@ class StrategicActionTests(unittest.TestCase):
         self.hacan.planets.append(stale)
         remote_system.planet_owners[chosen.planet.planet_id] = self.hacan.faction
         c.select_system(selected_system.position)
-        self.assertEqual(c.session.stage, 'ready_planets')
-        self.assertIn(chosen, c.readyable_planets(self.hacan))
-        self.assertNotIn(stale, c.readyable_planets(self.hacan))
-        c.toggle_ready(self.sol.planets[0].planet.planet_id)
-        self.assertFalse(c.session.ready_planets, 'A planet controlled by another player must not be selectable.')
-        c.toggle_ready(stale.planet.planet_id)
-        self.assertFalse(c.session.ready_planets, 'An unowned stale planet card must not be selectable.')
-        c.toggle_ready(chosen.planet.planet_id)
-        self.assertEqual(c.session.ready_planets, {chosen.planet.planet_id})
-        c.confirm_ready()
-        self.assertFalse(chosen.exhausted)
-        self.assertTrue(all(p.exhausted for p in self.hacan.planets if p is not chosen))
+        self.assertEqual(c.session.stage, 'offer')
+        self.assertIs(c.player, self.jolnar)
+        c.decline_secondary()
+        self.assertIs(c.player, self.sol)
+        self.assertTrue(all(not card.exhausted for card in self.hacan.planets
+                            if selected_system.planet_owners.get(card.planet.planet_id) == 'hacan'))
+        self.assertTrue(chosen.exhausted, 'The primary cannot ready a planet outside the chosen system.')
+        self.assertTrue(stale.exhausted)
         self.assertEqual(selected_system.command_tokens, {'sol', 'jolnar'})
+        self.sol.planets[0].exhausted = True
+        c.accept_secondary()
+        self.assertEqual(c.session.stage, 'ready_planets')
+        c.toggle_ready(chosen.planet.planet_id)
+        self.assertFalse(c.session.ready_planets, 'A planet controlled by another player must not be selectable.')
+        c.toggle_ready(self.sol.planets[0].planet.planet_id)
+        c.confirm_ready()
+        self.assertFalse(self.sol.planets[0].exhausted)
+        self.assertTrue(chosen.exhausted)
 
     def test_completing_secondary_production_keeps_next_offer_and_owner_turn(self):
         self.start_card(6, owner=2)

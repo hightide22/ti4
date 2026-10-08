@@ -1,7 +1,9 @@
 import unittest
+import json
+from pathlib import Path
 from unittest.mock import patch
 
-from board import load_board
+from board import RESOURCES, load_board
 from movement import MovementController, MovementError, Session, Snapshot
 from player import create_players
 from strategic_action import StrategyController
@@ -9,7 +11,7 @@ from technology import (available_technologies, missing_prerequisites, research_
                         restore_infantry_on_cards, technology_catalog, technology_image,
                         unit_stats, unit_upgrade)
 from turn_order import TurnOrder
-from units import Region, Unit, UnitLocation, unit_profile
+from units import Region, Unit, UnitLocation, unit_profile, unit_profiles
 
 
 class TechnologyTests(unittest.TestCase):
@@ -21,9 +23,19 @@ class TechnologyTests(unittest.TestCase):
 
     def test_every_available_card_has_a_bundled_scan(self):
         catalog = technology_catalog()
-        self.assertEqual(len(catalog), 41)
+        self.assertEqual(len(catalog), 33)
         self.assertTrue(all(technology_image(card).is_file() for card in catalog.values()))
-        self.assertEqual(len(available_technologies(self.by_faction['sol'])), 33)
+        self.assertTrue(all(card['source'] == 'base' for card in catalog.values()))
+        self.assertNotIn('aida', catalog)
+        self.assertNotIn('bs', catalog)
+        self.assertEqual(len(available_technologies(self.by_faction['sol'])), 25)
+        manifest = json.loads((Path(__file__).resolve().parents[1] / 'assets/resources.lock.json')
+                              .read_text(encoding='utf-8'))
+        pinned = {entry['path'] for entry in manifest['files']}
+        self.assertTrue({technology_image(card).relative_to(RESOURCES).as_posix()
+                         for card in catalog.values()} <= pinned)
+        definitions, _ = unit_profiles()
+        self.assertTrue(all(profile.get('source') == 'base' for profile in definitions.values()))
 
     def test_research_replaces_existing_and_future_sol_carriers(self):
         sol = self.by_faction['sol']
@@ -108,25 +120,16 @@ class TechnologyTests(unittest.TestCase):
         self.assertTrue(all(unit.profile_id == 'sol_infantry2' for unit in home.units
                             if unit.owner == 'sol' and unit.kind == 'infantry'))
 
-    def test_aida_and_self_assembly_apply_to_production(self):
+    def test_sarween_tools_reduce_base_game_production_cost(self):
         sol = self.by_faction['sol']
-        sol.technologies |= {'aida', 'sar', 'dd2', 'ac2'}
-        sol.command_pools['fleet'] += 1
+        sol.technologies |= {'st'}
         home = next(tile for tile in self.board.values()
                     if any(p.faction_homeworld == 'sol' for p in tile.planets))
-        old_mechs = sum(unit.kind == 'mech' and unit.owner == 'sol' for unit in home.units)
         self.movement.activate(sol, home.position)
         self.movement.confirm()
         self.movement.establish_control()
         self.movement.adjust_production('cruiser', 1)
-        self.movement.toggle_production_technology('aida')
-        self.movement.toggle_production_technology('sar')
-        self.assertEqual(self.movement.production_cost(self.movement.session), 0)
-        self.movement.produce()
-        self.assertIn('aida', sol.exhausted_technologies)
-        self.assertIn('sar', sol.exhausted_technologies)
-        self.assertEqual(sum(unit.kind == 'mech' and unit.owner == 'sol'
-                             for unit in home.units), old_mechs + 1)
+        self.assertEqual(self.movement.production_cost(self.movement.session), 1)
 
     def test_non_euclidean_shielding_cancels_two_space_cannon_hits(self):
         sol = self.by_faction['sol']

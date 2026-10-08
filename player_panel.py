@@ -240,8 +240,6 @@ class PlayerPanel:
         window.text(('planet_inf', index), str(planet.influence), x + 84, y + 9, 14, ACCENT if not exhausted else MUTED)
         if planet.tech_specialties:
             self.image(f'planet_cards/pc_tech_{planet.tech_specialties[0].lower()}_{suffix}.png', x + width - 12, y + 59, 13)
-        if planet.legendary_ability_name:
-            self.image(f'planet_cards/pc_legendary_{suffix}.png', x + width - 12, y + 58, 14)
         self.controls.append(Control(('planet', index), x, hit_y, width, height))
 
     def draw_details(self, window):

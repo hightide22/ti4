@@ -397,7 +397,7 @@ class BoardWindow(arcade.Window):
 
     def sync_strategy_actor(self):
         if self.strategy.session and self.strategy.session.stage in (
-                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+                'construction', 'diplomacy_system', 'warfare_system'):
             self.focus_view = False
             if getattr(self, 'inspector_visible', True) is False and hasattr(self, 'toggle_inspector'):
                 self.toggle_inspector()
@@ -496,7 +496,6 @@ class BoardWindow(arcade.Window):
         try:
             if kind == 'close' and not research:
                 self.technology_actions.cancel_transit()
-                self.technology_actions.finish_end_turn()
                 self.technology_view = False
             elif kind == 'tab':
                 if self.technology_actions.transit:
@@ -525,8 +524,6 @@ class BoardWindow(arcade.Window):
                 panel.planet_mode = args[0]
             elif kind == 'goods' and research:
                 ctl.change_goods(args[0])
-            elif kind == 'aida' and research:
-                ctl.toggle_aida()
             elif kind == 'research' and research:
                 ctl.research_selected()
                 panel.preview_alias = None
@@ -552,13 +549,8 @@ class BoardWindow(arcade.Window):
                 self.sync_turn_action()
             elif kind == 'use' and not research:
                 self.technology_actions.use(self.player_panel.player, args[0], args[1])
-                if args[0] not in ('pa', 'bs', 'pi'):
-                    self.technology_view = False
-                self.sync_turn_action()
-            elif kind == 'finish_turn' and not research:
-                self.technology_actions.finish_end_turn()
                 self.technology_view = False
-                self.pass_turn(skip_technology_prompt=True)
+                self.sync_turn_action()
             self.movement_error = None
         except (ValueError, StopIteration) as error:
             self.movement_error = str(error) or 'This choice is no longer available.'
@@ -613,7 +605,7 @@ class BoardWindow(arcade.Window):
     def strategy_map_click(self, x, y):
         session = self.strategy.session
         if not session or session.stage not in (
-                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+                'construction', 'diplomacy_system', 'warfare_system'):
             return
         position = self.pick(x, y)
         if position is None:
@@ -641,19 +633,7 @@ class BoardWindow(arcade.Window):
         except ValueError as error:
             self.movement_error = str(error)
 
-    def pass_turn(self, skip_technology_prompt=False):
-        if (not skip_technology_prompt and not self.smoke and self.turn_order.active_player and
-                not self.turn_order.strategy_selection and not self.turn_order.command_allocation and
-                not self.strategy.session and not self.movement.session and
-                self.technology_actions.begin_end_turn(self.turn_order.active_player)):
-            self.technology_view = True
-            bio_stims = ('bs' in self.turn_order.active_player.technologies and
-                         'bs' not in self.turn_order.active_player.exhausted_technologies)
-            self.technology_panel.tab = 'BIOTIC' if bio_stims else 'CYBERNETIC'
-            self.technology_panel.preview_alias = 'bs' if bio_stims else 'pi'
-            self.technology_panel.scroll = 0
-            self.technology_panel.action_page = 0
-            return
+    def pass_turn(self):
         self.strategy_view = False
         try:
             round_complete = self.turn_order.end_turn()
@@ -740,7 +720,7 @@ class BoardWindow(arcade.Window):
             self.outline(self.selected, ACCENT, 3)
             self.draw_route_preview(movement_route)
         if self.strategy.session and self.strategy.session.stage in (
-                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'ready_planets', 'warfare_system'):
+                'construction', 'diplomacy_system', 'ready_planets', 'warfare_system'):
             for position in self.strategy.selectable_systems():
                 self.outline(position, GOLD, 4)
             selected_system = self.strategy.session.selected_system
@@ -972,20 +952,6 @@ class BoardWindow(arcade.Window):
                     self.strategy.continue_stage()
             self.turn_order.actions_used = 0
             self.turn_order.action_used = False
-            player.technologies |= {'sr'}
-            self.technology_view = True
-            self.technology_panel.tab = 'PROPULSION'
-            self.technology_panel.preview_alias = 'sr'
-            self.on_draw()
-            arcade.get_image().save(preview_dir / 'technology-action-preview.png')
-            sling = next(hit for hit in self.technology_panel.hits
-                         if hit[0][:2] == ('use', 'sr'))
-            self.on_mouse_press((sling[1] + sling[2]) / 2,
-                                (sling[3] + sling[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
-            assert self.movement.session and self.movement.session.sling_relay
-            self.on_draw()
-            arcade.get_image().save(preview_dir / 'technology-sling-relay-preview.png')
-            self.movement.cancel()
             hacan = next(other for other in self.turn_order.players if other.faction == 'hacan')
             hacan.technologies |= {'qdn'}
             hacan.trade_goods = 3
@@ -1001,24 +967,6 @@ class BoardWindow(arcade.Window):
                                 (swap[3] + swap[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
             assert not self.turn_order.qdn_pending and hacan.trade_goods == 0
             assert self.turn_order.active_player is hacan
-            hacan.technologies |= {'bs', 'aida'}
-            hacan.exhausted_technologies.add('aida')
-            self.turn_order.strategy_enabled = False
-            self.pass_turn()
-            assert self.technology_view and self.technology_actions.end_turn_player is hacan
-            self.on_draw()
-            arcade.get_image().save(preview_dir / 'technology-bio-stims-preview.png')
-            ready = next(hit for hit in self.technology_panel.hits
-                         if hit[0] == ('use', 'bs', 'tech:aida'))
-            self.on_mouse_press((ready[1] + ready[2]) / 2,
-                                (ready[3] + ready[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
-            assert 'aida' not in hacan.exhausted_technologies
-            self.on_draw()
-            finish = next(hit for hit in self.technology_panel.hits
-                          if hit[0] == ('finish_turn',))
-            self.on_mouse_press((finish[1] + finish[2]) / 2,
-                                (finish[3] + finish[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
-            assert self.turn_order.active_player is not hacan
             from movement import Session, Snapshot
             player.technologies |= {'asc'}
             battle_tile = next(tile for tile in self.board.values() if not tile.units)
@@ -1042,7 +990,7 @@ class BoardWindow(arcade.Window):
             self.on_mouse_press((victim[1] + victim[2]) / 2,
                                 (victim[3] + victim[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
             assert battle.stage == 'space_combat'
-            print('PASS: technology research, unit upgrade, actions, QDN, Bio-Stims and Assault Cannon checked')
+            print('PASS: base-game research, unit upgrade, QDN and Assault Cannon checked')
             self.close()
             return
         if self.smoke and self.frames == 5:
@@ -1599,7 +1547,7 @@ class BoardWindow(arcade.Window):
             self.strategy_panel.update_hover(x, y)
             session = self.strategy.session
             map_stage = bool(session and session.stage in (
-                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'))
+                'construction', 'diplomacy_system', 'warfare_system'))
             bounds = self.strategy_panel.bounds
             over_modal = bounds and bounds[0] <= x <= bounds[1] and bounds[2] <= y <= bounds[3]
             over_strategy_card = self.strategy_panel.drag_card(x, y)
@@ -1820,8 +1768,6 @@ class BoardWindow(arcade.Window):
                             self.movement.adjust_production(action[1], action[2])
                         elif action[0] == 'production_trade_goods':
                             self.movement.change_production_trade_goods(action[1])
-                        elif action[0] == 'production_technology':
-                            self.movement.toggle_production_technology(action[1])
                         elif action[0] == 'establish':
                             self.movement.establish_control()
                             self.movement_panel.reset()

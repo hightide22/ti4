@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from player import command_tokens_in_reinforcements
-from technology import (available_technologies, is_unit_upgrade, missing_prerequisites,
+from technology import (available_technologies, missing_prerequisites,
                         research_technology, upgrade_profile)
 from units import Unit, UnitLocation, Region
 
@@ -29,7 +29,6 @@ class StrategyResolution:
     technology_count: int = 0
     technology_brilliant: bool = False
     technology_planets: set[str] = field(default_factory=set)
-    technology_use_aida: bool = False
     selected_system: tuple[int, int] | None = None
     pending_system: tuple[int, int] | None = None
     drawn_cards: list[str] = field(default_factory=list)
@@ -83,7 +82,6 @@ class StrategyController:
             s.technology_selected = None
             s.technology_count = 0
             s.technology_brilliant = False
-            s.technology_use_aida = False
             s.ready_planets.clear()
             s.pool_source = None
             s.selected_system = None
@@ -126,7 +124,7 @@ class StrategyController:
         # Warfare pays when the player chooses a dock.
         if s.card not in (4, 6):
             s.player.command_pools['strategic'] -= self.secondary_cost()
-        s.stage = {1: 'leadership', 2: 'diplomacy_secondary_system', 3: 'action_cards',
+        s.stage = {1: 'leadership', 2: 'ready_planets', 3: 'action_cards',
                    4: 'construction', 5: 'trade_secondary', 6: 'production_site',
                    7: 'technology'}[s.card]
         s.technology_brilliant = brilliant
@@ -213,7 +211,6 @@ class StrategyController:
             raise ValueError('This technology is unavailable or already researched.')
         s.technology_selected = alias
         s.technology_planets.clear()
-        s.technology_use_aida = False
 
     def toggle_technology_planet(self, planet_id, specialty=False):
         s = self.session
@@ -227,18 +224,11 @@ class StrategyController:
         if planet_id in selected:
             selected.remove(planet_id)
             return
-        if planet_id in other or (card.exhausted and not (specialty and 'pa' in s.player.technologies)):
+        if planet_id in other or card.exhausted:
             raise ValueError('This planet is exhausted or already committed.')
         if specialty and not card.planet.tech_specialties:
             raise ValueError('This planet has no technology specialty.')
         selected.add(planet_id)
-
-    def toggle_aida(self):
-        s = self.session
-        if not s or s.stage != 'technology' or 'aida' not in s.player.technologies or \
-                'aida' in s.player.exhausted_technologies:
-            raise ValueError('AI Development Algorithm is not ready.')
-        s.technology_use_aida = not s.technology_use_aida
 
     def research_selected(self):
         s = self.session
@@ -248,15 +238,11 @@ class StrategyController:
         tech = technology_catalog()[s.technology_selected]
         if tech not in available_technologies(s.player) or tech['alias'] in s.player.technologies:
             raise ValueError('This technology is unavailable or already researched.')
-        if s.technology_use_aida and (not is_unit_upgrade(tech) or
-                                      'aida' not in s.player.technologies or
-                                      'aida' in s.player.exhausted_technologies):
-            raise ValueError('AI Development Algorithm cannot be used for this research.')
         cards = {card.planet.planet_id: card for card in s.player.planets}
         specialties = [cards[planet_id] for planet_id in s.technology_planets]
-        if missing_prerequisites(s.player, tech, specialties, s.technology_use_aida):
+        if missing_prerequisites(s.player, tech, specialties):
             raise ValueError('Technology prerequisites are not satisfied.')
-        if any(card.exhausted and 'pa' not in s.player.technologies for card in specialties):
+        if any(card.exhausted for card in specialties):
             raise ValueError('A selected specialty planet is exhausted.')
         if any(cards[planet_id].exhausted for planet_id in s.payment_planets):
             raise ValueError('A payment planet is exhausted.')
@@ -265,17 +251,13 @@ class StrategyController:
         s.player.trade_goods -= s.trade_goods
         for planet_id in s.payment_planets:
             cards[planet_id].exhausted = True
-        if 'pa' not in s.player.technologies:
-            for planet_id in s.technology_planets:
-                cards[planet_id].exhausted = True
-        if s.technology_use_aida:
-            s.player.exhausted_technologies.add('aida')
+        for planet_id in s.technology_planets:
+            cards[planet_id].exhausted = True
         research_technology(s.player, s.technology_selected, self.board)
         s.technology_count += 1
         s.technology_selected = None
         s.technology_planets.clear()
         s.payment_planets.clear()
-        s.technology_use_aida = False
         s.trade_goods = 0
         if not (s.primary or s.technology_brilliant) or s.technology_count >= 2 or \
                 not any(card['alias'] not in s.player.technologies
@@ -296,28 +278,25 @@ class StrategyController:
     def select_system(self, position):
         s = self.session
         tile = self.board[position]
-        if s.stage in ('diplomacy_system', 'diplomacy_secondary_system'):
-            if s.stage == 'diplomacy_system' and tile.number == 18:
+        if s.stage == 'diplomacy_system':
+            if tile.number == 18:
                 raise ValueError('Choose a system other than Mecatol Rex.')
             if s.player.faction not in tile.planet_owners.values():
                 raise ValueError('Choose a system with a planet you control.')
-            if s.stage == 'diplomacy_secondary_system' and not any(
-                    self.planet_system(card.planet.planet_id) is tile
-                    for card in self.readyable_planets(s.player)):
-                raise ValueError('Choose a system with an exhausted planet you control.')
-            if s.stage == 'diplomacy_system':
-                for player in self.turn.players:
-                    if player is s.player or player.faction in tile.command_tokens:
+            for player in self.turn.players:
+                if player is s.player or player.faction in tile.command_tokens:
+                    continue
+                if not command_tokens_in_reinforcements(player, self.board):
+                    pool = next((p for p in ('tactical', 'strategic', 'fleet') if player.command_pools[p]), None)
+                    if pool is None:
                         continue
-                    if not command_tokens_in_reinforcements(player, self.board):
-                        pool = next((p for p in ('tactical', 'strategic', 'fleet') if player.command_pools[p]), None)
-                        if pool is None:
-                            continue
-                        player.command_pools[pool] -= 1
-                    tile.command_tokens.add(player.faction)
+                    player.command_pools[pool] -= 1
+                tile.command_tokens.add(player.faction)
+            for card in s.player.planets:
+                if tile.planet_owners.get(card.planet.planet_id) == s.player.faction:
+                    card.exhausted = False
             s.selected_system = position
-            s.ready_planets.clear()
-            s.stage = 'ready_planets'
+            self._participant_done()
         elif s.stage == 'warfare_system':
             if s.player.faction not in tile.command_tokens:
                 raise ValueError('Choose a system containing your command token.')
@@ -338,11 +317,6 @@ class StrategyController:
         if s.stage == 'diplomacy_system':
             return {tile.position for tile in self.board.values()
                     if tile.number != 18 and s.player.faction in tile.planet_owners.values()}
-        if s.stage == 'diplomacy_secondary_system':
-            return {tile.position for tile in self.board.values()
-                    if any(
-                        self.planet_system(card.planet.planet_id) is tile
-                        for card in self.readyable_planets(s.player))}
         if s.stage == 'warfare_system':
             return {tile.position for tile in self.board.values() if s.player.faction in tile.command_tokens}
         if s.stage == 'construction':
@@ -477,7 +451,7 @@ class StrategyController:
             self._participant_done()
         elif s.stage == 'warfare_system' and not any(s.player.faction in t.command_tokens for t in self.board.values()):
             s.stage = 'warfare_allocate'
-        elif s.stage in ('diplomacy_system', 'diplomacy_secondary_system', 'warfare_system') and \
+        elif s.stage in ('diplomacy_system', 'warfare_system') and \
                 not self.selectable_systems():
             self._participant_done()
         else:

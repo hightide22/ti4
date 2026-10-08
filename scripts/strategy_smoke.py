@@ -144,7 +144,7 @@ def main():
         w.strategy.session = w.turn_order.strategy_resolution = None
         w.strategy_view = False
 
-        # Diplomacy first selects a system, then offers every exhausted planet, including other systems.
+        # Base-game Diplomacy readies only the owner's planets in the chosen system.
         diplomacy_owner = w.turn_order.active_player
         for assignments in w.turn_order.strategy_assignments.values():
             if 2 in assignments:
@@ -157,15 +157,10 @@ def main():
         remote_system = next(tile for tile in w.board.values()
                              if tile.position != selected_system.position and tile.planets and
                              not tile.planet_owners)
-        stale_system = next(tile for tile in w.board.values()
-                            if tile.position not in (selected_system.position, remote_system.position)
-                            and tile.planets and not tile.planet_owners)
         remote_planet = remote_system.planets[0]
         remote_system.planet_owners[remote_planet.planet_id] = diplomacy_owner.faction
         remote_card = PlanetCard(remote_planet, exhausted=True)
-        stale_card = PlanetCard(stale_system.planets[0], exhausted=True)
         diplomacy_owner.planets.append(remote_card)
-        diplomacy_owner.planets.append(stale_card)
         for planet_card in diplomacy_owner.planets:
             planet_card.exhausted = True
         w.strategy.start(2)
@@ -180,27 +175,32 @@ def main():
             'The selected controlled system should remain clickable beside the modal.'
         assert w.pick(sx, sy) == selected_system.position
         w.on_mouse_press(sx, sy, arcade.MOUSE_BUTTON_LEFT, 0)
-        assert w.strategy.session.stage == 'ready_planets'
-        assert w.strategy.session.selected_system == selected_system.position
+        assert w.strategy.session.stage == 'offer'
         assert all(player.faction in selected_system.command_tokens
                    for player in w.player_panel.players if player is not diplomacy_owner)
+        assert all(not card.exhausted for card in diplomacy_owner.planets
+                   if selected_system.planet_owners.get(card.planet.planet_id) == diplomacy_owner.faction)
+        assert remote_card.exhausted
+        responder = w.strategy.player
+        for card in responder.planets:
+            card.exhausted = True
+        w.strategy.accept_secondary()
+        w.sync_strategy_actor()
         render('diplomacy-ready-planets')
-        remote_action = ('ready_planet', remote_planet.planet_id)
+        responder_planet = responder.planets[0].planet
+        responder_system = w.strategy.planet_system(responder_planet.planet_id)
+        remote_action = ('ready_planet', responder_planet.planet_id)
         displayed_planets = {hit[0][1] for hit in w.strategy_panel.hits if hit[0][0] == 'ready_planet'}
-        controlled_exhausted = {card.planet.planet_id for card in diplomacy_owner.planets
-                                if card.exhausted and
-                                w.strategy.planet_system(card.planet.planet_id).planet_owners.get(
-                                    card.planet.planet_id) == diplomacy_owner.faction}
+        controlled_exhausted = {card.planet.planet_id for card in responder.planets
+                                if card.exhausted}
         assert displayed_planets == controlled_exhausted
-        assert stale_card.planet.planet_id not in displayed_planets
         remote_hit = next(hit for hit in w.strategy_panel.hits if hit[0] == remote_action)
         _, left, right, card_bottom, card_top = remote_hit
         w.on_mouse_motion((left + right) / 2, (card_bottom + card_top) / 2, 0, 0)
-        assert w.strategy_hover_system == remote_system.position
+        assert w.strategy_hover_system == responder_system.position
         render('diplomacy-remote-planet-hover')
         click(remote_action)
-        assert remote_planet.planet_id in w.strategy.session.ready_planets
-        assert w.strategy.session.selected_system == selected_system.position
+        assert responder_planet.planet_id in w.strategy.session.ready_planets
         w.strategy.session = w.turn_order.strategy_resolution = None
         w.strategy_view = False
         # Repeat the draft layout at the minimum supported window size.

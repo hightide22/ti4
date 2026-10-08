@@ -55,15 +55,19 @@ class TurnOrder:
         self.action_used = False
         self.actions_used = 0
         self.passed_indices.clear()
-        self.strategy_assignments = {self._key(p): [] for p in self.players}
-        self.strategy_used = {self._key(p): set() for p in self.players}
-        self.strategy_secondary_used = {self._key(p): set() for p in self.players}
-        self.strategy_free_secondary = {5: set()}
+        self.reset_strategy_cards()
         speaker_order = [(self.speaker_index + offset) % len(self.players)
                          for offset in range(len(self.players))]
         picks_per_player = 2 if len(self.players) in (3, 4) else 1
         self.strategy_pick_order = [index for _ in range(picks_per_player) for index in speaker_order]
         self.strategy_pick_cursor = 0
+
+    def reset_strategy_cards(self):
+        """Return every strategy card to the draft after a completed round."""
+        self.strategy_assignments = {self._key(p): [] for p in self.players}
+        self.strategy_used = {self._key(p): set() for p in self.players}
+        self.strategy_secondary_used = {self._key(p): set() for p in self.players}
+        self.strategy_free_secondary = {5: set()}
 
     def choose_strategy_card(self, card):
         if not self.strategy_selection or card not in self.available_strategy_cards:
@@ -176,6 +180,8 @@ class TurnOrder:
                 self.active_index = self.strategy_initiative[0] if self.strategy_initiative else 0
                 self.round_number += 1
                 self.turn_serial += 1
+                if self.strategy_enabled:
+                    self.reset_strategy_cards()
                 return True
         order = self.strategy_initiative if self.strategy_enabled and self.strategy_initiative else list(range(len(self.players)))
         current = order.index(self.active_index) if self.active_index in order else 0

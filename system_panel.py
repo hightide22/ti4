@@ -10,7 +10,7 @@ from ui_theme import (CARD, INK, MUTED, ACCENT, BORDER, SELECTED, DISABLED, DANG
 from units import UNIT_TYPES, Unit, system_inventory, unit_profile
 
 PLANET_TYPES = {"CULTURAL": "Cultural", "INDUSTRIAL": "Industrial", "HAZARDOUS": "Hazardous", "FACTION": "Homeworld", "MR": "Mecatol Rex"}
-ORDER = ("warsun", "flagship", "dreadnought", "carrier", "cruiser", "destroyer", "fighter", "infantry", "mech", "pds", "spacedock")
+ORDER = ("warsun", "flagship", "dreadnought", "carrier", "cruiser", "destroyer", "fighter", "infantry", "pds", "spacedock")
 
 
 @dataclass

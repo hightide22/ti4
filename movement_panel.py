@@ -9,7 +9,7 @@ from units import UNIT_TYPES, Region, unit_profile
 from technology import production_allowed
 
 PRODUCTION_ORDER = ('infantry', 'fighter', 'destroyer', 'cruiser', 'carrier', 'dreadnought',
-                    'mech', 'flagship', 'warsun')
+                    'flagship', 'warsun')
 
 
 def amount(value):
@@ -282,7 +282,7 @@ class MovementPanel:
                 window.text('landing_title', 'COMMIT GROUND FORCES', x, y, 11, ACCENT)
                 y -= 28
                 if not forces:
-                    window.text('landing_empty', 'No transported infantry or mechs can land.', x, y - 10, 11, MUTED, width)
+                    window.text('landing_empty', 'No transported infantry can land.', x, y - 10, 11, MUTED, width)
                     y -= 38
                 for unit in forces:
                     planet_id = session.landings.get(unit.unit_id)
@@ -325,7 +325,7 @@ class MovementPanel:
                 produced = window.movement.production_total(session)
                 window.text('production_title',
                             'INTEGRATED ECONOMY' if session.integrated_current else
-                            'SLING RELAY' if session.sling_relay else 'PRODUCTION',
+                            'PRODUCTION',
                             x, y, 11, ACCENT)
                 y -= 21
                 window.text('production_capacity',
@@ -349,23 +349,8 @@ class MovementPanel:
                            left, y - 36, 34, 32)
                     self.hits.append((('production_trade_goods', delta), left, left + 34, y - 36, y - 4))
                 y -= 54
-                for alias, label in (('aida', 'AI Development: reduce cost'),
-                                     ('sar', 'Self-Assembly: place 1 mech')):
-                    if (not session.integrated_current and not session.sling_relay and
-                            alias in session.player.technologies and
-                            alias not in session.player.exhausted_technologies):
-                        selected = getattr(session, f'production_{alias}')
-                        arcade.draw_lrbt_rectangle_filled(x, x + width, y - 25, y,
-                                                           (39, 75, 65) if selected else CARD)
-                        window.text(('production_technology', alias),
-                                    f'{"✓ " if selected else ""}{label}', x + 8, y - 17,
-                                    9, ACCENT if selected else INK, width - 16)
-                        self.hits.append((('production_technology', alias), x, x + width,
-                                          y - 25, y))
-                        y -= 29
                 for kind in PRODUCTION_ORDER:
-                    if not production_allowed(session.player, kind) or \
-                            (session.sling_relay and not UNIT_TYPES[kind]['ship']):
+                    if not production_allowed(session.player, kind):
                         continue
                     top = y
                     count = session.production_choices.get(kind, 0)

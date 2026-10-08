@@ -21,7 +21,7 @@ def player_reference():
              if card.get('source') == 'base'}
     return ({f['alias']: f for f in read('data/factions/base.json')},
             {a['id']: a for a in read('data/abilities/base.json')},
-            {t['alias']: t for t in read('data/technologies/pok.json')}, cards)
+            {t['alias']: t for t in read('data/technologies/pok.json') if t.get('source') == 'base'}, cards)
 
 
 class PlayerRoster:

@@ -108,19 +108,9 @@
       "sha": "322b3083b1aef5dc0de62a73055c2d40c79f64d0"
     },
     {
-      "path": "planet_cards/pc_legendary_exh.png",
-      "size": 2440,
-      "sha": "b97e690ca92eefd34cc6a06d523c2ab741d9ca79"
-    },
-    {
       "path": "planet_cards/pc_inf_rdy.png",
       "size": 2128,
       "sha": "b552f76299517a0c2213d0cb04a3f2f16f67f0ea"
-    },
-    {
-      "path": "planet_cards/pc_legendary_rdy.png",
-      "size": 2385,
-      "sha": "a5bd392bf379481f92dd73f6acd2eead57b3012d"
     },
     {
       "path": "planet_cards/pc_res_exh.png",
@@ -1023,11 +1013,6 @@
       "sha": "ae70fc877b55c482827a5557ce379847245fd49a"
     },
     {
-      "path": "units/blu_mf.png",
-      "size": 6858,
-      "sha": "5242eee93ba6e8b21038236c248f5c790aa691b2"
-    },
-    {
       "path": "units/blu_ws.png",
       "size": 10001,
       "sha": "8b131802a6c4ab8b1ee2f7a9cb4298dfee4fc0c1"
@@ -1061,11 +1046,6 @@
       "path": "units/ppl_ff.png",
       "size": 5161,
       "sha": "24cba6d3bb41c07687c15307804654a9549a45a2"
-    },
-    {
-      "path": "units/ppl_mf.png",
-      "size": 6889,
-      "sha": "62c1680214f83ee1095cf5906496ca8399667c20"
     },
     {
       "path": "units/ppl_fs.png",
@@ -1121,11 +1101,6 @@
       "path": "units/ylw_gf.png",
       "size": 5815,
       "sha": "28aaa21b84f1583e6dc51ba5fed3c4b067ece681"
-    },
-    {
-      "path": "units/ylw_mf.png",
-      "size": 6929,
-      "sha": "a6e90b107f8706778097214190f5b7395739730c"
     },
     {
       "path": "units/ylw_sd.png",
@@ -1283,14 +1258,174 @@
       "sha": "8140a05349085796a357ca7183b713fe2e0ae07d"
     },
     {
-      "path": "strat_cards/pok_2.png",
-      "size": 240165,
-      "sha": "a73fe22c37fd766b673412cb5bb9bad2c22ad39f"
-    },
-    {
       "path": "tokens/token_speaker.png",
       "size": 39864,
       "sha": "c858a58226b7c1c6f73ed9f4c12277854704e351"
+    },
+    {
+      "path": "hover_images/techs/generic/antimass_deflectors.png",
+      "size": 223294,
+      "sha": "79228c6b891a93ba2a73beeabe30a32056322ab7"
+    },
+    {
+      "path": "hover_images/techs/generic/gravity_drive.png",
+      "size": 220045,
+      "sha": "7ec01d1c5b982fadc4514b1eec2807af0054f7fb"
+    },
+    {
+      "path": "hover_images/techs/generic/fleet_logistics.png",
+      "size": 222245,
+      "sha": "43f22fc3b11d5a44216c0f5a5965828416d11568"
+    },
+    {
+      "path": "hover_images/techs/generic/lightwave_deflector.png",
+      "size": 227817,
+      "sha": "c584ce3c981a82e12fba816a519bf196f6ef9c9d"
+    },
+    {
+      "path": "hover_images/techs/generic/neural_motivator.png",
+      "size": 209445,
+      "sha": "a4f58f78b62fa617a2348db1ce0a6b764321e2bb"
+    },
+    {
+      "path": "hover_images/techs/generic/dacxive_animators.png",
+      "size": 222582,
+      "sha": "6256a342ea92a83c89164f1babec598330da14ff"
+    },
+    {
+      "path": "hover_images/techs/generic/hyper_metabolism.png",
+      "size": 223421,
+      "sha": "3628d72244ef6a9f1db0e437874e1e6ccbf309b6"
+    },
+    {
+      "path": "hover_images/techs/generic/x89_bacterial_weapon.png",
+      "size": 245169,
+      "sha": "5e71f6867b826a102ab0d2a756ea26d28400e914"
+    },
+    {
+      "path": "hover_images/techs/generic/plasma_scoring.png",
+      "size": 212836,
+      "sha": "93994d2f33499b08455e038071fa4c326f30bfaa"
+    },
+    {
+      "path": "hover_images/techs/generic/magen_defense_grid.png",
+      "size": 237996,
+      "sha": "54520c5b261e20be46dcae1efab44c9b513cf086"
+    },
+    {
+      "path": "hover_images/techs/generic/duranium_armor.png",
+      "size": 235430,
+      "sha": "eb12ed2d93ace3c5a77c1b39050e8b71a3ad248b"
+    },
+    {
+      "path": "hover_images/techs/generic/assault_cannon.png",
+      "size": 238048,
+      "sha": "1dada4327c2336ea7bf26d9a85822454a1f4e7a6"
+    },
+    {
+      "path": "hover_images/techs/generic/sarween_tools.png",
+      "size": 211793,
+      "sha": "85bea8e8d6702f644072ff8cd95a35f8098ae418"
+    },
+    {
+      "path": "hover_images/techs/generic/graviton_laser_system.png",
+      "size": 231662,
+      "sha": "61c90de6cc8b1779a8806a44d09b2ca386c000cb"
+    },
+    {
+      "path": "hover_images/techs/generic/transit_diodes.png",
+      "size": 237942,
+      "sha": "a6c298bcbcc6966cb0dddc282658fe85db714ee3"
+    },
+    {
+      "path": "hover_images/techs/generic/integrated_economy.png",
+      "size": 242188,
+      "sha": "d736f5da047558f7cb9f26d0f0518aa007840caa"
+    },
+    {
+      "path": "hover_images/techs/generic/warsun.jpg",
+      "size": 166518,
+      "sha": "417832cec1981121e205fad7982e52487ac81634"
+    },
+    {
+      "path": "hover_images/techs/generic/spacedock_2.jpg",
+      "size": 164935,
+      "sha": "b62108c819f29bb267438db710914e614713c4a0"
+    },
+    {
+      "path": "hover_images/techs/generic/cruiser_2.jpg",
+      "size": 156006,
+      "sha": "6d4338fc07e4d4e67548d58a4330e23e4a1774e5"
+    },
+    {
+      "path": "hover_images/techs/generic/dreadnought_2.jpg",
+      "size": 166811,
+      "sha": "21e9666371f4d3ec8dab6d9bb5e52769af81e339"
+    },
+    {
+      "path": "hover_images/techs/generic/destroyer_2.jpg",
+      "size": 149019,
+      "sha": "857cf1f420f92caaace1ea7fe4b00e0e380ca454"
+    },
+    {
+      "path": "hover_images/techs/generic/pds_2.jpg",
+      "size": 145061,
+      "sha": "fc3945c6f9ce47895d18eebd7cb764f832effa74"
+    },
+    {
+      "path": "hover_images/techs/generic/carrier_2.jpg",
+      "size": 156766,
+      "sha": "ed79e9150f0cd7b173b14d864b771e5bfc714605"
+    },
+    {
+      "path": "hover_images/techs/generic/fighter_2.jpg",
+      "size": 171333,
+      "sha": "507c701dd6724dde4ad9fe6b42aa8366e3bb3ef7"
+    },
+    {
+      "path": "hover_images/techs/generic/infantry_2.jpg",
+      "size": 182522,
+      "sha": "a141cfd81d4d49c3544560cbb8a0a5bb9a7c36ee"
+    },
+    {
+      "path": "hover_images/techs/faction/l4_disruptors.jpg",
+      "size": 118432,
+      "sha": "4534a805783e81b8a89b4397e6417d72c3db41a3"
+    },
+    {
+      "path": "hover_images/techs/faction/quantum_datahub_node.jpg",
+      "size": 159087,
+      "sha": "aa58f230b84fd255ad947627a5ecc705105e238b"
+    },
+    {
+      "path": "hover_images/techs/faction/advanced_carrier_2.jpg",
+      "size": 155318,
+      "sha": "895a720cb0c104ad1d8991e1f5317a144f6a5d45"
+    },
+    {
+      "path": "hover_images/techs/faction/spacial_conduit_cylinder.jpg",
+      "size": 150428,
+      "sha": "8ecbe60cb8f5a9222cfcb7ad50d6111f03e986f4"
+    },
+    {
+      "path": "hover_images/techs/faction/noneuclidean_shielding.jpg",
+      "size": 122083,
+      "sha": "527cdd62e6db5980d21dc43c1b36071a72dd40dd"
+    },
+    {
+      "path": "hover_images/techs/faction/production_biomes.jpg",
+      "size": 138884,
+      "sha": "4acfd1e12d16cd03761b37d9d5d596c9088d5c69"
+    },
+    {
+      "path": "hover_images/techs/faction/spec_ops_2.jpg",
+      "size": 148134,
+      "sha": "f02cf0cf7ca61a795ff2e37d217640aeae2c2047"
+    },
+    {
+      "path": "hover_images/techs/faction/eres_siphons.jpg",
+      "size": 117582,
+      "sha": "1e3071c8a46a3fbd37791aa8d276999db5ab0f3e"
     }
   ]
 }

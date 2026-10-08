@@ -19,7 +19,7 @@ STRATEGY_CARDS = {
 def strategy_image(card, small=False, used=False):
     if small or used:
         return f'emojis/cards/SC{card}{"Back" if used else ""}.png'
-    return f'strat_cards/{"pok_2" if card == 2 else f"base_game_{card}"}.png'
+    return f'strat_cards/base_game_{card}.png'
 
 
 class StrategyPanel:
@@ -137,7 +137,7 @@ class StrategyPanel:
         s = w.strategy.session
         draft = turn.strategy_selection
         map_choice = bool(s and s.stage in ('construction', 'diplomacy_system',
-                                            'diplomacy_secondary_system', 'ready_planets', 'warfare_system'))
+                                            'ready_planets', 'warfare_system'))
         width = min(1060 if draft else 440 if map_choice else 830, w.width - 48)
         height = min(730, w.height - 48) if draft else min(555, w.height - w.player_panel.HEIGHT - 48)
         base_x = w.width - width - 16 if map_choice else (w.width - width) / 2
@@ -312,7 +312,7 @@ class StrategyPanel:
                    x, y - 213, 11, INK, width)
             if s.stage == 'warfare_allocate':
                 self.button(w, ('continue',), 'FINISH REDISTRIBUTION', x, foot, width, not s.player.pending_commands)
-        elif s.stage in ('diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+        elif s.stage in ('diplomacy_system', 'warfare_system'):
             eligible = ctl.selectable_systems()
             if s.stage == 'warfare_system':
                 if s.pending_system is not None:
@@ -333,7 +333,7 @@ class StrategyPanel:
                 if s.selected_system is not None:
                     title = f'{w.board[s.selected_system].name} selected · choose a planet next'
                 w.text('strategy_map_help', title, x, y, 13, INK if eligible else MUTED, width)
-                if s.stage in ('diplomacy_system', 'diplomacy_secondary_system') and eligible:
+                if s.stage == 'diplomacy_system' and eligible:
                     w.text('diplomacy_pan_hint', 'Right/middle-drag to pan the map',
                            x, y - 40, 9, MUTED, width)
             if not eligible and s.stage != 'warfare_system':

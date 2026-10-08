@@ -5,7 +5,7 @@ from collections import Counter
 from unittest.mock import patch
 
 from board import load_board
-from units import Region, Unit, UnitLocation, hex_clearance, layout_units, placed_outline, circle_overlap, polygons_overlap, system_inventory
+from units import UNIT_TYPES, Region, Unit, UnitLocation, hex_clearance, layout_units, placed_outline, circle_overlap, polygons_overlap, system_inventory
 
 
 class UnitTests(unittest.TestCase):
@@ -55,18 +55,23 @@ class UnitTests(unittest.TestCase):
     def test_ground_groups_show_three_icons_and_a_count_from_three_units(self):
         tile = self.homes[1]
         planet_id = tile.planets[0].planet_id
-        for kind in ('infantry', 'mech'):
-            for count in (1, 2, 3, 5):
-                tile.units = [Unit(f'{kind}-{index}', kind, 'sol', 'blu',
-                                   UnitLocation(Region.PLANET, planet_id=planet_id))
-                              for index in range(count)]
-                placements = layout_units(tile, True)
-                self.assertEqual(len(placements), min(count, 3))
-                self.assertEqual(sum(len(placement.units) for placement in placements), count)
-                if count < 3:
-                    self.assertTrue(all(placement.badge_count is None for placement in placements))
-                else:
-                    self.assertEqual(placements[-1].badge_count, count)
+        for count in (1, 2, 3, 5):
+            tile.units = [Unit(f'infantry-{index}', 'infantry', 'sol', 'blu',
+                               UnitLocation(Region.PLANET, planet_id=planet_id))
+                          for index in range(count)]
+            placements = layout_units(tile, True)
+            self.assertEqual(len(placements), min(count, 3))
+            self.assertEqual(sum(len(placement.units) for placement in placements), count)
+            if count < 3:
+                self.assertTrue(all(placement.badge_count is None for placement in placements))
+            else:
+                self.assertEqual(placements[-1].badge_count, count)
+
+    def test_expansion_mech_is_not_a_playable_unit(self):
+        self.assertNotIn('mech', UNIT_TYPES)
+        with self.assertRaisesRegex(ValueError, 'Unknown unit'):
+            Unit('expansion-mech', 'mech', 'sol', 'blu',
+                 UnitLocation(Region.PLANET, planet_id=self.homes[1].planets[0].planet_id))
 
     def test_inventory_separates_planet_garrisons(self):
         tile = self.homes[16]

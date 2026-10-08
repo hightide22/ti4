@@ -23,6 +23,33 @@ class TurnOrderTests(unittest.TestCase):
         self.assertEqual(turns.strategy_initiative, [2, 1, 0])
         self.assertIs(turns.active_player, players[2])
 
+    def test_all_passed_returns_cards_and_redrafts_from_current_speaker(self):
+        players = [type('Player', (), {'faction': faction, 'pending_commands': 0})()
+                   for faction in ('sol', 'hacan', 'jolnar')]
+        turns = TurnOrder(players, strategy_enabled=True)
+        for card in (1, 2, 3, 4, 5, 6):
+            turns.choose_strategy_card(card)
+        turns.set_speaker(players[2])
+        for player in players:
+            turns.strategy_used[player.faction].update(turns.strategy_assignments[player.faction])
+        self.assertFalse(turns.end_turn())
+        self.assertFalse(turns.end_turn())
+        self.assertTrue(turns.end_turn())
+        self.assertEqual(turns.round_number, 2)
+        self.assertEqual(turns.available_strategy_cards, tuple(range(1, 9)))
+        self.assertTrue(all(not cards for cards in turns.strategy_assignments.values()))
+        for player in players:
+            player.pending_commands = 1
+        turns.begin_command_allocation()
+        for player in players:
+            self.assertIs(turns.active_player, player)
+            player.pending_commands = 0
+            turns.finish_player_command_allocation()
+        turns.begin_strategy_phase()
+        self.assertIs(turns.active_player, players[2])
+        self.assertTrue(turns.strategy_selection)
+        self.assertIs(turns.choose_strategy_card(8), players[2])
+
     def test_cannot_pass_before_using_both_strategy_cards(self):
         players = [type('Player', (), {'faction': faction, 'pending_commands': 0})()
                    for faction in ('sol', 'hacan', 'jolnar')]

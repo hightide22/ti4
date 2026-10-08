@@ -20,7 +20,7 @@ FACTIONS = {'sol', 'jolnar', 'letnev', 'hacan'}
 def technology_catalog():
     records = json.loads((RESOURCES / 'data/technologies/pok.json').read_text(encoding='utf-8'))
     return {tech['alias']: tech for tech in records
-            if tech.get('source') in ('base', 'pok') and
+            if tech.get('source') == 'base' and
             (not tech.get('faction') or tech['faction'] in FACTIONS)}
 
 
@@ -100,7 +100,7 @@ def _specialty_coverage(missing, specialties):
     return best
 
 
-def missing_prerequisites(player, tech, specialty_planets=(), use_aida=False):
+def missing_prerequisites(player, tech, specialty_planets=()):
     """Return how many requirements remain after owned colors and chosen skips."""
     owned = Counter()
     for alias in player.technologies:
@@ -113,9 +113,6 @@ def missing_prerequisites(player, tech, specialty_planets=(), use_aida=False):
                          if typ in COLOR_CODES) for card in specialty_planets]
     remaining = _specialty_coverage(missing, specialties)
     if player.faction == 'jolnar' and not is_unit_upgrade(tech):
-        remaining -= 1
-    if use_aida and is_unit_upgrade(tech) and 'aida' in player.technologies and \
-            'aida' not in player.exhausted_technologies:
         remaining -= 1
     return max(0, remaining)
 

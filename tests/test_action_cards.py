@@ -179,7 +179,7 @@ class ActionCardTests(unittest.TestCase):
 
 class ActionCardArtworkTests(unittest.TestCase):
     def test_all_shortlisted_cards_have_a_face_image(self):
-        self.assertEqual(len(CARD_IMAGES), 30)
+        self.assertEqual(len(CARD_IMAGES), 18)
         self.assertTrue(all((CARD_ART / filename).is_file() for filename in CARD_IMAGES.values()))
 
 

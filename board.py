@@ -25,14 +25,12 @@ class Planet:
     influence: int
     tech_specialties: tuple[str, ...] = ()
     faction_homeworld: str | None = None
-    legendary_ability_name: str | None = None
-    legendary_ability_text: str | None = None
     center: tuple[float, float] = (172.5, 149.5)
     radius: float = 60.0
 
     @classmethod
     def from_data(cls, data: dict) -> Planet:
-        return cls(data["id"], data["name"], data.get("planetType"), data.get("resources", 0), data.get("influence", 0), tuple(data.get("techSpecialties") or ()), data.get("factionHomeworld"), data.get("legendaryAbilityName"), data.get("legendaryAbilityText"), (data.get("positionInTile", {}).get("x", 172.5), data.get("positionInTile", {}).get("y", 149.5)), float(data.get("radius") or 60))
+        return cls(data["id"], data["name"], data.get("planetType"), data.get("resources", 0), data.get("influence", 0), tuple(data.get("techSpecialties") or ()), data.get("factionHomeworld"), (data.get("positionInTile", {}).get("x", 172.5), data.get("positionInTile", {}).get("y", 149.5)), float(data.get("radius") or 60))
 
 
 @dataclass(frozen=True)

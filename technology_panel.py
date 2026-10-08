@@ -130,11 +130,7 @@ class TechnologyPanel:
             w.text('technology_phase', f'{phase} · research {s.technology_count + 1}',
                    x + 24, top - 57, 10, GOLD)
         else:
-            ending_turn = w.technology_actions.end_turn_player is player
-            self._button(w, ('finish_turn',) if ending_turn else ('close',),
-                         'FINISH TURN' if ending_turn else 'CLOSE',
-                         x + width - (151 if ending_turn else 100), top - 54,
-                         127 if ending_turn else 77, 29)
+            self._button(w, ('close',), 'CLOSE', x + width - 100, top - 54, 77, 29)
 
         tab_y = top - 100
         tab_width = (width - 48 - 32) / 5
@@ -256,16 +252,11 @@ class TechnologyPanel:
             if selected_tech:
                 specialties = [card for card in player.planets
                                if card.planet.planet_id in s.technology_planets]
-                shortfall = missing_prerequisites(player, selected_tech, specialties,
-                                                  s.technology_use_aida)
+                shortfall = missing_prerequisites(player, selected_tech, specialties)
                 w.text('tech_missing', f'Unmet prerequisites: {shortfall}', right,
                        bottom + 109, 10, GREEN if shortfall == 0 else GOLD)
             else:
                 shortfall = 1
-            if 'aida' in player.technologies and 'aida' not in player.exhausted_technologies \
-                    and selected_tech and is_unit_upgrade(selected_tech):
-                self._button(w, ('aida',), 'USE AI DEVELOPMENT ALGORITHM', right,
-                             bottom + 75, min(285, right_width), 26, selected=s.technology_use_aida)
             can_research = bool(selected and selected_tech and shortfall == 0 and paid >= cost)
             self._button(w, ('research',), 'RESEARCH', right, bottom + 27,
                          right_width * .55 - 5, 34, can_research)
@@ -302,7 +293,7 @@ class TechnologyPanel:
             elif state and state.moved_ids:
                 self._button(w, ('transit_finish',), 'FINISH TRANSIT', right,
                              bottom + 10, right_width, 30)
-        elif selected_tech and selected_tech['alias'] in ('pa', 'sr', 'x89_base', 'pm', 'bs', 'pi'):
+        elif selected_tech and selected_tech['alias'] in ('x89_base', 'pm'):
             alias = selected_tech['alias']
             targets = w.technology_actions.targets(player, alias)
             w.text('tech_action_heading', 'AVAILABLE USES', right, bottom + 232, 10, ACCENT)
