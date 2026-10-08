@@ -172,13 +172,40 @@ class MovementPanel:
         pool = 'strategic' if session.strategic_production else 'tactical'
         window.text('move_token', f'{session.player.faction.upper()} · {pool.title()} reserve: {session.player.command_pools[pool]}',
                     x, window.height - 90, 11, MUTED)
-        playable_cards = window.action_cards.playable(session.player, session)
-        if session.player.action_cards:
+        card_participants = window.action_cards.participants(session)
+        playable_cards = sum(len(window.action_cards.playable(player, session))
+                             for player in card_participants)
+        if session.player.action_cards or card_participants:
             card_x, card_y = x + width - 151, window.height - 54
             button(window, 'movement_action_cards', f'CARDS · {len(session.player.action_cards)}',
                    card_x, card_y, 133, 27, primary=bool(playable_cards), size=9)
             self.buttons.append((('action_cards',), card_x, card_x + 133,
                                  card_y, card_y + 27))
+        if session.stage in ('space_cannon_action', 'space_cannon_response',
+                             'space_cannon_direct_hit', 'invasion_start'):
+            if session.stage == 'space_cannon_action':
+                heading = 'SPACE CANNON ACTION WINDOW'
+                detail = 'Play Experimental Battlestation or continue to Space Cannon rolls.'
+                action, label = 'space_cannon_continue', 'CONTINUE TO SPACE CANNON'
+            elif session.stage == 'space_cannon_response':
+                heading = 'SPACE CANNON HITS'
+                detail = f'{len(session.space_cannon_events)} hit(s) are waiting to be assigned.'
+                action, label = 'space_cannon_resolve', 'ASSIGN HITS AND CONTINUE'
+            elif session.stage == 'space_cannon_direct_hit':
+                heading = 'DIRECT HIT WINDOW'
+                detail = 'Play Direct Hit against a ship that sustained damage, or continue.'
+                action, label = 'space_cannon_direct_hit_continue', 'CONTINUE MOVEMENT'
+            else:
+                heading = 'INVASION ACTION WINDOW'
+                detail = 'Play Bunker or Disable before bombardment and planetary defense.'
+                action, label = 'invasion_continue', 'CONTINUE INVASION'
+            window.text('action_window_heading', heading, x, window.height - 175, 11, ACCENT)
+            window.text('action_window_detail', detail, x, window.height - 206, 10, INK, width)
+            bx, by, bw, bh = x, 191, width, 38
+            button(window, ('action_window_continue', action), label, bx, by, bw, bh,
+                   primary=True, size=9)
+            self.hits.append(((action,), bx, bx + bw, by, by + bh))
+            return
         bottom = 164
         content_y = (window.height - 122 if session.strategic_production else
                      self.timeline(window, session, x, window.height - 121, width))

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import arcade
 
-from action_cards import ACTION_CARD_DEFS
+from action_cards import ACTION_CARD_DEFS, canonical_action_card
 from ui_theme import (ACCENT, BORDER, CARD, GOLD, INK, MUTED, SELECTED,
                       button, modal)
 
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent
 CARD_ART = ROOT / 'assets' / 'action_cards'
 CARD_IMAGES = {
     'bunker': 'bunker.jpg',
-    'courageous_to_the_end': 'courageous_to_the_end.jpg',
+    'courageous': 'courageous_to_the_end.jpg',
     'direct_hit': 'direct_hit.jpg',
     'disable': 'disable.jpg',
     'experimental_battlestation': 'experimental_battlestation.jpg',
@@ -48,6 +48,7 @@ class ActionCardPanel:
                      if left <= x <= right and bottom <= y <= top), None)
 
     def _texture(self, alias):
+        alias = canonical_action_card(alias)
         filename = CARD_IMAGES.get(alias)
         if not filename:
             return None
@@ -70,12 +71,13 @@ class ActionCardPanel:
                                            3 if playable else 1)
 
     def _draw_card(self, window, alias, index, x, y, width, height, playable):
+        effect = canonical_action_card(alias)
         texture = self._texture(alias)
         if texture:
             arcade.draw_texture_rect(texture, arcade.XYWH(x + width / 2, y + height / 2,
                                                            width, height))
         else:
-            card = ACTION_CARD_DEFS.get(alias, {
+            card = ACTION_CARD_DEFS.get(effect, {
                 'name': alias, 'window': 'Unknown timing',
                 'effect': 'This card is not implemented yet.'})
             arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + height,
@@ -105,9 +107,10 @@ class ActionCardPanel:
         if not self.open:
             return
         session = window.movement.session
-        participants = ([p for p in window.player_panel.players if p.faction in session.combat_factions]
-                        if session and session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection')
-                        else [session.player] if session else [])
+        if window.action_cards.pending:
+            self._draw_pending(window, session)
+            return
+        participants = window.action_cards.participants(session)
         if not participants:
             player = window.strategy.player if window.strategy.session else window.turn_order.active_player
             participants = [player] if player else []
@@ -200,3 +203,49 @@ class ActionCardPanel:
             if playable_by_index[index]:
                 self.hits.append((('play', index), lifted_x, lifted_x + lifted_width,
                                   lifted_y, lifted_y + lifted_height))
+
+    def _draw_pending(self, window, session):
+        pending = window.action_cards.pending
+        player = pending['player']
+        card = ACTION_CARD_DEFS[pending['effect']]
+        choices = window.action_cards.pending_choices()
+        width = min(620, window.width - 48)
+        columns = 2 if len(choices) > 4 else 1
+        rows = max(1, (len(choices) + columns - 1) // columns)
+        height = min(window.height - 48, 200 + rows * 42)
+        left, bottom = (window.width - width) / 2, (window.height - height) / 2
+        top = bottom + height
+        self.bounds = (left, left + width, bottom, top)
+        arcade.draw_lrbt_rectangle_filled(0, window.width, 0, window.height, (3, 7, 14, 125))
+        modal(left, left + width, bottom, top)
+        window.text('action_pending_title', f'{player.faction.upper()} · {card["name"]}',
+                    left + 22, top - 34, 16, ACCENT)
+        help_text = ('Choose a system for the cruiser.' if pending['effect'] == 'war_effort' else
+                     'Choose a system whose ships may pass through enemy fleets.'
+                     if pending['effect'] == 'in_the_silence_of_space' else
+                     'Choose the nearby Space Dock to fire.'
+                     if pending['effect'] == 'experimental_battlestation' else
+                     'Choose the cruiser to replace with a dreadnought.'
+                     if pending['effect'] == 'upgrade' else
+                     'Choose the ship to destroy with Direct Hit.')
+        window.text('action_pending_help', help_text, left + 22, top - 62, 10, MUTED, width - 44)
+        for index, (value, label) in enumerate(choices):
+            row, column = divmod(index, columns)
+            cell_width = (width - 44 - (columns - 1) * 8) / columns
+            x = left + 22 + column * (cell_width + 8)
+            y = top - 105 - row * 39
+            arcade.draw_lrbt_rectangle_filled(x, x + cell_width, y - 30, y, CARD)
+            arcade.draw_lrbt_rectangle_outline(x, x + cell_width, y - 30, y, BORDER, 1)
+            window.text(('action_pending_choice', index), label, x + 9, y - 20, 9, INK,
+                        cell_width - 18)
+            self.hits.append((('pending_choice', value), x, x + cell_width, y - 30, y))
+        if pending['effect'] == 'courageous':
+            dice = ', '.join(str(value) for value in pending['rolls'])
+            window.text('action_pending_roll', f'Rolls {dice} · {pending["remaining"]} hit(s)',
+                        left + 22, bottom + 50, 10, GOLD)
+            window.text('action_pending_opponent', 'The opponent chooses a ship for each hit.',
+                        left + 22, bottom + 31, 9, MUTED)
+        if pending['effect'] != 'courageous':
+            close_x, close_y = left + width - 98, top - 49
+            button(window, 'action_pending_cancel', 'CANCEL', close_x, close_y, 76, 26, size=9)
+            self.hits.append((('cancel_pending',), close_x, close_x + 76, close_y, close_y + 26))

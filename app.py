@@ -115,7 +115,9 @@ class BoardWindow(arcade.Window):
         self.action_card_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
         self.technology_actions = TechnologyActions(self.board, self.movement, self.turn_order)
-        self.action_cards = ActionCardController(self.player_panel.players, self.movement)
+        self.action_cards = ActionCardController(self.player_panel.players, self.movement,
+                                                 deck=self.action_card_deck.cards,
+                                                 turn=self.turn_order)
         self.action_card_panel = ActionCardPanel()
         self.strategy = StrategyController(self.board, self.turn_order, self.movement, self.action_cards)
         self.transaction = TransactionController(self.board, self.player_panel.players,
@@ -781,8 +783,9 @@ class BoardWindow(arcade.Window):
         self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled else None
         card_player = (self.movement.session.player if self.movement.session else active_player)
         card_count = len(card_player.action_cards) if card_player else 0
-        playable_count = (len(self.action_cards.playable(card_player, self.movement.session))
-                          if card_player and self.movement.session else 0)
+        card_participants = self.action_cards.participants(self.movement.session)
+        playable_count = sum(len(self.action_cards.playable(player, self.movement.session))
+                             for player in card_participants)
         card_left, card_right = left - 370, left - 258
         button(self, 'action_card_hand_button', f'CARDS · {card_count}',
                card_left, turn_bottom, card_right - card_left, turn_top - turn_bottom,
@@ -826,7 +829,7 @@ class BoardWindow(arcade.Window):
             self.roster.draw_details(self)
         if self.player_panel.hovered_planet is not None:
             self.player_panel.draw_details(self)
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won'):
             self.combat_panel.draw(self, self.movement.session)
         if self.strategy_modal and not self.technology_modal:
             self.strategy_panel.draw(self, self.turn_order)
@@ -1620,12 +1623,9 @@ class BoardWindow(arcade.Window):
                 if action and action[0] == 'player':
                     self.action_card_panel.player_faction = action[1]
                 elif action and action[0] == 'play':
-                    participants = ([p for p in self.player_panel.players
-                                     if p.faction in self.movement.session.combat_factions]
-                                    if self.movement.session and
-                                    self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection')
-                                    else [self.movement.session.player] if self.movement.session else
-                                    [self.turn_order.active_player])
+                    participants = self.action_cards.participants(self.movement.session)
+                    if not participants:
+                        participants = [self.turn_order.active_player]
                     player = next((p for p in participants
                                    if p and p.faction == self.action_card_panel.player_faction),
                                   participants[0])
@@ -1634,6 +1634,16 @@ class BoardWindow(arcade.Window):
                         self.movement_error = None
                     except ValueError as error:
                         self.movement_error = str(error)
+                    self.action_card_panel.open = bool(self.action_cards.pending)
+                elif action and action[0] == 'pending_choice':
+                    try:
+                        self.action_cards.resolve_pending(action[1])
+                        self.movement_error = None
+                    except (ValueError, StopIteration) as error:
+                        self.movement_error = str(error)
+                    self.action_card_panel.open = bool(self.action_cards.pending)
+                elif action and action[0] == 'cancel_pending':
+                    self.action_cards.cancel_pending()
                     self.action_card_panel.open = False
                 elif action and action[0] == 'close':
                     self.action_card_panel.open = False
@@ -1641,8 +1651,9 @@ class BoardWindow(arcade.Window):
                           self.action_card_panel.bounds[0] <= x <= self.action_card_panel.bounds[1] and
                           self.action_card_panel.bounds[2] <= y <= self.action_card_panel.bounds[3]):
                     self.action_card_panel.open = False
+                self.sync_turn_action()
             return
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won'):
             if button != arcade.MOUSE_BUTTON_LEFT:
                 return
             if self.combat_panel.drag_header(x, y):
@@ -1659,6 +1670,10 @@ class BoardWindow(arcade.Window):
                         self.movement.toggle_combat_reroll(action[1], action[2])
                     elif action[0] == 'reroll_dice':
                         self.movement.reroll_selected_combat_dice(action[1])
+                    elif action[0] == 'fire_team_die':
+                        self.action_cards.toggle_fire_team_die(action[1], action[2])
+                    elif action[0] == 'fire_team_resolve':
+                        self.action_cards.resolve_fire_team(action[1])
                     elif action[0] == 'advance':
                         self.movement.advance_combat()
                     elif action[0] == 'announce_retreat':
@@ -1742,6 +1757,18 @@ class BoardWindow(arcade.Window):
                             self.movement.use_spatial_conduit()
                         elif action[0] == 'action_cards':
                             self.action_card_panel.open = True
+                        elif action[0] == 'space_cannon_continue':
+                            session = self.movement.session
+                            session.experimental_window_closed = True
+                            self.movement.continue_after_movement(
+                                session, session.space_cannon_next_stage or 'invasion')
+                        elif action[0] == 'space_cannon_resolve':
+                            session = self.movement.session
+                            self.movement.continue_after_space_cannon(session)
+                        elif action[0] == 'space_cannon_direct_hit_continue':
+                            self.movement.continue_after_space_cannon(self.movement.session)
+                        elif action[0] == 'invasion_continue':
+                            self.movement.continue_invasion_start(self.movement.session)
                         elif action[0] == 'confirm':
                             self.movement.confirm()
                             self.movement_error = None
@@ -1941,7 +1968,7 @@ class BoardWindow(arcade.Window):
             return
         if (self.strategy_modal or self.technology_modal or
                 (self.movement.session and self.movement.session.stage in
-                 ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice')) or
+                 ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won')) or
                 x < self.roster.WIDTH):
             return
 
@@ -1956,7 +1983,7 @@ class BoardWindow(arcade.Window):
             return
         if self.technology_modal:
             self.technology_panel.scroll_by(-scroll_y)
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'space_combat_won'):
             self.combat_panel.scroll_by(x, -scroll_y * 42)
             return
         if self.strategy_modal:

@@ -149,13 +149,26 @@ class Session:
     landings: dict[str, str | None] = field(default_factory=dict)
     cannon_log: list[str] = field(default_factory=list)
     cannon_checked: bool = False
+    space_cannon_events: list[dict] = field(default_factory=list)
+    space_cannon_next_stage: str | None = None
+    space_cannon_nes_cancel: int = 0
+    space_cannon_direct_hit: tuple[str, str] | None = None
+    experimental_window_closed: bool = False
+    disabled_pds: set[str] = field(default_factory=set)
+    bunker_factions: set[str] = field(default_factory=set)
+    invasion_window_closed: bool = False
     afb_rolls: dict[str, list[dict]] = field(default_factory=dict)
     afb_log: list[str] = field(default_factory=list)
     assault_log: list[str] = field(default_factory=list)
     assault_queue: list[str] = field(default_factory=list)
     afb_resolved: bool = False
     retreat_announced: str | None = None
+    retreat_blocked_round: int | None = None
     retreat_log: str = ''
+    combat_winner: str | None = None
+    pending_direct_hits: dict[str, list[str]] = field(default_factory=dict)
+    pending_courageous: dict[str, list[dict]] = field(default_factory=dict)
+    hit_sources: dict[str, tuple[str, ...]] = field(default_factory=dict)
     bombard_targets: dict[str, str | None] = field(default_factory=dict)
     bombard_rolls: list[dict] = field(default_factory=list)
     bombard_log: list[str] = field(default_factory=list)
@@ -203,6 +216,9 @@ class Session:
     fighter_combat_modifiers: dict[str, int] = field(default_factory=dict)
     skilled_retreat: bool = False
     played_action_windows: set[tuple] = field(default_factory=set)
+    fire_team_pending: str | None = None
+    fire_team_selected: set[int] = field(default_factory=set)
+    moved_ship_ids: set[str] = field(default_factory=set)
 
     @property
     def choices(self):
@@ -259,9 +275,20 @@ class MovementController:
         player = self.faction_player(faction)
         return bool(player and alias in player.technologies)
 
-    def destroy_unit(self, tile, unit, session=None):
+    def destroy_unit(self, tile, unit, session=None, source_factions=()):
         """Destroy a unit and resolve technology reactions to its destruction."""
         player = self.faction_player(unit.owner)
+        if (session and session.combat_type == 'space' and session.stage in
+                ('space_combat', 'combat_end', 'assault_choice') and
+                UNIT_TYPES[unit.kind]['ship'] and source_factions):
+            threshold = self.combat_threshold(unit.owner, unit_profile(unit))
+            available_stage = ('space_combat' if session.stage == 'assault_choice' else
+                               'combat_end' if session.combat_needs_resolution else session.stage)
+            for faction in source_factions:
+                if faction != unit.owner:
+                    session.pending_courageous.setdefault(unit.owner, []).append(
+                        {'threshold': threshold, 'opponents': (faction,),
+                         'stage': available_stage})
         if player and unit.kind == 'infantry':
             upgrade = 'so2' if unit.owner == 'sol' and 'so2' in player.technologies else \
                       'inf2' if 'inf2' in player.technologies else None
@@ -273,7 +300,7 @@ class MovementController:
         if UNIT_TYPES[unit.kind]['ship']:
             for cargo in list(tile.units):
                 if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == unit.unit_id:
-                    self.destroy_unit(tile, cargo, session)
+                    self.destroy_unit(tile, cargo, session, source_factions)
 
     def neighbors(self, tile):
         neighbors = list(self.board.neighbors(tile.position))
@@ -288,7 +315,7 @@ class MovementController:
         session.rolled_any_dice = True
         return random.randint(1, 10)
 
-    def route(self, origin, target, unit, player, bonus=0, move_bonus=0):
+    def route(self, origin, target, unit, player, bonus=0, move_bonus=0, ignore_enemy=False):
         if player.faction in origin.command_tokens or origin is target or unit.move_value <= 0:
             return None
         budget = (min(unit.move_value, 1) if 'nebula' in origin.anomalies else unit.move_value) + bonus + move_bonus
@@ -310,7 +337,8 @@ class MovementController:
                     return next_path
                 enemy = any(u.owner != player.faction and UNIT_TYPES[u.kind]['ship']
                             and u.location.region == Region.SPACE for u in neighbor.units)
-                if (enemy and 'lwd' not in player.technologies) or 'nebula' in neighbor.anomalies:
+                if (enemy and 'lwd' not in player.technologies and not ignore_enemy) or \
+                        'nebula' in neighbor.anomalies:
                     continue
                 seen.add(neighbor.position)
                 queue.append((neighbor, next_path))
@@ -427,6 +455,44 @@ class MovementController:
         session.sources = sources
         session.gravity_bonus_ids = gravity_bonus_ids
 
+    def apply_silence_space(self, session, position):
+        if not session or session.stage != 'movement':
+            raise MovementError('In the Silence of Space can only be used during movement.')
+        origin = self.board[position]
+        player = session.player
+        if player.faction in origin.command_tokens:
+            raise MovementError('Ships cannot move from a system you have already activated.')
+        routes, ships = {}, []
+        gravity_bonus_ids = set()
+        for unit in origin.units:
+            independent_fighter = (unit.kind == 'fighter' and 'ff2' in player.technologies and
+                                   unit.location.region == Region.SPACE)
+            if unit.owner != player.faction or not (capital_ship(unit) or independent_fighter):
+                continue
+            path = self.route(origin, session.target, unit, player, ignore_enemy=True)
+            if not path and 'gd' in player.technologies:
+                path = self.route(origin, session.target, unit, player, move_bonus=1,
+                                  ignore_enemy=True)
+                if path:
+                    gravity_bonus_ids.add(unit.unit_id)
+            if path:
+                ships.append(unit)
+                routes[unit.unit_id] = path
+        if not ships:
+            raise MovementError('No ships in that system can reach the activated system.')
+        source = session.sources.get(origin.position)
+        if source is None:
+            source = Source(origin, [], [], {})
+            session.sources[origin.position] = source
+        source.ships = ships
+        source.routes.update(routes)
+        source.passengers = [unit for unit in origin.units if unit.owner == player.faction and
+                             ((unit.kind == 'fighter' and unit.location.region == Region.SPACE and
+                               unit not in source.ships) or
+                              (unit.kind == 'infantry' and unit.location.region == Region.PLANET))]
+        session.gravity_bonus_ids.update(gravity_bonus_ids)
+        session.selected.intersection_update(session.choices)
+
     def add_command_token(self, player, position):
         tile = self.board[position]
         if player.faction in tile.command_tokens:
@@ -520,6 +586,9 @@ class MovementController:
         session.combat_hits = {owner: sum(hits for shooter, hits in outgoing_hits.items()
                                            if shooter != owner)
                                for owner in session.combat_factions}
+        session.hit_sources = {owner: tuple(shooter for shooter, hits in outgoing_hits.items()
+                                            if shooter != owner and hits)
+                               for owner in session.combat_factions}
         session.combat_assignments = {owner: [] for owner in session.combat_factions}
         return len(selected)
 
@@ -550,10 +619,15 @@ class MovementController:
                 location = UnitLocation(Region.SPACE) if unit.kind == 'fighter' else UnitLocation(Region.TRANSPORT, carrier_id=carrier_id)
                 transfers.append((source.tile, unit, location))
         # Apply only after the entire selection has passed validation.
+        ships_entering_target = {ship.unit_id for source in session.sources.values()
+                                 if source.tile is not session.target
+                                 for ship in session.ships(source)}
         for origin, unit, location in transfers:
             origin.units.remove(unit)
             unit.location = location
             session.target.units.append(unit)
+            if unit.unit_id in ships_entering_target:
+                session.moved_ship_ids.add(unit.unit_id)
         session.cannon_log = []
         session.landings = ({unit.unit_id: None for unit in self.landing_forces(session)}
                             if session.target.planets else {})
@@ -608,7 +682,28 @@ class MovementController:
             self.finish()
 
     def continue_after_movement(self, session, next_stage):
-        self.resolve_space_cannon(session)
+        session.space_cannon_next_stage = next_stage
+        if not session.cannon_checked:
+            experimental_available = bool(session.moved_ship_ids and self.action_cards and any(
+                self.action_cards.can_play(player.faction, 'experimental_battlestation', session)
+                for player in self.players))
+            if experimental_available and not session.experimental_window_closed:
+                session.stage = 'space_cannon_action'
+                return
+            if not self.resolve_space_cannon(session):
+                return
+        self.continue_after_space_cannon(session)
+
+    def continue_after_space_cannon(self, session):
+        if session.stage == 'space_cannon_direct_hit' and session.space_cannon_direct_hit:
+            faction, unit_id = session.space_cannon_direct_hit
+            pending = session.pending_direct_hits.get(faction, [])
+            if unit_id in pending:
+                pending.remove(unit_id)
+            session.space_cannon_direct_hit = None
+        if session.space_cannon_events and not self.resolve_space_cannon_hits(session):
+            return
+        next_stage = session.space_cannon_next_stage or 'invasion'
         if next_stage == 'space_combat' and self.hostile_space_factions(
                 session.target, session.player.faction) and self.combat_units(session, session.player.faction):
             self.start_combat(session)
@@ -619,26 +714,26 @@ class MovementController:
 
     def resolve_space_cannon(self, session):
         if session.cannon_checked:
-            return
+            return True
         session.cannon_checked = True
         active_faction = session.player.faction
         active_ships = [unit for unit in session.target.units if unit.owner == active_faction and
                         unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
         if not active_ships:
-            return
+            return True
         shooters = []
         for source in (session.target, *self.neighbors(session.target)):
             for unit in source.units:
                 profile = unit_profile(unit)
-                if unit.kind != 'pds' or unit.owner == active_faction or not profile.get('spaceCannonHitsOn'):
+                if (unit.kind != 'pds' or unit.owner == active_faction or
+                        unit.unit_id in session.disabled_pds or not profile.get('spaceCannonHitsOn')):
                     continue
                 if source is not session.target and not profile.get('deepSpaceCannon'):
                     continue
                 shooters.append((source, unit, profile))
         if not shooters:
-            return
+            return self._finish_space_cannon_rolls(session, active_ships)
         plasma_used = set()
-        nes_cancel = 0
         for source, cannon, profile in shooters:
             shooter = self.faction_player(cannon.owner)
             extra = int(bool(shooter and 'ps' in shooter.technologies and
@@ -659,10 +754,6 @@ class MovementController:
             session.cannon_log.append(
                 f'{cannon.owner.upper()} PDS in tile {source.system_id}: {dice} → {hits} hit(s)')
             for _ in range(hits):
-                if nes_cancel:
-                    nes_cancel -= 1
-                    session.cannon_log.append('Non-Euclidean Shielding canceled 1 additional hit.')
-                    continue
                 candidates = [unit for unit in active_ships if unit in session.target.units]
                 if not candidates:
                     break
@@ -670,12 +761,52 @@ class MovementController:
                     nonfighters = [unit for unit in candidates if unit.kind != 'fighter']
                     if nonfighters:
                         candidates = nonfighters
-                target = self.apply_hit(session.target, candidates, session)
-                if target in session.target.units and target.damaged and \
-                        self.has_tech(target.owner, 'nes'):
-                    nes_cancel = 1
-                session.cannon_log.append(
-                    f'{target.kind.title()} {"damaged" if target.damaged else "destroyed"}')
+                session.space_cannon_events.append({'owner': cannon.owner,
+                                                    'candidates': [unit.unit_id for unit in candidates],
+                                                    'graviton': graviton})
+        return self._finish_space_cannon_rolls(session, active_ships)
+
+    def _finish_space_cannon_rolls(self, session, active_ships):
+        if session.space_cannon_events and self.action_cards:
+            session.stage = 'space_cannon_response'
+            if any(self.action_cards.can_play(player.faction, 'maneuvering_jets', session)
+                   for player in self.players):
+                return False
+        return self.resolve_space_cannon_hits(session)
+
+    def resolve_space_cannon_hits(self, session):
+        while session.space_cannon_events:
+            event = session.space_cannon_events.pop(0)
+            candidates = [unit for unit in session.target.units
+                          if unit.unit_id in event['candidates']]
+            if not candidates:
+                continue
+            if session.space_cannon_nes_cancel:
+                session.space_cannon_nes_cancel -= 1
+                session.cannon_log.append('Non-Euclidean Shielding canceled 1 additional hit.')
+                continue
+            if event.get('graviton'):
+                nonfighters = [unit for unit in candidates if unit.kind != 'fighter']
+                if nonfighters:
+                    candidates = nonfighters
+            target = self.apply_hit(session.target, candidates, session)
+            if target in session.target.units and target.damaged and event['owner'] != target.owner:
+                session.pending_direct_hits.setdefault(event['owner'], []).append(target.unit_id)
+            if target in session.target.units and target.damaged and self.has_tech(target.owner, 'nes'):
+                session.space_cannon_nes_cancel = 1
+            session.cannon_log.append(
+                f'{target.kind.title()} {"damaged" if target.damaged else "destroyed"}')
+            if target in session.target.units and target.damaged and event['owner'] != target.owner:
+                session.space_cannon_direct_hit = (event['owner'], target.unit_id)
+                previous_stage = session.stage
+                session.stage = 'space_cannon_direct_hit'
+                if (self.action_cards and
+                        self.action_cards.can_play(event['owner'], 'direct_hit', session)):
+                    return False
+                session.stage = previous_stage
+                session.space_cannon_direct_hit = None
+                session.pending_direct_hits[event['owner']].remove(target.unit_id)
+        return True
 
     def apply_hit(self, tile, candidates, session=None):
         target = sorted(candidates, key=lambda unit: (
@@ -749,6 +880,8 @@ class MovementController:
         if not session or session.stage != 'space_combat' or session.combat_needs_resolution:
             raise MovementError('Retreat can only be announced before combat rolls')
         faction = session.player.faction
+        if session.retreat_blocked_round == session.combat_round + 1:
+            raise MovementError('Your retreat was intercepted for this combat round.')
         if session.retreat_announced:
             raise MovementError('A retreat has already been announced')
         if not self.retreat_options(session, faction):
@@ -782,10 +915,22 @@ class MovementController:
         self.prepare_invasion(session)
 
     def has_planetary_shield(self, tile):
-        return any(unit.kind == 'pds' and unit_profile(unit).get('planetaryShield')
+        session = self.session if self.session and self.session.target is tile else None
+        return any(unit.kind == 'pds' and unit_profile(unit).get('planetaryShield') and
+                   (session is None or unit.unit_id not in session.disabled_pds)
                    for unit in tile.units)
 
     def prepare_invasion(self, session):
+        session.stage = 'invasion_start'
+        session.invasion_window_closed = False
+        if self.action_cards and any(
+                self.action_cards.can_play(player.faction, card, session)
+                for player in self.players for card in player.action_cards):
+            return
+        self.continue_invasion_start(session)
+
+    def continue_invasion_start(self, session):
+        session.invasion_window_closed = True
         faction = session.player.faction
         hostile_ground = {unit.location.planet_id for unit in session.target.units
                           if unit.owner != faction and unit.location.region == Region.PLANET and
@@ -795,7 +940,8 @@ class MovementController:
                    unit_profile(unit).get('bombardHitsOn')]
         war_sun_present = any(unit.kind == 'warsun' and unit.owner == faction and
                               unit.location.region == Region.SPACE for unit in session.target.units)
-        hostile_shield = any(unit.owner != faction and unit.kind == 'pds' and
+        hostile_shield = any(unit.owner != faction and unit.unit_id not in session.disabled_pds and
+                             unit.kind == 'pds' and
                              unit_profile(unit).get('planetaryShield') for unit in session.target.units) and \
             not war_sun_present
         session.bombard_targets.clear()
@@ -847,6 +993,9 @@ class MovementController:
             plasma_available = False
             for _ in range(int(profile.get('bombardDieCount') or 1) + extra):
                 value = self.roll_d10(session)
+                planet_owner = session.target.planet_owners.get(planet_id)
+                if planet_owner in session.bunker_factions:
+                    value -= 4
                 rolls.append({'unit_id': unit_id, 'kind': ship.kind, 'planet_id': planet_id,
                               'value': value, 'hit': value >= int(profile['bombardHitsOn'])})
             session.bombard_rolls.extend(rolls)
@@ -952,7 +1101,7 @@ class MovementController:
         if victim is None:
             raise MovementError('Choose one of your non-fighter ships to destroy.')
         attacker = session.assault_queue.pop(0)
-        self.destroy_unit(session.target, victim, session)
+        self.destroy_unit(session.target, victim, session, (attacker,))
         session.assault_log.append(f'{attacker.upper()} Assault Cannon destroyed a '
                                    f'{victim.owner.upper()} {victim.kind}.')
         while session.assault_queue and not self.assault_victims(session):
@@ -1069,8 +1218,16 @@ class MovementController:
 
     def advance_combat(self):
         session = self.session
-        if not session or session.stage not in ('space_combat', 'ground_combat', 'combat_end'):
+        if not session or session.stage not in ('space_combat', 'ground_combat', 'combat_end',
+                                                'space_combat_won'):
             raise MovementError('Combat is not active')
+        if self.action_cards and self.action_cards.pending:
+            raise MovementError('Finish the action-card choice first.')
+        if session.fire_team_pending:
+            raise MovementError('Finish Fire Team rerolls first.')
+        if session.stage == 'space_combat_won':
+            self.continue_after_salvage(session)
+            return
         if session.stage == 'combat_end':
             self._finish_combat_round(session)
             return
@@ -1090,10 +1247,13 @@ class MovementController:
                     if unit_profile(unit).get('sustainDamage') and not unit.damaged:
                         unit.damaged = True
                         sustained_this_round.add(unit_id)
+                        for source in session.hit_sources.get(faction, ()):
+                            session.pending_direct_hits.setdefault(source, []).append(unit_id)
                         if self.has_tech(faction, 'nes'):
                             absorbed_extra.add(unit_id)
                         continue
-                    self.destroy_unit(session.target, unit, session)
+                    self.destroy_unit(session.target, unit, session,
+                                      session.hit_sources.get(faction, ()))
             for faction in session.combat_factions:
                 if self.has_tech(faction, 'da'):
                     damaged = [unit for unit in self.combat_units(session, faction)
@@ -1103,8 +1263,9 @@ class MovementController:
             session.combat_needs_resolution = False
             session.stage = 'combat_end'
             if self.action_cards and any(
-                    self.action_cards.can_play(faction, 'emergency_repairs', session)
-                    for faction in session.combat_factions):
+                    self.action_cards.can_play(player.faction, alias, session)
+                    for player in self.players for alias in player.action_cards
+                    if player.faction in session.combat_factions):
                 return
             self._finish_combat_round(session)
             return
@@ -1138,16 +1299,30 @@ class MovementController:
         session.combat_hits = {faction: sum(hits for shooter, hits in outgoing_hits.items()
                                              if shooter != faction)
                                for faction in session.combat_factions}
+        session.hit_sources = {faction: tuple(shooter for shooter, hits in outgoing_hits.items()
+                                              if shooter != faction and hits)
+                               for faction in session.combat_factions}
         session.combat_needs_resolution = True
 
     def _finish_combat_round(self, session):
+        session.pending_direct_hits.clear()
+        session.pending_courageous.clear()
         own_alive = bool(self.combat_units(session, session.player.faction))
         enemies_alive = any(self.combat_units(session, faction)
                             for faction in session.combat_factions if faction != session.player.faction)
         if session.combat_type == 'ground' and (not own_alive or not enemies_alive):
             self.finish_ground_battle(session, own_alive, enemies_alive)
         elif not own_alive or not enemies_alive:
+            winner = next((faction for faction in session.combat_factions
+                           if self.combat_units(session, faction)), None)
+            session.combat_winner = winner
             session.space_combat_resolved = True
+            if winner and self.action_cards and any(
+                    self.action_cards.can_play(winner, alias, session)
+                    for player in self.players if player.faction == winner
+                    for alias in player.action_cards):
+                session.stage = 'space_combat_won'
+                return
             self.prepare_invasion(session)
         elif session.combat_type == 'space' and session.retreat_announced:
             session.stage = 'retreat_selection'
@@ -1158,6 +1333,12 @@ class MovementController:
             session.combat_assignments = {faction: [] for faction in session.combat_factions}
             session.combat_modifiers.clear()
             session.fighter_combat_modifiers.clear()
+
+    def continue_after_salvage(self, session):
+        if not session or session.stage != 'space_combat_won':
+            raise MovementError('Space combat has not been won.')
+        session.space_combat_resolved = True
+        self.prepare_invasion(session)
 
     def production_sites(self, session):
         sites = []
@@ -1427,6 +1608,7 @@ class MovementController:
         nes_cancel = {}
         for planet_id in session.landed_planets:
             cannons = [unit for unit in session.target.units if unit.owner != faction and unit.kind == 'pds' and
+                       unit.unit_id not in session.disabled_pds and
                        unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
                        unit_profile(unit).get('spaceCannonHitsOn')]
             if not cannons:

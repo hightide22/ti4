@@ -115,9 +115,14 @@ class CombatPanel:
                 for index, (roll_index, roll) in enumerate(rolls):
                     row, col = divmod(index, dice_columns)
                     die_x, die_y = dice_x + col * 25, dice_y - row * 25
-                    selected = roll_index in session.reroll_selected.get(faction, set())
+                    selected = (roll_index in session.reroll_selected.get(faction, set()) or
+                                (session.fire_team_pending == faction and
+                                 roll_index in session.fire_team_selected))
                     self.draw_die(window, die_x, die_y, roll['value'], roll['hit'], size=21,
                                   key=(faction, kind, target, index), selected=selected)
+                    if session.fire_team_pending == faction:
+                        self.action_hits.append((('fire_team_die', faction, roll_index),
+                                                 die_x, die_x + 21, die_y, die_y + 21))
                     if faction in session.munitions_available and not roll.get('rerolled'):
                         self.reroll_die_hits.append((('reroll_die', faction, roll_index),
                                                      die_x, die_x + 21, die_y, die_y + 21))
@@ -174,13 +179,15 @@ class CombatPanel:
             subtitle = f'{planet.name} · {round_label}'
         else:
             subtitle = f'Round {session.combat_round}' if session.combat_round else 'Roll one die per combat die'
-        if session.stage == 'combat_end':
+        if session.stage == 'space_combat_won':
+            subtitle = f'{session.combat_winner.upper()} wins · Choose Salvage or continue'
+        elif session.stage == 'combat_end':
             subtitle = f'Round {session.combat_round} · End of combat round'
         window.text('combat_round', subtitle, left + 24, bottom + height - 58, 11, MUTED)
         combat_players = [player for player in window.player_panel.players
                           if player.faction in session.combat_factions]
         playable_cards = sum(len(window.action_cards.playable(player, session))
-                             for player in combat_players)
+                             for player in window.action_cards.participants(session))
         if playable_cards:
             card_x, card_y = left + width - 162, bottom + height - 68
             button(window, 'combat_action_cards', f'CARDS · {playable_cards}',
@@ -296,31 +303,58 @@ class CombatPanel:
             units_label = 'ground forces' if session.combat_type == 'ground' else 'ships'
             label = 'Resolve Hits · Continue' if complete else f'Assign hits to your {units_label}'
             color = SELECTED if complete else DISABLED
+        elif session.stage == 'space_combat_won':
+            complete = True
+            label = 'Continue to Invasion'
+            color = SELECTED
         else:
             complete = True
             label = ('Finish Combat Round' if session.stage == 'combat_end' else
                      'Roll Combat Dice' if not session.combat_round else 'Next Combat Round')
             color = SELECTED
-        if session.stage == 'retreat_selection':
+        if session.fire_team_pending:
+            complete = False
+            label = 'Resolve Fire Team rerolls first'
+            color = DISABLED
+        elif session.stage == 'retreat_selection':
             self.advance_hit = None
         else:
             bx, by, bw, bh = left + width - 320, bottom + 24, 296, 42
             button(window, 'combat_advance_button', label, bx, by, bw, bh,
                    primary=True, enabled=complete, size=11)
             self.advance_hit = (bx, bx + bw, by, by + bh) if complete else None
+        if session.fire_team_pending:
+            faction = session.fire_team_pending
+            selected_dice = len(session.fire_team_selected)
+            bx, by, bw, bh = left + 20, bottom + 24, min(245, col_width - 24), 38
+            enabled = selected_dice > 0
+            label = f'REROLL {selected_dice} DICE' if enabled else 'SELECT DICE TO REROLL'
+            arcade.draw_lrbt_rectangle_filled(bx, bx + bw, by, by + bh,
+                                               (31, 78, 83) if enabled else DISABLED)
+            arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh,
+                                                ACCENT if enabled else BORDER, 1)
+            window.text('fire_team_confirm', label, bx + 9, by + 13, 9,
+                        INK if enabled else MUTED, bw - 18)
+            if enabled:
+                self.action_hits.append((('fire_team_resolve', faction), bx, bx + bw, by, by + bh))
         if session.stage == 'space_combat' and not session.retreat_announced:
             retreat_options = window.movement.retreat_options(session, session.player.faction)
             rx, ry, rw, rh = left + 20, bottom + 24, min(220, col_width - 24), 38
-            enabled = bool(retreat_options) and not session.combat_needs_resolution
+            blocked = session.retreat_blocked_round == session.combat_round + 1
+            enabled = bool(retreat_options) and not session.combat_needs_resolution and not blocked
             arcade.draw_lrbt_rectangle_filled(rx, rx + rw, ry, ry + rh,
                                                SELECTED if enabled else DISABLED)
-            label = 'Announce Retreat' if retreat_options else 'No Adjacent Retreat'
+            label = ('Retreat Intercepted' if blocked else 'Announce Retreat'
+                     if retreat_options else 'No Adjacent Retreat')
             window.text('announce_retreat_button', label, rx + 10, ry + 13, 9,
                         INK if enabled else MUTED, rw - 18)
             if enabled:
                 self.action_hits.append((('announce_retreat',), rx, rx + rw, ry, ry + rh))
             else:
-                window.text('retreat_unavailable', 'Assign hits before announcing a retreat.' if retreat_options else 'Need your ships in a safe adjacent system.',
+                reason = ('Cannot retreat this combat round.' if blocked else
+                          'Assign hits before announcing a retreat.' if retreat_options else
+                          'Need your ships in a safe adjacent system.')
+                window.text('retreat_unavailable', reason,
                             rx, ry + 43, 8, MUTED, rw)
         elif session.stage == 'space_combat' and session.retreat_announced:
             window.text('retreat_declared', 'Retreat declared; choose destination after this round.',
@@ -371,6 +405,9 @@ class CombatPanel:
                                 len(session.combat_assignments.get(faction, []))) for faction in factions)
             unit_label = 'ground forces' if session.combat_type == 'ground' else 'ship groups'
             window.text('combat_help', f'Click {unit_label} to assign incoming hits · {remaining} left',
+                        left + 24, bottom + 99, 11, MUTED, width - 48)
+        elif session.stage == 'space_combat_won':
+            window.text('combat_help', 'The winner may play Salvage before the action continues.',
                         left + 24, bottom + 99, 11, MUTED, width - 48)
         elif session.stage == 'combat_end':
             window.text('combat_help', 'Repair eligible units now, then continue to the next round.',

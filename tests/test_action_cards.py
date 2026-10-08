@@ -1,7 +1,10 @@
 import unittest
+import random
 from unittest.mock import patch
 
-from action_cards import ActionCardController
+from action_cards import (ACTION_CARD_DEFS, ActionCardController,
+                          canonical_action_card)
+from action_card_deck import ActionCardDeck
 from action_card_panel import CARD_ART, CARD_IMAGES
 from board import load_board
 from movement import MovementController, Session, Snapshot, capital_ship
@@ -18,6 +21,127 @@ class ActionCardTests(unittest.TestCase):
         self.movement = MovementController(self.board, self.players)
         self.cards = ActionCardController(self.players, self.movement, deck=[])
         self.sol = next(player for player in self.players if player.faction == 'sol')
+
+    def test_draw_pile_contains_all_shortlisted_base_card_types(self):
+        deck = ActionCardDeck(rng=random.Random(4))
+
+        self.assertEqual({canonical_action_card(alias) for alias in deck.cards},
+                         set(ACTION_CARD_DEFS))
+        self.assertNotIn('f_conscription', deck.cards)
+
+    def test_war_effort_is_an_action_and_places_a_cruiser_in_a_friendly_fleet(self):
+        turns = TurnOrder([self.sol], strategy_enabled=False)
+        self.cards.turn = turns
+        self.sol.action_cards[:] = ['war_effort']
+        system = next(tile for tile in self.board.values() if any(
+            unit.owner == self.sol.faction and unit.location.region == Region.SPACE
+            for unit in tile.units))
+
+        self.assertTrue(self.cards.can_play(self.sol.faction, 'war_effort'))
+        self.cards.play(self.sol, 0)
+        self.cards.resolve_pending(system.position)
+
+        self.assertTrue(any(unit.owner == self.sol.faction and unit.kind == 'cruiser'
+                            for unit in system.units))
+        self.assertTrue(turns.action_used)
+        self.assertEqual(self.sol.action_cards, [])
+
+    def test_upgrade_prompts_for_a_cruiser_and_replaces_it_with_a_dreadnought(self):
+        system = next(iter(self.board.values()))
+        cruiser = Unit('action-sol-upgrade-cruiser', 'cruiser', self.sol.faction,
+                       self.sol.color_code, UnitLocation(Region.SPACE))
+        system.units.append(cruiser)
+        session = Session(self.sol, system, {}, Snapshot.capture(self.board, self.sol, self.players),
+                          stage='movement')
+        self.movement.session = session
+        self.sol.action_cards[:] = ['upgrade']
+
+        self.cards.play(self.sol, 0)
+        self.cards.resolve_pending(cruiser.unit_id)
+
+        self.assertNotIn(cruiser, system.units)
+        self.assertTrue(any(unit.owner == self.sol.faction and unit.kind == 'dreadnought'
+                            for unit in system.units))
+        self.assertEqual(self.sol.action_cards, [])
+
+    def test_direct_hit_can_destroy_a_ship_damaged_by_space_cannon(self):
+        system = next(iter(self.board.values()))
+        dreadnought = Unit('action-sol-cannon-dread', 'dreadnought', self.sol.faction,
+                           self.sol.color_code, UnitLocation(Region.SPACE))
+        system.units.append(dreadnought)
+        hacan = next(player for player in self.players if player.faction == 'hacan')
+        hacan.action_cards[:] = ['dh1']
+        session = Session(self.sol, system, {}, Snapshot.capture(self.board, self.sol, self.players),
+                          stage='space_cannon_response', space_cannon_next_stage='invasion',
+                          cannon_checked=True,
+                          space_cannon_events=[{'owner': hacan.faction,
+                                                'candidates': [dreadnought.unit_id],
+                                                'graviton': False}])
+        self.movement.session = session
+
+        self.movement.continue_after_space_cannon(session)
+
+        self.assertEqual(session.stage, 'space_cannon_direct_hit')
+        self.assertTrue(self.cards.can_play(hacan.faction, 'dh1', session))
+        self.cards.play(hacan, 0)
+        self.cards.resolve_pending(dreadnought.unit_id)
+        self.movement.continue_after_space_cannon(session)
+
+        self.assertNotIn(dreadnought, system.units)
+        self.assertEqual(session.stage, 'invasion')
+
+    def test_bunker_reduces_bombardment_against_the_card_owners_planet(self):
+        system = next(tile for tile in self.board.values() if tile.planets)
+        planet_id = system.planets[0].planet_id
+        hacan = next(player for player in self.players if player.faction == 'hacan')
+        defender = Unit('action-hacan-bunker-infantry', 'infantry', hacan.faction,
+                        hacan.color_code, UnitLocation(Region.PLANET, planet_id=planet_id))
+        bomber = Unit('action-sol-bunker-dread', 'dreadnought', self.sol.faction,
+                      self.sol.color_code, UnitLocation(Region.SPACE))
+        system.units.extend((defender, bomber))
+        system.planet_owners[planet_id] = hacan.faction
+        session = Session(self.sol, system, {}, Snapshot.capture(self.board, self.sol, self.players),
+                          stage='invasion_start')
+        self.movement.session = session
+        hacan.action_cards[:] = ['bunker']
+
+        self.cards.play(hacan, 0)
+        self.movement.continue_invasion_start(session)
+        session.bombard_targets[bomber.unit_id] = planet_id
+        with patch('movement.random.randint', return_value=8):
+            self.movement.resolve_bombardment()
+
+        self.assertEqual(session.bombard_rolls[0]['value'], 4)
+        self.assertIn(defender, system.units)
+
+    def test_fire_team_rerolls_selected_ground_dice(self):
+        system = next(tile for tile in self.board.values() if tile.planets)
+        planet_id = system.planets[0].planet_id
+        hacan = next(player for player in self.players if player.faction == 'hacan')
+        infantry = Unit('action-sol-fire-team-infantry', 'infantry', self.sol.faction,
+                        self.sol.color_code, UnitLocation(Region.PLANET, planet_id=planet_id))
+        defender = Unit('action-hacan-fire-team-infantry', 'infantry', hacan.faction,
+                        hacan.color_code, UnitLocation(Region.PLANET, planet_id=planet_id))
+        system.units.extend((infantry, defender))
+        session = Session(self.sol, system, {}, Snapshot.capture(self.board, self.sol, self.players),
+                          stage='ground_combat', combat_type='ground',
+                          combat_factions=('sol', 'hacan'), combat_needs_resolution=True,
+                          combat_rolls={'sol': [{'unit_id': infantry.unit_id, 'kind': 'infantry',
+                                                 'value': 1, 'natural': 1, 'modifier': 0,
+                                                 'hit': False, 'rerolled': False}],
+                                        'hacan': []},
+                          combat_hits={'sol': 0, 'hacan': 0})
+        self.movement.session = session
+        self.sol.action_cards[:] = ['fire_team']
+
+        self.cards.play(self.sol, 0)
+        self.cards.toggle_fire_team_die(self.sol.faction, 0)
+        with patch('movement.random.randint', return_value=10):
+            self.cards.resolve_fire_team(self.sol.faction)
+
+        self.assertTrue(session.combat_rolls['sol'][0]['hit'])
+        self.assertEqual(session.combat_hits['hacan'], 1)
+        self.assertIsNone(session.fire_team_pending)
 
     def test_flank_speed_unlocks_a_route_and_is_spent_on_play(self):
         fleet = [(origin, unit) for origin in self.board.values() for unit in origin.units

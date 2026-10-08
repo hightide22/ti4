@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import arcade
 
+import app as app_module
 from app import BoardWindow
 from movement import capital_ship
 from units import Region, Unit, UnitLocation
@@ -50,7 +51,21 @@ def main():
         window.movement.activate(player, target.position)
         window.selected = target.position
         assert not window.movement.session.sources
-        window.on_draw()
+        real_button = app_module.button
+        action_button_styles = []
+
+        def track_action_button(*args, **kwargs):
+            if args[1] == 'action_card_hand_button':
+                action_button_styles.append(kwargs.get('primary', False))
+            return real_button(*args, **kwargs)
+
+        app_module.button = track_action_button
+        try:
+            window.on_draw()
+            assert action_button_styles and action_button_styles[-1]
+            arcade.get_image().save(output / 'action-card-window-highlight.png')
+        finally:
+            app_module.button = real_button
         control = next(hit for hit in window.movement_panel.buttons if hit[0] == ('action_cards',))
         click(window, control)
         assert window.action_card_panel.open
