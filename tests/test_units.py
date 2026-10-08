@@ -40,6 +40,27 @@ class UnitTests(unittest.TestCase):
                     for other in fleet[:i]:
                         self.assertFalse(polygons_overlap(outline, placed_outline(other)))
 
+    def test_crowded_fleet_groups_without_losing_units_or_crashing(self):
+        tile = self.homes[12]
+        for kind in ('carrier', 'dreadnought', 'cruiser', 'destroyer', 'fighter'):
+            for index in range(3):
+                tile.units.append(Unit(f'crowded-{kind}-{index}', kind, 'jolnar', 'blu',
+                                       UnitLocation(Region.SPACE)))
+        placements = layout_units(tile)
+        self.assertCountEqual([unit.unit_id for placement in placements for unit in placement.units],
+                              [unit.unit_id for unit in tile.units])
+        self.assertTrue(any(placement.kind == 'destroyer' and placement.badge_count == 3
+                            for placement in placements))
+        fleet = [placement for placement in placements if
+                 placement.units[0].location.region == Region.SPACE]
+        for index, placement in enumerate(fleet):
+            outline = placed_outline(placement)
+            self.assertTrue(all(hex_clearance(x, y) >= 3 for x, y in outline))
+            for planet in tile.planets:
+                self.assertFalse(circle_overlap(outline, planet.center, planet.radius + 2))
+            for other in fleet[:index]:
+                self.assertFalse(polygons_overlap(outline, placed_outline(other)))
+
     def test_small_groups_and_count_threshold(self):
         from board import TILES
         for count in (4, 5, 12):

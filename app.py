@@ -113,6 +113,8 @@ class BoardWindow(arcade.Window):
         self.turn_history_size = 0
         self.last_infantry_return_turn = None
         self.turn_button_hit = None
+        self.ai_pause_hit = None
+        self.ai_speed_hit = None
         self.action_card_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
         self.technology_actions = TechnologyActions(self.board, self.movement, self.turn_order)
@@ -213,6 +215,18 @@ class BoardWindow(arcade.Window):
         self.system_panel.reset()
         self.focus_view = False
         self.focus_zoom = 1.0
+
+    def frame_action_route(self, source_position, target_position):
+        """Show both ends of an AI move long enough to follow the action."""
+        start, end = world(source_position), world(target_position)
+        self.target_map_center = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
+        available_width = max(1, self.width - self.sidebar - self.roster.WIDTH - 100)
+        available_height = max(1, self.height - 200 - self.player_panel.HEIGHT)
+        required_scale = min(available_width / (abs(start[0] - end[0]) + 2),
+                             available_height / (abs(start[1] - end[1]) + math.sqrt(3)))
+        self.target_zoom = min(1.7, max(.65, required_scale / self.fit_scale))
+        self.selected = target_position
+        self.focus_view = False
 
     def screen(self, position):
         x, y = world(position)
@@ -789,6 +803,17 @@ class BoardWindow(arcade.Window):
                turn_right - turn_left, turn_top - turn_bottom, primary=True,
                enabled=enabled, size=10)
         self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled else None
+        if self.ai.bot_factions:
+            ai_left = 260
+            button(self, 'ai_pause', 'RESUME AI' if self.ai.paused else 'PAUSE AI',
+                   ai_left, turn_bottom, 94, turn_top - turn_bottom,
+                   selected=self.ai.paused, size=9)
+            button(self, 'ai_speed', f'{self.ai.speed:g}×',
+                   ai_left + 100, turn_bottom, 44, turn_top - turn_bottom, size=9)
+            self.ai_pause_hit = (ai_left, ai_left + 94, turn_bottom, turn_top)
+            self.ai_speed_hit = (ai_left + 100, ai_left + 144, turn_bottom, turn_top)
+        else:
+            self.ai_pause_hit = self.ai_speed_hit = None
         card_player = (self.movement.session.player if self.movement.session else active_player)
         card_count = len(card_player.action_cards) if card_player else 0
         card_participants = self.action_cards.participants(self.movement.session)
@@ -833,6 +858,29 @@ class BoardWindow(arcade.Window):
             if self.movement.session and self.movement.session.stage == 'production' else set())
         self.player_panel.draw(self, show_details=False)
         self.roster.draw(self)
+        if self.ai.bot_factions:
+            feed_left = self.roster.WIDTH + 12
+            feed_right = min(feed_left + 465, left - 12)
+            focus_positions = (self.ai.focus_positions if self.movement.session and
+                               self.ai.is_bot(self.movement.session.player) and
+                               self.ai.focus_positions else (self.selected,))
+            focus_ys = [self.screen(position)[1] for position in focus_positions]
+            top_box = (self.height - 187, self.height - 89)
+            bottom_box = (self.player_panel.HEIGHT + 13, self.player_panel.HEIGHT + 111)
+            overlap = lambda box: sum(box[0] - 30 <= y <= box[1] + 30 for y in focus_ys)
+            feed_top = (bottom_box[1] if overlap(bottom_box) < overlap(top_box)
+                        else top_box[1])
+            arcade.draw_lrbt_rectangle_filled(feed_left, feed_right, feed_top - 98,
+                                               feed_top, (10, 21, 34, 235))
+            arcade.draw_lrbt_rectangle_outline(feed_left, feed_right, feed_top - 98,
+                                                feed_top, (67, 133, 154), 1)
+            self.text('ai_feed_title',
+                      f'AI ACTIONS · {"PAUSED" if self.ai.paused else f"{self.ai.speed:g}×"}',
+                      feed_left + 10, feed_top - 17, 10, ACCENT)
+            for index, (faction, event) in enumerate(self.ai.events):
+                self.text(('ai_feed', index), f'{faction} · {event}', feed_left + 10,
+                          feed_top - 38 - index * 19, 9, INK if index == 0 else MUTED,
+                          max_width=feed_right - feed_left - 20)
         if not self.strategy_modal:
             self.roster.draw_details(self)
         if self.player_panel.hovered_planet is not None:
@@ -1595,6 +1643,15 @@ class BoardWindow(arcade.Window):
                     elif action[0] == 'start':
                         self.start_from_menu()
             return
+        if self.ai.bot_factions and button == arcade.MOUSE_BUTTON_LEFT:
+            if self.ai_pause_hit and all((self.ai_pause_hit[0] <= x <= self.ai_pause_hit[1],
+                                          self.ai_pause_hit[2] <= y <= self.ai_pause_hit[3])):
+                self.ai.paused = not self.ai.paused
+                return
+            if self.ai_speed_hit and all((self.ai_speed_hit[0] <= x <= self.ai_speed_hit[1],
+                                          self.ai_speed_hit[2] <= y <= self.ai_speed_hit[3])):
+                self.ai.cycle_speed()
+                return
         if self.ai.bot_factions and not self.smoke:
             turn = self.turn_order
             if ((turn.strategy_selection or turn.command_allocation) and self.ai.is_bot(turn.active_player)):

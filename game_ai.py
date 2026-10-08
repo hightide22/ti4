@@ -8,6 +8,7 @@ game controllers rather than being reimplemented as a second rules engine.
 from __future__ import annotations
 
 from collections import Counter
+from collections import deque
 from itertools import combinations
 from math import ceil
 
@@ -29,6 +30,9 @@ SHIP_VALUE = {'fighter': 0.8, 'destroyer': 1.4, 'cruiser': 2.4,
 LOSS_ORDER = {'fighter': 0, 'destroyer': 2, 'cruiser': 3,
               'carrier': 5, 'dreadnought': 6, 'flagship': 8, 'warsun': 10,
               'infantry': 0}
+STRATEGY_NAMES = {1: 'Leadership', 2: 'Diplomacy', 3: 'Politics',
+                  4: 'Construction', 5: 'Trade', 6: 'Warfare',
+                  7: 'Technology', 8: 'Imperial'}
 
 
 def payment_plan(player, amount, value):
@@ -62,6 +66,10 @@ class GameAI:
         self.window = window
         self.bot_factions = set(bot_factions)
         self.wait = 0.0
+        self.paused = False
+        self.speed = 1.0
+        self.events = deque(maxlen=3)
+        self.focus_positions = ()
         self.thinking = False
         self.last_error = None
 
@@ -73,10 +81,12 @@ class GameAI:
                      if p.faction not in self.bot_factions), None)
 
     def update(self, delta_time):
+        if self.paused:
+            return
         self.wait -= delta_time
         if self.wait > 0 or self.thinking or self.window.main_menu_visible:
             return
-        self.wait = .18
+        self.wait = .55 / self.speed
         self.thinking = True
         try:
             self.step()
@@ -89,6 +99,24 @@ class GameAI:
         finally:
             self.thinking = False
 
+    def report(self, player, message, duration=2.0):
+        faction = player.faction.upper() if player else 'AI'
+        self.events.appendleft((faction, message))
+        self.wait = max(self.wait, duration / self.speed)
+
+    def cycle_speed(self):
+        speeds = (1.0, 2.0, 4.0, .5)
+        self.speed = speeds[(speeds.index(self.speed) + 1) % len(speeds)]
+        self.wait = min(self.wait, .55 / self.speed)
+
+    def opening_expansion(self, player, move):
+        if not move or self.window.turn_order.round_number != 1 or move[1] == move[2]:
+            return False
+        target = self.window.board[move[1]]
+        return (any(not target.planet_owners.get(planet.planet_id) for planet in target.planets)
+                and not any(player.faction in tile.command_tokens
+                            for tile in self.window.board.values()))
+
     def step(self):
         w = self.window
         turn = w.turn_order
@@ -96,7 +124,10 @@ class GameAI:
             return
         if turn.strategy_selection:
             if self.is_bot(turn.active_player):
-                turn.choose_strategy_card(self.choose_strategy_card(turn.active_player))
+                player = turn.active_player
+                card = self.choose_strategy_card(player)
+                turn.choose_strategy_card(card)
+                self.report(player, f'Drafted {STRATEGY_NAMES[card]}.')
                 w.sync_strategy_actor()
             return
         if turn.qdn_pending:
@@ -128,22 +159,28 @@ class GameAI:
         if not self.is_bot(player):
             return
         if turn.action_used or not turn.can_take_action:
+            self.report(player, 'Ended the turn.', 1.3)
             w.pass_turn()
             return
         cards = [card for card in turn.strategy_assignments[player.faction]
                  if card not in turn.strategy_used[player.faction]]
         move = self.best_activation(player) if player.command_pools['tactical'] else None
-        if cards and (not move or self.strategy_value(player, cards[0]) >= move[0] - 3):
+        if self.opening_expansion(player, move):
+            self.start_activation(player, move)
+        elif cards and (not move or self.strategy_value(player, cards[0]) >= move[0] - 3):
             card = max(cards, key=lambda item: (self.strategy_value(player, item), -item))
             w.strategy.start(card)
+            self.report(player, f'Played {STRATEGY_NAMES[card]}.')
             w.sync_strategy_actor()
         elif move:
             self.start_activation(player, move)
         elif cards:
             card = max(cards, key=lambda item: (self.strategy_value(player, item), -item))
             w.strategy.start(card)
+            self.report(player, f'Played {STRATEGY_NAMES[card]}.')
             w.sync_strategy_actor()
         else:
+            self.report(player, 'Passed for the rest of the round.', 2.2)
             w.pass_turn()
 
     def command_pool(self, player):
@@ -215,7 +252,17 @@ class GameAI:
             dock = any(u.owner == player.faction and u.kind == 'spacedock' and
                        target.planet_owners.get(u.location.planet_id) == player.faction
                        for u in target.units)
-            if dock:
+            can_expand_from_here = (
+                self.window.turn_order.round_number == 1 and
+                any(p.faction_homeworld == player.faction for p in target.planets) and
+                any(u.owner == player.faction and u.kind == 'infantry' for u in target.units) and
+                any(u.owner == player.faction and u.kind == 'carrier' for u in target.units) and
+                any(any(not neighbor.planet_owners.get(p.planet_id) for p in neighbor.planets)
+                    and player.faction not in neighbor.command_tokens and
+                    any(movement.route(target, neighbor, ship, player) for ship in target.units
+                        if ship.owner == player.faction and ship.kind == 'carrier')
+                    for neighbor in movement.neighbors(target)))
+            if dock and not can_expand_from_here:
                 budget = player.available_values[0] + player.trade_goods
                 local_count = sum(u.owner == player.faction for u in target.units)
                 score = (9 + min(6, budget) + (2 if local_count < 6 else 0)
@@ -300,9 +347,17 @@ class GameAI:
                         capacity -= 1
                     except MovementError:
                         continue
-        self.window.selected = target_position
-        self.window.frame_player_systems(player)
+        self.window.frame_action_route(source_position, target_position)
+        self.focus_positions = (source_position, target_position)
         self.window.movement_panel.reset()
+        ships = sum(u.kind not in ('fighter', 'infantry') for u in
+                    (session.choices[unit_id] for unit_id in session.selected))
+        cargo = len(session.selected) - ships
+        target = session.target.name
+        if source_position == target_position:
+            self.report(player, f'Activated {target} to produce units.', 2.7)
+        else:
+            self.report(player, f'Activated {target}: {ships} ships, {cargo} passengers selected.', 2.7)
 
     def resolve_strategy(self):
         w = self.window
@@ -315,6 +370,7 @@ class GameAI:
                     (s.card == 6 and ctl.home_docks()):
                 if not ctl.secondary_unavailable():
                     ctl.accept_secondary(brilliant=(player.faction == 'jolnar' and s.card == 7))
+                    self.report(player, f'Accepted {STRATEGY_NAMES[s.card]} secondary.', 1.1)
                     return
             ctl.decline_secondary()
         elif s.stage == 'leadership':
@@ -329,6 +385,7 @@ class GameAI:
                         ctl.toggle_payment(planet_id)
                     s.trade_goods = plan[1]
             ctl.pay_leadership()
+            self.report(player, f'Gained {s.base_gain + s.purchases} command tokens.', 1.7)
         elif s.stage == 'allocate':
             if player.pending_commands:
                 ctl.allocate(self.command_pool(player))
@@ -340,6 +397,7 @@ class GameAI:
                 position = max(options, key=lambda pos: (
                     sum(p.resources + p.influence for p in w.board[pos].planets), pos))
                 ctl.select_system(position)
+                self.report(player, f'Diplomacy protected {w.board[position].name}.', 2.2)
             else:
                 ctl.continue_stage()
         elif s.stage == 'ready_planets':
@@ -352,11 +410,13 @@ class GameAI:
             choices = [p for p in w.turn_order.players if p is not w.turn_order.speaker]
             chosen = player if player in choices else next((p for p in choices if self.is_bot(p)), choices[0])
             ctl.choose_speaker(chosen.faction)
+            self.report(player, f'Chose {chosen.faction.upper()} as Speaker.', 2.0)
         elif s.stage == 'trade':
             allies = [p for p in w.turn_order.players if p is not player and self.is_bot(p)]
             if allies:
                 s.free_trade.add(min(allies, key=lambda p: (p.trade_goods, p.faction)).faction)
             ctl.confirm_trade()
+            self.report(player, 'Gained 3 trade goods and replenished commodities.', 2.0)
         elif s.stage == 'warfare_system':
             options = ctl.selectable_systems()
             if not options:
@@ -367,6 +427,7 @@ class GameAI:
                 ctl.select_system(position)
                 ctl.select_warfare_token(position, player.faction)
                 ctl.confirm_warfare_removal()
+                self.report(player, f'Warfare removed a token from {w.board[position].name}.', 1.7)
         elif s.stage == 'warfare_allocate':
             if player.pending_commands:
                 ctl.allocate(self.command_pool(player))
@@ -386,8 +447,10 @@ class GameAI:
                             self._tile_threat(ctl.planet_system(c.planet.planet_id), player.faction),
                             c.planet.planet_id))
                 tile = ctl.planet_system(card.planet.planet_id)
+                kind = s.structure
                 ctl.select_system(tile.position)
                 ctl.build(card.planet.planet_id)
+                self.report(player, f'Built {kind} on {card.planet.name}.', 2.2)
         elif s.stage == 'production_site':
             docks = ctl.home_docks()
             if docks:
@@ -407,6 +470,7 @@ class GameAI:
                     ctl.toggle_technology_planet(planet_id)
                 s.trade_goods = goods
                 ctl.research_selected()
+                self.report(player, f'Researched {alias}.', 2.2)
             else:
                 ctl.continue_stage()
         elif s.stage == 'placeholder':
@@ -483,6 +547,7 @@ class GameAI:
                                'salvage', 'intercept', 'bunker', 'disable'):
                     continue
                 cards.play(player, index)
+                self.report(player, f'Played action card {cards.name_for(alias)}.', 2.1)
                 return True
         return False
 
@@ -502,7 +567,11 @@ class GameAI:
         if any(not self.is_bot(p) for p in w.action_cards.participants(s)):
             return
         if s.stage == 'movement':
+            ships = sum(s.choices[unit_id].kind not in ('infantry', 'fighter')
+                        for unit_id in s.selected)
             ctl.confirm()
+            if ships:
+                self.report(s.player, f'Moved {ships} ships into {s.target.name}.', 2.5)
         elif s.stage == 'space_cannon_action':
             s.experimental_window_closed = True
             ctl.continue_after_movement(s, s.space_cannon_next_stage or 'invasion')
@@ -516,6 +585,7 @@ class GameAI:
             for unit_id in s.bombard_targets:
                 s.bombard_targets[unit_id] = hostile[0] if hostile else None
             ctl.resolve_bombardment()
+            self.report(s.player, f'Bombarded {s.target.name}.', 2.2)
         elif s.stage == 'invasion':
             targets = [p for p in s.target.planets if
                        s.target.planet_owners.get(p.planet_id) != s.player.faction]
@@ -537,6 +607,10 @@ class GameAI:
                 elif undefended:
                     s.landings[unit_id] = undefended[0].planet_id
             ctl.establish_control()
+            if s.landed_planets:
+                names = ', '.join(p.name for p in s.target.planets
+                                  if p.planet_id in s.landed_planets)
+                self.report(s.player, f'Landed infantry on {names}.', 2.5)
         elif s.stage == 'assault_choice':
             victims = ctl.assault_victims(s)
             if victims:
@@ -551,6 +625,10 @@ class GameAI:
                              if faction != s.player.faction) and ctl.retreat_options(s, s.player.faction)):
                 ctl.announce_retreat()
             ctl.advance_combat()
+            if s.combat_needs_resolution and s.combat_rolls:
+                results = ', '.join(f'{faction.upper()} {sum(bool(roll["hit"]) for roll in rolls)} hits'
+                                    for faction, rolls in s.combat_rolls.items())
+                self.report(s.player, f'Combat round {s.combat_round}: {results}.', 3.0)
         elif s.stage == 'retreat_selection':
             options = ctl.retreat_options(s, s.retreat_announced)
             if options:
@@ -674,3 +752,5 @@ class GameAI:
             ctl.toggle_production_planet(planet_id)
         s.trade_goods_to_spend = payment[1]
         ctl.produce()
+        summary = ', '.join(f'{count} {kind}' for kind, count in sorted(planned.items()))
+        self.report(player, f'Produced {summary} in {s.target.name}.', 3.0)

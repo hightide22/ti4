@@ -283,60 +283,96 @@ def layout_units(tile: Tile, detailed=False) -> list[UnitPlacement]:
             row_count = min(columns, count - row * columns)
             placements.append(UnitPlacement(members, cx + (col - (row_count - 1) / 2) * 36, cy + (row - (rows - 1) / 2) * 36 - 2, size, badge_count=badge_count))
     fleet.sort(key=lambda item: (-item[1], item[0][0].owner))
-    occupied = []
-    occupied_bounds = []
-    same_kind = {}
     labels = protected_labels(tile)
-    for members, size, badge_count in fleet:
-        key = members[0].owner, members[0].kind
-        candidates = []
-        # Rotate only when a repeated ship cannot stay near its formation.
-        for angle in (0, -15, 15, -30, 30, -45, 45, -60, 60, 90):
-            if angle and key not in same_kind and candidates:
-                break
-            if angle and candidates:
-                best = max(candidates, key=lambda candidate: candidate[0])
-                if math.dist(best[1:3], same_kind[key]) <= size * 1.5:
+
+    def arrange(entries, scale):
+        occupied = []
+        occupied_bounds = []
+        same_kind = {}
+        placed = []
+        for members, original_size, badge_count in entries:
+            size = original_size * scale
+            key = members[0].owner, members[0].kind
+            best = None
+            # Rotate only when a repeated ship cannot stay near its formation.
+            for angle in (0, -15, 15, -30, 30, -45, 45, -60, 60, 90):
+                if angle and key not in same_kind and best:
                     break
-            outline = rotated_silhouette(members[0].image_path, size, angle)
-            bound_radius = max(math.hypot(dx, dy) for dx, dy in outline)
-            edge_support = outline_edge_support(outline)
-            for x in range(20, 326, 6):
-                for y in range(18, 283, 6):
-                    # The silhouette's bounding radius avoids exact polygon
-                    # collision checks when shapes are clearly far apart.
-                    polygon = tuple((x + dx, y + dy) for dx, dy in outline)
-                    edge_clearance = outline_hex_clearance(x, y, edge_support)
-                    if edge_clearance < 3:
-                        continue
-                    if any(math.dist((x, y), planet.center) < planet.radius + bound_radius + 2 and
-                           circle_overlap(polygon, planet.center, planet.radius + 2)
-                           for planet in tile.planets):
-                        continue
-                    if any(math.hypot(max(label[0][0] - x, 0, x - label[2][0]),
-                                      max(label[0][1] - y, 0, y - label[2][1])) < bound_radius and
-                           polygons_overlap(polygon, label) for label in labels):
-                        continue
-                    if math.dist((x, y), (104, 274)) < bound_radius + 29 and circle_overlap(polygon, (104, 274), 29):
-                        continue
-                    expanded = tuple((x + dx * 1.12, y + dy * 1.12) for dx, dy in outline)
-                    expanded_radius = bound_radius * 1.12
-                    if any(math.dist((x, y), (ox, oy)) < expanded_radius + other_radius and
-                           polygons_overlap(expanded, other)
-                           for other, (ox, oy, other_radius) in zip(occupied, occupied_bounds)):
-                        continue
-                    planet_clearance = min((math.hypot(x - p.center[0], y - p.center[1]) - p.radius for p in tile.planets), default=100)
-                    score = min(edge_clearance, planet_clearance)
-                    if key in same_kind:
-                        score -= math.dist((x, y), same_kind[key]) * .7
-                    candidates.append((score - abs(angle) * .015, x, y, polygon, angle))
-        if not candidates:
-            raise ValueError(f"No free display position for {members[0].kind} in tile {tile.number}")
-        _, x, y, polygon, angle = max(candidates, key=lambda candidate: candidate[0])
-        occupied.append(polygon)
-        occupied_bounds.append((x, y, max(math.hypot(px - x, py - y) for px, py in polygon)))
-        same_kind.setdefault(key, (x, y))
-        placements.append(UnitPlacement(members, x, y, size, angle, badge_count))
+                if angle and best and math.dist(best[1:3], same_kind[key]) <= size * 1.5:
+                    break
+                outline = rotated_silhouette(members[0].image_path, size, angle)
+                bound_radius = max(math.hypot(dx, dy) for dx, dy in outline)
+                edge_support = outline_edge_support(outline)
+                for x in range(20, 326, 6):
+                    for y in range(18, 283, 6):
+                        # The silhouette's bounding radius avoids exact polygon
+                        # collision checks when shapes are clearly far apart.
+                        polygon = tuple((x + dx, y + dy) for dx, dy in outline)
+                        edge_clearance = outline_hex_clearance(x, y, edge_support)
+                        if edge_clearance < 3:
+                            continue
+                        if any(math.dist((x, y), planet.center) < planet.radius + bound_radius + 2 and
+                               circle_overlap(polygon, planet.center, planet.radius + 2)
+                               for planet in tile.planets):
+                            continue
+                        if any(math.hypot(max(label[0][0] - x, 0, x - label[2][0]),
+                                          max(label[0][1] - y, 0, y - label[2][1])) < bound_radius and
+                               polygons_overlap(polygon, label) for label in labels):
+                            continue
+                        if (math.dist((x, y), (104, 274)) < bound_radius + 29 and
+                                circle_overlap(polygon, (104, 274), 29)):
+                            continue
+                        expanded = tuple((x + dx * 1.12, y + dy * 1.12) for dx, dy in outline)
+                        expanded_radius = bound_radius * 1.12
+                        if any(math.dist((x, y), (ox, oy)) < expanded_radius + other_radius and
+                               polygons_overlap(expanded, other)
+                               for other, (ox, oy, other_radius) in zip(occupied, occupied_bounds)):
+                            continue
+                        planet_clearance = min((math.hypot(x - p.center[0], y - p.center[1]) - p.radius
+                                                for p in tile.planets), default=100)
+                        score = min(edge_clearance, planet_clearance)
+                        if key in same_kind:
+                            score -= math.dist((x, y), same_kind[key]) * .7
+                        candidate = (score - abs(angle) * .015, x, y, polygon, angle)
+                        if best is None or candidate[0] > best[0]:
+                            best = candidate
+            if best is None:
+                return None
+            _, x, y, polygon, angle = best
+            occupied.append(polygon)
+            occupied_bounds.append((x, y, max(math.hypot(px - x, py - y) for px, py in polygon)))
+            same_kind.setdefault(key, (x, y))
+            placed.append(UnitPlacement(members, x, y, size, angle, badge_count))
+        return placed
+
+    # Skip a doomed full-size search once the display is clearly denser than
+    # the free space left by this system's planets.
+    compact_early = len(fleet) > max(5, 10 - 2 * len(tile.planets))
+    arranged = None if compact_early else arrange(fleet, 1)
+    if arranged is None:
+        # Dense battles and repeated production can put more plastic in a
+        # system than separate full-size sprites can display. Keep every unit
+        # represented by grouping each faction's matching ships into one badge.
+        consolidated = defaultdict(list)
+        for members, _, _ in fleet:
+            consolidated[(members[0].owner, members[0].kind)].extend(members)
+        compact = [(tuple(members), UNIT_TYPES[kind]['size'], len(members) if len(members) > 1 else None)
+                   for (owner, kind), members in consolidated.items()]
+        compact.sort(key=lambda item: (-item[1], item[0][0].owner))
+        for scale in (1, .82, .65, .5, .38):
+            arranged = arrange(compact, scale)
+            if arranged is not None:
+                break
+        if arranged is None:
+            # Extreme custom maps can fill every legal point. Rendering must
+            # remain total even then; the inventory still exposes each unit.
+            arranged = []
+            for index, (members, size, badge_count) in enumerate(compact):
+                column, row = divmod(index, 6)
+                arranged.append(UnitPlacement(members, 42 + column * 42,
+                                               35 + row * 42, min(20, size * .38),
+                                               badge_count=badge_count))
+    placements.extend(arranged)
     return placements
 
 

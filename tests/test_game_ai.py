@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock
 
 from game_ai import GameAI, payment_plan
 from player import PlayerState
@@ -68,6 +69,25 @@ class GameAITests(unittest.TestCase):
                                  movement=MovementController(board, players))
         ai = GameAI(window, {'sol', 'jolnar'})
         self.assertEqual(ai.best_activation(sol)[1], human_tile.position)
+
+    def test_first_bot_action_expands_instead_of_locking_home_dock(self):
+        config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
+        players = create_players(board, config)
+        turn = TurnOrder(players, strategy_enabled=True)
+        turn.strategy_selection = False
+        turn.strategy_assignments['sol'] = [4, 7]
+        movement = MovementController(board, players)
+        window = SimpleNamespace(turn_order=turn, board=board, movement=movement,
+                                 strategy=SimpleNamespace(session=None, start=Mock()),
+                                 action_cards=SimpleNamespace(pending=None),
+                                 transaction=SimpleNamespace(session=None))
+        ai = GameAI(window, {'sol'})
+        ai.start_activation = Mock()
+        ai.step()
+        ai.start_activation.assert_called_once()
+        selected = ai.start_activation.call_args.args[1]
+        self.assertNotEqual(selected[1], selected[2])
+        self.assertFalse(window.strategy.start.called)
 
     def test_bot_assignment_sustains_ship_before_losing_fighter(self):
         # Combat's existing assigner decides how damage is applied; the bot
