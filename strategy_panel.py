@@ -382,7 +382,9 @@ class StrategyPanel:
             options = [(('produce_at', u.unit_id), next(p.name for p in t.planets if p.planet_id == u.location.planet_id), False)
                        for t, u in ctl.home_docks()]
             w.text('strategy_dock_title', 'Choose one home-system Space Dock:', x, y, 12, INK)
-            self.options(w, options, x, y - 45, width, rows)
+            w.text('strategy_warfare_cost', 'Spend 1 strategy token. No token is placed on the map.',
+                   x, y - 21, 10, MUTED, width)
+            self.options(w, options, x, y - 72, width, rows)
         elif s.stage == 'placeholder':
             w.text('strategy_placeholder', 'This card has no implemented effect yet.', x, y, 12, MUTED, width)
             self.button(w, ('continue',), 'CONTINUE', x, foot, width)

@@ -90,7 +90,9 @@ The combat and movement shortlist contains 18 base-game action cards. Politics d
 
 Leadership uses explicit payment: choose the extra token count, click ready planets for influence, and choose trade goods with +/- controls. The dialog shows paid influence versus required influence. Nothing selects payment automatically, and commodities cannot pay. New tokens must be distributed before the next secondary offer. The combined command-sheet, board, and unallocated-token count is capped at 16. Leadership's secondary has no strategy-token cost.
 
-Diplomacy lets the owner choose a controlled system other than Mecatol Rex, places other players' command tokens there and readies every exhausted planet the owner controls in that system. Its secondary can ready up to two exhausted planets anywhere. Construction uses selected structures and planets. Trade lets the owner choose free secondary recipients. Warfare returns a selected board token for allocation and redistribution; its secondary uses exactly one selected Space Dock in the responder's home system, with the existing production payment interface. Politics draws two action cards and changes the Speaker; card 8 remains a placeholder.
+Diplomacy lets the owner choose a controlled system other than Mecatol Rex, places other players' command tokens there and readies every exhausted planet the owner controls in that system. Its secondary can ready up to two exhausted planets anywhere. Construction uses selected structures and planets. Trade lets the owner choose free secondary recipients. Warfare returns a selected board token for allocation and redistribution; its secondary spends one strategy-pool token to use exactly one selected Space Dock in the responder's home system, with the existing production payment interface. The secondary does not place a command token on the map. Politics draws two action cards and changes the Speaker; card 8 remains a placeholder.
+
+Space Cannon and Bombardment results show each die as a hit or miss, including any roll modifier. `scripts/dice_smoke.py` renders both miss outcomes in the GUI.
 
 ## Technologies
 

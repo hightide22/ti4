@@ -164,10 +164,17 @@ class StrategicActionTests(unittest.TestCase):
         c.continue_stage()
         c.accept_secondary()
         home, dock = c.home_docks()[0]
+        self.assertNotIn(self.hacan.faction, home.command_tokens)
+        tokens_before = {position: set(system.command_tokens)
+                         for position, system in self.board.items()}
+        strategy_tokens_before = self.hacan.command_pools['strategic']
         other_planet = next(p for p in home.planets if p.planet_id != dock.location.planet_id)
         home.units.append(Unit('second-hacan-dock', 'spacedock', 'hacan', self.hacan.color_code,
                                UnitLocation(Region.PLANET, other_planet.planet_id)))
         c.produce_at(dock.unit_id)
+        self.assertEqual(self.hacan.command_pools['strategic'], strategy_tokens_before - 1)
+        self.assertEqual({position: set(system.command_tokens)
+                          for position, system in self.board.items()}, tokens_before)
         self.assertEqual(len(self.movement.session.production_sites), 1)
         self.assertEqual(self.movement.session.production_sites[0][0], dock.location.planet_id)
         self.assertEqual(c.session.stage, 'production')

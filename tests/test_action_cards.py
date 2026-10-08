@@ -113,6 +113,7 @@ class ActionCardTests(unittest.TestCase):
 
         self.assertEqual(session.bombard_rolls[0]['value'], 4)
         self.assertIn(defender, system.units)
+        self.assertIn('8-4=4 miss', session.bombard_log[-1])
 
     def test_fire_team_rerolls_selected_ground_dice(self):
         system = next(tile for tile in self.board.values() if tile.planets)

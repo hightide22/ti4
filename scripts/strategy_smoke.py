@@ -98,6 +98,9 @@ def main():
         click(('continue',))  # No own command token is on the board in this fixture.
         click(('continue',))
         click(('accept',))
+        render('warfare-dock-choice')
+        assert w.labels['strategy_warfare_cost'].text == \
+            'Spend 1 strategy token. No token is placed on the map.'
         dock_id = w.strategy.home_docks()[0][1].unit_id
         click(('produce_at', dock_id))
         assert w.movement.session.strategic_production

@@ -24,6 +24,11 @@ def cargo_cost(unit):
     return int(value) if value is not None else 1
 
 
+def format_die_result(value, modifier, hit):
+    result = f'{value}{modifier:+d}={value + modifier}' if modifier else str(value)
+    return f'{result} {"HIT" if hit else "miss"}'
+
+
 @dataclass
 class Source:
     tile: object
@@ -645,6 +650,12 @@ class MovementController:
         ships_entering_target = {ship.unit_id for source in session.sources.values()
                                  if source.tile is not session.target
                                  for ship in session.ships(source)}
+        transferred_ids = set()
+        for origin, unit, _ in transfers:
+            if (unit.unit_id in transferred_ids or
+                    sum(candidate is unit for candidate in origin.units) != 1):
+                raise MovementError('A selected unit is no longer available in its source system. Cancel and reactivate.')
+            transferred_ids.add(unit.unit_id)
         for origin, unit, location in transfers:
             origin.units.remove(unit)
             unit.location = location
@@ -880,8 +891,12 @@ class MovementController:
                                 for unit in active_ships))
             if graviton:
                 shooter.exhausted_technologies.add('gls')
+            results = ', '.join(format_die_result(
+                value, modifier, value + modifier >= int(profile['spaceCannonHitsOn']))
+                for value in dice)
             session.cannon_log.append(
-                f'{cannon.owner.upper()} PDS in tile {source.system_id}: {dice} → {hits} hit(s)')
+                f'{cannon.owner.upper()} PDS in tile {source.system_id} '
+                f'({profile["spaceCannonHitsOn"]}+): {results} → {hits} hit(s)')
             for _ in range(hits):
                 candidates = [unit for unit in active_ships if unit in session.target.units]
                 if not candidates:
@@ -1124,12 +1139,13 @@ class MovementController:
             extra = int(plasma_available)
             plasma_available = False
             for _ in range(int(profile.get('bombardDieCount') or 1) + extra):
-                value = self.roll_d10(session)
+                natural_value = self.roll_d10(session)
                 planet_owner = session.target.planet_owners.get(planet_id)
-                if planet_owner in session.bunker_factions:
-                    value -= 4
+                modifier = -4 if planet_owner in session.bunker_factions else 0
+                value = natural_value + modifier
                 rolls.append({'unit_id': unit_id, 'kind': ship.kind, 'planet_id': planet_id,
-                              'value': value, 'hit': value >= int(profile['bombardHitsOn'])})
+                              'value': value, 'natural': natural_value, 'modifier': modifier,
+                              'hit': value >= int(profile['bombardHitsOn'])})
             session.bombard_rolls.extend(rolls)
             hits = sum(roll['hit'] for roll in rolls)
             destroyed = 0
@@ -1148,8 +1164,11 @@ class MovementController:
                     nes_cancel[planet_id] = 1
                 destroyed += 1
             planet = next(planet for planet in session.target.planets if planet.planet_id == planet_id)
+            dice_results = ', '.join(format_die_result(roll['natural'], roll['modifier'], roll['hit'])
+                                     for roll in rolls)
             session.bombard_log.append(
-                f'{ship.kind.title()} bombarded {planet.name}: {rolls} → {destroyed} hit(s).')
+                f'{ship.kind.title()} bombarded {planet.name} ({profile["bombardHitsOn"]}+): '
+                f'{dice_results} → {destroyed} hit(s) assigned.')
         session.bombardment_resolved = True
         self.begin_invasion(session)
 
@@ -1341,7 +1360,11 @@ class MovementController:
     def combat_assignment_target(self, session, faction, kind):
         assigned = session.combat_assignments.setdefault(faction, [])
         counts = {unit_id: assigned.count(unit_id) for unit_id in set(assigned)}
-        for unit in sorted(self.combat_units(session, faction), key=lambda item: item.unit_id):
+        # Spread the first hit across intact sustain units before assigning a
+        # second hit to any of them.
+        for unit in sorted(self.combat_units(session, faction),
+                           key=lambda item: (item.damaged,
+                                             counts.get(item.unit_id, 0), item.unit_id)):
             if unit.kind != kind:
                 continue
             bonus = 2 if unit_profile(unit).get('sustainDamage') and not unit.damaged and \
@@ -1781,8 +1804,12 @@ class MovementController:
                         for _ in range(int(profile.get('spaceCannonDieCount') or 1) + extra)]
                 penalty = -1 if 'amd' in session.player.technologies else 0
                 hits = sum(value + penalty >= int(profile['spaceCannonHitsOn']) for value in dice)
+                results = ', '.join(format_die_result(
+                    value, penalty, value + penalty >= int(profile['spaceCannonHitsOn']))
+                    for value in dice)
                 session.defense_log.append(
-                    f'{cannon.owner.upper()} PDS on {planet_id}: {dice} → {hits} hit(s)')
+                    f'{cannon.owner.upper()} PDS on {planet_id} '
+                    f'({profile["spaceCannonHitsOn"]}+): {results} → {hits} hit(s)')
                 for _ in range(hits):
                     if nes_cancel.get(planet_id, 0):
                         nes_cancel[planet_id] -= 1

@@ -47,6 +47,20 @@ class MovementTests(unittest.TestCase):
         self.assertNotIn('sol', self.target.command_tokens)
         self.assertEqual(self.player.command_pools['tactical'], tactical)
 
+    def test_stale_movement_selection_fails_before_moving_any_units(self):
+        session = self.controller.activate(self.player, self.target.position)
+        source = session.sources[self.home.position]
+        carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
+        infantry = next(unit for unit in source.passengers if unit.kind == 'infantry')
+        session.toggle(carrier.unit_id)
+        session.toggle(infantry.unit_id)
+        self.home.units.remove(infantry)
+        with self.assertRaisesRegex(MovementError, 'no longer available'):
+            self.controller.confirm()
+        self.assertIn(carrier, self.home.units)
+        self.assertNotIn(carrier, self.target.units)
+        self.assertEqual(session.stage, 'movement')
+
     def test_landed_infantry_captures_planet_and_undo_restores_cards_and_control(self):
         target = next(tile for tile in self.board.neighbors(self.home.position)
                       if tile.planets and not tile.command_tokens and
@@ -416,6 +430,25 @@ class MovementTests(unittest.TestCase):
         self.assertNotIn(carrier, self.home.units)
         self.assertNotIn(carrier, self.target.units)
 
+    def test_two_hits_damage_two_intact_dreadnoughts_before_destroying_either(self):
+        dreadnoughts = [Unit(f'hacan-sustain-{index}', 'dreadnought', 'hacan', 'ylw',
+                             UnitLocation(Region.SPACE)) for index in range(2)]
+        self.target.units.extend(dreadnoughts)
+        session = self.controller.activate(self.player, self.target.position)
+        carrier = next(unit for unit in session.sources[self.home.position].ships
+                       if unit.kind == 'carrier')
+        session.toggle(carrier.unit_id)
+        self.controller.confirm()
+        self.assertEqual(session.stage, 'space_combat')
+        session.combat_hits = {'sol': 0, 'hacan': 2}
+        session.combat_needs_resolution = True
+        self.controller.assign_combat_hit('hacan', 'dreadnought')
+        self.controller.assign_combat_hit('hacan', 'dreadnought')
+        self.assertEqual(set(session.combat_assignments['hacan']),
+                         {unit.unit_id for unit in dreadnoughts})
+        self.controller.advance_combat()
+        self.assertTrue(all(unit.damaged and unit in self.target.units for unit in dreadnoughts))
+
     def test_undo_after_combat_and_production_returns_to_production_checkpoint(self):
         planet = self.home.planets[0]
         base = Unit('test-undo-production-base', 'spacedock', self.player.faction,
@@ -462,6 +495,43 @@ class MovementTests(unittest.TestCase):
         self.assertTrue(any('destroyed' in entry for entry in session.cannon_log))
         self.assertNotIn(carrier, self.target.units)
         self.assertEqual(session.stage, 'invasion')
+
+    def test_space_cannon_miss_keeps_the_entering_ship(self):
+        target = next(tile for tile in self.controller.neighbors(self.home)
+                      if tile.planets and not tile.command_tokens and
+                      any(self.controller.route(self.home, tile, unit, self.player)
+                          for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'carrier'))
+        planet = target.planets[0]
+        target.units.append(Unit('miss-test-pds', 'pds', 'hacan', 'ylw',
+                                 UnitLocation(Region.PLANET, planet_id=planet.planet_id)))
+        session = self.controller.activate(self.player, target.position)
+        carrier = next(unit for unit in session.sources[self.home.position].ships
+                       if unit.kind == 'carrier')
+        session.toggle(carrier.unit_id)
+        with patch('movement.random.randint', return_value=1) as roll:
+            self.controller.confirm()
+        roll.assert_called_once_with(1, 10)
+        self.assertIn(carrier, target.units)
+        self.assertTrue(any('1-1=0 miss' in entry and '0 hit(s)' in entry
+                            for entry in session.cannon_log), session.cannon_log)
+
+    def test_bombardment_miss_does_not_destroy_ground_force(self):
+        planet = self.target.planets[0]
+        self.target.planet_owners[planet.planet_id] = 'hacan'
+        defender = Unit('miss-test-infantry', 'infantry', 'hacan', 'ylw',
+                        UnitLocation(Region.PLANET, planet_id=planet.planet_id))
+        bomber = Unit('miss-test-dread', 'dreadnought', 'sol', 'blu', UnitLocation(Region.SPACE))
+        self.target.units.extend((defender, bomber))
+        session = self.controller.activate(self.player, self.target.position)
+        self.controller.confirm()
+        self.assertEqual(session.stage, 'bombardment')
+        self.controller.cycle_bombardment_target(bomber.unit_id)
+        with patch('movement.random.randint', return_value=1) as roll:
+            self.controller.resolve_bombardment()
+        roll.assert_called_once_with(1, 10)
+        self.assertIn(defender, self.target.units)
+        self.assertEqual([result['hit'] for result in session.bombard_rolls], [False])
+        self.assertIn('1 miss', session.bombard_log[-1])
 
     def test_anti_fighter_barrage_rolls_once_before_space_combat(self):
         destroyer = next(unit for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'destroyer')
@@ -557,6 +627,27 @@ class MovementTests(unittest.TestCase):
                              unit.location.region == Region.PLANET and
                              unit.location.planet_id == planet.planet_id for unit in target.units), 1)
         self.assertEqual(target.planet_owners[planet.planet_id], 'sol')
+
+    def test_planetary_space_cannon_miss_leaves_landing_force_alive(self):
+        target = next(tile for tile in self.controller.neighbors(self.home)
+                      if tile.planets and any(self.controller.route(self.home, tile, unit, self.player)
+                                             for unit in self.home.units if unit.kind == 'carrier'))
+        planet = target.planets[0]
+        target.units.append(Unit('defense-miss-pds', 'pds', 'hacan', 'ylw',
+                                 UnitLocation(Region.PLANET, planet.planet_id)))
+        session = self.controller.activate(self.player, target.position)
+        source = session.sources[self.home.position]
+        carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
+        infantry = next(unit for unit in source.passengers if unit.kind == 'infantry')
+        session.toggle(carrier.unit_id)
+        session.toggle(infantry.unit_id)
+        self.controller.confirm()
+        self.controller.cycle_landing(infantry.unit_id)
+        with patch('movement.random.randint', return_value=1):
+            self.controller.establish_control()
+        self.assertIn(infantry, target.units)
+        self.assertTrue(any('1-1=0 miss' in entry and '0 hit(s)' in entry
+                            for entry in session.defense_log), session.defense_log)
 
     def test_ground_battles_resolve_landed_planets_in_order_then_capture_them(self):
         target = next(tile for tile in self.board.neighbors(self.home.position)

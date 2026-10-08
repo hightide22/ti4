@@ -218,7 +218,11 @@ class MovementPanel:
         try:
             notices = []
             if session.cannon_log:
-                notices.append(('SPACE CANNON', session.cannon_log[-1]))
+                roll = next((entry for entry in reversed(session.cannon_log)
+                             if ' PDS in tile ' in entry), None)
+                notices.append(('SPACE CANNON DICE', roll or session.cannon_log[-1]))
+                if roll and roll != session.cannon_log[-1]:
+                    notices.append(('SPACE CANNON RESULT', session.cannon_log[-1]))
             if session.afb_log:
                 notices.append(('ANTI-FIGHTER BARRAGE', session.afb_log[-1]))
             if session.assault_log:
@@ -228,12 +232,20 @@ class MovementPanel:
             if session.bombard_log:
                 notices.append(('BOMBARDMENT', session.bombard_log[-1]))
             if session.defense_log:
-                notices.append(('PLANETARY DEFENSE', session.defense_log[-1]))
+                roll = next((entry for entry in reversed(session.defense_log)
+                             if ' PDS on ' in entry), None)
+                notices.append(('PLANETARY DEFENSE DICE', roll or session.defense_log[-1]))
+                if roll and roll != session.defense_log[-1]:
+                    notices.append(('PLANETARY DEFENSE RESULT', session.defense_log[-1]))
             for index, (label, detail) in enumerate(notices[-3:]):
-                window.text(('action_result_label', index), label, x, y, 8, ACCENT, width)
+                label_key = ('action_result_label', index)
+                detail_key = ('action_result_detail', index)
+                window.text(label_key, label, x, y, 8, ACCENT, width)
+                y -= max(16, window.labels[label_key].content_height + 5)
+                window.text(detail_key, detail, x, y, 9, INK, width)
+                y -= max(28, window.labels[detail_key].content_height + 12)
+            if notices:
                 y -= 12
-                window.text(('action_result_detail', index), detail, x, y, 9, INK, width)
-                y -= 20
             if session.stage == 'movement':
                 window.text('move_sources', f'SOURCES FOR THIS ACTIVATION · {len(session.sources)}', x, y, 11, ACCENT)
                 y -= 28
