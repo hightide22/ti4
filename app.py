@@ -404,6 +404,8 @@ class BoardWindow(arcade.Window):
 
     @property
     def strategy_modal(self):
+        if self.bot_actor:
+            return False
         return (self.turn_order.strategy_selection or self.turn_order.qdn_pending or
                 bool(self.strategy.session and self.strategy.session.stage != 'production') or
                 bool(self.strategy_view and not self.movement.session))
@@ -414,8 +416,55 @@ class BoardWindow(arcade.Window):
 
     @property
     def technology_modal(self):
+        if self.bot_actor:
+            return False
         return self.technology_view or bool(self.strategy.session and
                                             self.strategy.session.stage == 'technology')
+
+    @property
+    def bot_actor(self):
+        """Whether the current decision belongs to an automated player."""
+        if self.smoke or not self.ai.bot_factions:
+            return False
+        actor = (self.movement.session.player if self.movement.session else
+                 self.strategy.player if self.strategy.session else
+                 self.turn_order.active_player)
+        return self.ai.is_bot(actor)
+
+    def human_card_participants(self):
+        participants = self.action_cards.participants(self.movement.session)
+        return [player for player in participants if not self.ai.is_bot(player)]
+
+    def draw_bot_sidebar(self, left):
+        """Show progress without exposing controls for the bot's decisions."""
+        session = self.movement.session
+        self.movement_panel.hits.clear()
+        self.movement_panel.buttons.clear()
+        self.movement_panel.route_hits.clear()
+        self.movement_panel.source_hits.clear()
+        self.system_panel.hits.clear()
+        self.system_panel.remove_token_hit = None
+        self.system_panel.add_token_hit = None
+        self.system_panel.strategy_tab_hit = None
+        self.system_panel.technology_tab_hit = None
+        self.strategy_panel.hits.clear()
+        self.technology_panel.hits.clear()
+        if not self.inspector_visible:
+            return
+        actor = (session.player if session else self.strategy.player if self.strategy.session
+                 else self.turn_order.active_player)
+        phase = (session.stage if session else self.strategy.session.stage if self.strategy.session else
+                 'strategy draft' if self.turn_order.strategy_selection else
+                 'command allocation' if self.turn_order.command_allocation else 'choosing action')
+        self.text('bot_sidebar_title', 'AI ACTION IN PROGRESS', left + 18,
+                  self.height - 143, 14, ACCENT)
+        self.text('bot_sidebar_faction', actor.faction.upper(), left + 18,
+                  self.height - 175, 11, INK)
+        if session:
+            self.text('bot_sidebar_target', session.target.name, left + 18,
+                      self.height - 203, 15, INK, self.sidebar - 36)
+        self.text('bot_sidebar_stage', phase.replace('_', ' ').upper(),
+                  left + 18, self.height - 236, 10, MUTED)
 
     def sync_strategy_actor(self):
         if self.strategy.session and self.strategy.session.stage in (
@@ -799,10 +848,11 @@ class BoardWindow(arcade.Window):
                         'STRATEGY ACTION' if self.strategy.session else
                         'ALLOCATE COMMANDS' if pending_commands else
                         'END TURN' if self.turn_order.action_used else 'PASS')
-        button(self, 'pass_turn_button', button_label, turn_left, turn_bottom,
-               turn_right - turn_left, turn_top - turn_bottom, primary=True,
-               enabled=enabled, size=10)
-        self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled else None
+        if not self.bot_actor:
+            button(self, 'pass_turn_button', button_label, turn_left, turn_bottom,
+                   turn_right - turn_left, turn_top - turn_bottom, primary=True,
+                   enabled=enabled, size=10)
+        self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled and not self.bot_actor else None
         if self.ai.bot_factions:
             ai_left = 260
             button(self, 'ai_pause', 'RESUME AI' if self.ai.paused else 'PAUSE AI',
@@ -814,17 +864,24 @@ class BoardWindow(arcade.Window):
             self.ai_speed_hit = (ai_left + 100, ai_left + 144, turn_bottom, turn_top)
         else:
             self.ai_pause_hit = self.ai_speed_hit = None
-        card_player = (self.movement.session.player if self.movement.session else active_player)
+        card_participants = self.human_card_participants()
+        card_player = (card_participants[0] if self.bot_actor and card_participants else
+                       None if self.bot_actor else
+                       self.strategy.player if self.strategy.session else active_player)
         card_count = len(card_player.action_cards) if card_player else 0
-        card_participants = self.action_cards.participants(self.movement.session)
         playable_count = sum(len(self.action_cards.playable(player, self.movement.session))
                              for player in card_participants)
         card_left, card_right = left - 370, left - 258
-        button(self, 'action_card_hand_button', f'CARDS · {card_count}',
-               card_left, turn_bottom, card_right - card_left, turn_top - turn_bottom,
-               primary=bool(playable_count), selected=self.action_card_panel.open, size=9)
-        self.action_card_button_hit = (card_left, card_right, turn_bottom, turn_top)
-        if not self.inspector_visible:
+        if card_player:
+            button(self, 'action_card_hand_button', f'CARDS · {card_count}',
+                   card_left, turn_bottom, card_right - card_left, turn_top - turn_bottom,
+                   primary=bool(playable_count), selected=self.action_card_panel.open, size=9)
+            self.action_card_button_hit = (card_left, card_right, turn_bottom, turn_top)
+        else:
+            self.action_card_button_hit = None
+        if self.bot_actor:
+            self.draw_bot_sidebar(left)
+        elif not self.inspector_visible:
             self.system_panel.hits.clear()
             self.system_panel.remove_token_hit = None
             self.system_panel.add_token_hit = None
@@ -856,7 +913,7 @@ class BoardWindow(arcade.Window):
             set(self.strategy.session.payment_planets) if self.strategy.session and self.strategy.session.stage == 'leadership'
             else set(self.movement.session.production_planets)
             if self.movement.session and self.movement.session.stage == 'production' else set())
-        self.player_panel.draw(self, show_details=False)
+        self.player_panel.draw(self, show_details=False, interactive=not self.bot_actor)
         self.roster.draw(self)
         if self.ai.bot_factions:
             feed_left = self.roster.WIDTH + 12
@@ -1617,7 +1674,7 @@ class BoardWindow(arcade.Window):
                                           else self.strategy_panel.hover_system)
         else:
             self.strategy_hover_system = None
-        if self.movement.session and self.movement.session.stage == 'movement':
+        if self.movement.session and self.movement.session.stage == 'movement' and not self.bot_actor:
             self.movement_panel.update_hover(x, y)
         else:
             self.movement_panel.update_hover(-1, -1)
@@ -2123,6 +2180,8 @@ class BoardWindow(arcade.Window):
         if self.main_menu_visible:
             if symbol in (arcade.key.ENTER, arcade.key.RETURN):
                 self.start_from_menu()
+            return
+        if self.bot_actor:
             return
         if (self.ai.bot_factions and symbol == arcade.key.Z and modifiers & arcade.key.MOD_CTRL and
                 self.ai.is_bot(self.turn_order.active_player)):

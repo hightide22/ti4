@@ -12,12 +12,13 @@ from collections import deque
 from itertools import combinations
 from math import ceil
 
-from movement import MovementError, capital_ship
+from movement import MovementError, capital_ship, cargo_cost
+from ai_combat import win_probability
 from action_cards import canonical_action_card
 from player import command_tokens_in_reinforcements
 from technology import (available_technologies, missing_prerequisites,
                         production_allowed)
-from units import Region, unit_profile
+from units import Region, UNIT_TYPES, unit_profile
 
 
 TECH_PRIORITY = {
@@ -33,6 +34,7 @@ LOSS_ORDER = {'fighter': 0, 'destroyer': 2, 'cruiser': 3,
 STRATEGY_NAMES = {1: 'Leadership', 2: 'Diplomacy', 3: 'Politics',
                   4: 'Construction', 5: 'Trade', 6: 'Warfare',
                   7: 'Technology', 8: 'Imperial'}
+MIN_ATTACK_WIN_CHANCE = .80
 
 
 def payment_plan(player, amount, value):
@@ -70,6 +72,7 @@ class GameAI:
         self.speed = 1.0
         self.events = deque(maxlen=3)
         self.focus_positions = ()
+        self.attack_odds = None
         self.thinking = False
         self.last_error = None
 
@@ -230,6 +233,7 @@ class GameAI:
     def best_activation(self, player):
         movement = self.window.movement
         best = None
+        best_odds = None
         human = self.human_faction()
         flank = any(canonical_action_card(card) == 'flank_speed'
                     for card in player.action_cards)
@@ -237,8 +241,14 @@ class GameAI:
             if player.faction in target.command_tokens:
                 continue
             friendly = [u for u in target.units if u.owner == player.faction and
-                        u.location.region == Region.SPACE and capital_ship(u)]
-            hostile = self._tile_threat(target, player.faction)
+                        u.location.region == Region.SPACE and UNIT_TYPES[u.kind]['ship']]
+            enemies = [u for u in target.units if u.owner != player.faction and
+                       u.location.region == Region.SPACE and UNIT_TYPES[u.kind]['ship']]
+            cannons = [unit for area in (target, *movement.neighbors(target))
+                       for unit in area.units if unit.kind == 'pds' and
+                       unit.owner != player.faction and
+                       unit_profile(unit).get('spaceCannonHitsOn') and
+                       (area is target or unit_profile(unit).get('deepSpaceCannon'))]
             owned = [p for p in target.planets if target.planet_owners.get(p.planet_id) == player.faction]
             neutral = [p for p in target.planets if not target.planet_owners.get(p.planet_id)]
             enemy_planets = [p for p in target.planets if target.planet_owners.get(p.planet_id)
@@ -270,37 +280,100 @@ class GameAI:
                 candidate = (score, target.position, target.position)
                 if best is None or candidate > best:
                     best = candidate
+                    best_odds = None
             if planet_value <= 0:
                 continue
             for source in self.window.board.values():
                 if source is target or player.faction in source.command_tokens:
                     continue
-                ships = [u for u in source.units if u.owner == player.faction and capital_ship(u)
-                         and (movement.route(source, target, u, player) or
-                              ('gd' in player.technologies and
-                               movement.route(source, target, u, player, bonus=1)) or
-                              (flank and movement.route(source, target, u, player, bonus=1)))]
+                candidates = [u for u in source.units if u.owner == player.faction and
+                              (capital_ship(u) or (u.kind == 'fighter' and
+                                                   'ff2' in player.technologies and
+                                                   u.location.region == Region.SPACE)) and
+                              (movement.route(source, target, u, player) or
+                               ('gd' in player.technologies and
+                                movement.route(source, target, u, player, bonus=1)) or
+                               (flank and movement.route(source, target, u, player, bonus=1)))]
+                if not candidates:
+                    continue
+                slots = max(0, movement.fleet_supply(player) -
+                            sum(capital_ship(unit) for unit in friendly))
+                ranked = sorted(candidates, key=lambda u: (
+                    -int(u.kind == 'carrier' and any(p.owner == player.faction and
+                                                     p.kind == 'infantry' for p in source.units)),
+                    -SHIP_VALUE.get(u.kind, 0), u.unit_id))
+                keep = int(any(p.faction_homeworld == player.faction for p in source.planets)
+                           and len(ranked) > 1)
+                ships = ranked[:max(0, min(slots, len(ranked) - keep))]
                 if not ships:
                     continue
-                infantry = [u for u in source.units if u.owner == player.faction and
-                            u.kind == 'infantry' and u.location.region in (Region.PLANET, Region.TRANSPORT)]
-                carrying = sum(u.capacity for u in ships)
-                if (neutral or enemy_planets) and (not infantry or carrying <= 0):
+                ship_ids = {unit.unit_id for unit in ships}
+                auto_cargo = [unit for unit in source.units if unit.owner == player.faction and
+                              unit.location.region == Region.TRANSPORT and
+                              unit.location.carrier_id in ship_ids]
+                capacity = max(0, sum(unit.capacity for unit in ships) -
+                               sum(cargo_cost(unit) for unit in auto_cargo))
+                ground = [unit for unit in auto_cargo if unit.kind == 'infantry']
+                reserves = set()
+                for planet in source.planets:
+                    defenders = sorted((unit for unit in source.units if
+                                        unit.owner == player.faction and unit.kind == 'infantry' and
+                                        unit.location.planet_id == planet.planet_id),
+                                       key=lambda unit: unit.unit_id)
+                    if len(defenders) >= 2 and source.planet_owners.get(planet.planet_id) == player.faction:
+                        reserves.add(defenders[0].unit_id)
+                passengers = sorted((unit for unit in source.units if unit.owner == player.faction and
+                                     unit.unit_id not in reserves and
+                                     (unit.kind == 'infantry' and unit.location.region == Region.PLANET or
+                                      unit.kind == 'fighter' and unit.location.region == Region.SPACE and
+                                      unit.unit_id not in ship_ids)),
+                                    key=lambda unit: (unit.kind != 'infantry', unit.unit_id))
+                carried_fighters = [unit for unit in auto_cargo if unit.kind == 'fighter']
+                for passenger in passengers:
+                    cost = cargo_cost(passenger)
+                    if cost <= capacity:
+                        capacity -= cost
+                        if passenger.kind == 'infantry':
+                            ground.append(passenger)
+                        else:
+                            carried_fighters.append(passenger)
+                if (neutral or enemy_planets) and not ground:
                     continue
-                own_power = self._force(ships + friendly)
-                if hostile and own_power < hostile * 1.35:
+                attack_fleet = ships + carried_fighters + friendly
+                space_odds = (win_probability(attack_fleet, enemies,
+                                              self.window.turn_order.players, cannons=cannons,
+                                              require_transport=bool(neutral or enemy_planets))
+                              if enemies or cannons else 1.0)
+                if space_odds < MIN_ATTACK_WIN_CHANCE:
                     continue
                 defenders = sum(u.owner != player.faction and u.kind == 'infantry'
                                 for u in target.units)
-                if enemy_planets and len(infantry) < max(1, defenders):
+                if enemy_planets and len(ground) < max(1, defenders):
                     continue
+                ground_chance = None
+                if enemy_planets and not neutral:
+                    ground_odds = [win_probability(ground, [unit for unit in target.units
+                                                            if unit.kind == 'infantry' and
+                                                            unit.owner != player.faction and
+                                                            unit.location.planet_id == planet.planet_id],
+                                                   self.window.turn_order.players, space=False,
+                                                   cannons=[unit for unit in target.units
+                                                            if unit.kind == 'pds' and
+                                                            unit.owner != player.faction and
+                                                            unit.location.planet_id == planet.planet_id])
+                                   for planet in enemy_planets]
+                    ground_chance = max(ground_odds, default=1.0)
+                    if ground_chance < MIN_ATTACK_WIN_CHANCE:
+                        continue
                 # Fewer ships are committed to a soft target; preserve home defence.
                 source_defence = 1.5 if any(p.faction_homeworld == player.faction for p in source.planets) else 0
-                score = 9 + planet_value + min(4, len(infantry)) - .6 * len(ships) - source_defence
-                score += 2 if hostile and own_power >= hostile * 1.8 else 0
+                score = 9 + planet_value + min(4, len(ground)) - .6 * len(ships) - source_defence
+                score += 4 * (space_odds - MIN_ATTACK_WIN_CHANCE) if enemies or cannons else 0
                 candidate = (score, target.position, source.position)
                 if best is None or candidate > best:
                     best = candidate
+                    best_odds = (space_odds if enemies or cannons else None, ground_chance)
+        self.attack_odds = best_odds
         return best if best and best[0] > 0 else None
 
     def start_activation(self, player, move):
@@ -357,7 +430,10 @@ class GameAI:
         if source_position == target_position:
             self.report(player, f'Activated {target} to produce units.', 2.7)
         else:
-            self.report(player, f'Activated {target}: {ships} ships, {cargo} passengers selected.', 2.7)
+            odds = self.attack_odds or (None, None)
+            chance = next((value for value in odds if value is not None), None)
+            forecast = f' · win chance ~{chance:.0%}' if chance is not None else ''
+            self.report(player, f'Activated {target}: {ships} ships, {cargo} passengers{forecast}.', 2.7)
 
     def resolve_strategy(self):
         w = self.window

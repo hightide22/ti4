@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock
 
 from game_ai import GameAI, payment_plan
+from ai_combat import win_probability
 from player import PlayerState
 from turn_order import TurnOrder
 from board import load_board
@@ -88,6 +89,59 @@ class GameAITests(unittest.TestCase):
         selected = ai.start_activation.call_args.args[1]
         self.assertNotEqual(selected[1], selected[2])
         self.assertFalse(window.strategy.start.called)
+
+    def test_combat_odds_refuse_suicidal_attack_and_allow_superior_fleet(self):
+        config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
+        players = create_players(board, config)
+        sol = next(player for player in players if player.faction == 'sol')
+        hacan = next(player for player in players if player.faction == 'hacan')
+        home = next(tile for tile in board.values() if any(
+            unit.owner == 'sol' and unit.kind == 'carrier' for unit in tile.units))
+        target = next(tile for tile in board.neighbors(home.position)
+                      if tile.name == 'Tequran/Torkan')
+        for planet in target.planets:
+            target.planet_owners[planet.planet_id] = 'hacan'
+        for tile in board.values():
+            if tile not in (home, target):
+                tile.command_tokens.add('sol')
+        turn = TurnOrder(players)
+        movement = MovementController(board, players)
+        ai = GameAI(SimpleNamespace(turn_order=turn, board=board, movement=movement), {'sol'})
+        for index in range(2):
+            target.units.append(Unit(f'guard-{index}', 'dreadnought', 'hacan',
+                                     hacan.color_code, UnitLocation(Region.SPACE)))
+        self.assertNotEqual((ai.best_activation(sol) or (None, None))[1], target.position)
+        self.assertLess(win_probability([unit for unit in home.units if unit.owner == 'sol' and
+                                         unit.location.region == Region.SPACE],
+                                        target.units, players), .80)
+        target.units[:] = [Unit('guard-cruiser', 'cruiser', 'hacan', hacan.color_code,
+                                UnitLocation(Region.SPACE))]
+        for index in range(2):
+            home.units.append(Unit(f'escort-{index}', 'dreadnought', 'sol',
+                                   sol.color_code, UnitLocation(Region.SPACE)))
+        self.assertGreaterEqual(win_probability([unit for unit in home.units if
+                                                 unit.owner == 'sol' and
+                                                 unit.location.region == Region.SPACE],
+                                                target.units, players), .80)
+        self.assertEqual(ai.best_activation(sol)[1], target.position)
+
+    def test_invasion_odds_require_a_surviving_transport_and_count_pds(self):
+        config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
+        players = create_players(board, config)
+        sol = next(player for player in players if player.faction == 'sol')
+        hacan = next(player for player in players if player.faction == 'hacan')
+        carrier = Unit('preview-carrier', 'carrier', 'sol', sol.color_code,
+                       UnitLocation(Region.SPACE))
+        cruiser = Unit('preview-cruiser', 'cruiser', 'sol', sol.color_code,
+                       UnitLocation(Region.SPACE))
+        pds = Unit('preview-pds', 'pds', 'hacan', hacan.color_code,
+                   UnitLocation(Region.PLANET, planet_id='test-planet'))
+        self.assertEqual(win_probability([cruiser], [], players,
+                                         require_transport=True), 0)
+        self.assertEqual(win_probability([carrier], [], players,
+                                         require_transport=True), 1)
+        self.assertLess(win_probability([carrier], [], players, cannons=[pds],
+                                        require_transport=True), 1)
 
     def test_bot_assignment_sustains_ship_before_losing_fighter(self):
         # Combat's existing assigner decides how damage is applied; the bot

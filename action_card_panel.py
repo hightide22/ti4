@@ -108,13 +108,18 @@ class ActionCardPanel:
             return
         session = window.movement.session
         if window.action_cards.pending:
-            self._draw_pending(window, session)
+            if not window.ai.is_bot(window.action_cards.pending['player']):
+                self._draw_pending(window, session)
+            else:
+                self.bounds = None
             return
         participants = window.action_cards.participants(session)
         if not participants:
             player = window.strategy.player if window.strategy.session else window.turn_order.active_player
             participants = [player] if player else []
+        participants = [player for player in participants if not window.ai.is_bot(player)]
         if not participants:
+            self.bounds = None
             return
         if not any(p.faction == self.player_faction for p in participants):
             self.player_faction = participants[0].faction

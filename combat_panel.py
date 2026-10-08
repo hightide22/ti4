@@ -120,14 +120,15 @@ class CombatPanel:
                                  roll_index in session.fire_team_selected))
                     self.draw_die(window, die_x, die_y, roll['value'], roll['hit'], size=21,
                                   key=(faction, kind, target, index), selected=selected)
-                    if session.fire_team_pending == faction:
+                    if session.fire_team_pending == faction and not window.ai.is_bot(player):
                         self.action_hits.append((('fire_team_die', faction, roll_index),
                                                  die_x, die_x + 21, die_y, die_y + 21))
-                    if faction in session.munitions_available and not roll.get('rerolled'):
+                    if (faction in session.munitions_available and not roll.get('rerolled')
+                            and not window.ai.is_bot(player)):
                         self.reroll_die_hits.append((('reroll_die', faction, roll_index),
                                                      die_x, die_x + 21, die_y, die_y + 21))
                 assignments = session.combat_assignments.get(faction, [])
-                available = (session.combat_needs_resolution and
+                available = (not window.ai.is_bot(player) and session.combat_needs_resolution and
                              window.movement.combat_assignment_target(session, faction, kind) is not None)
                 action = ('assign_hit', faction, kind)
                 if available and len(assignments) < min(session.combat_hits.get(faction, 0),
@@ -187,7 +188,8 @@ class CombatPanel:
         combat_players = [player for player in window.player_panel.players
                           if player.faction in session.combat_factions]
         playable_cards = sum(len(window.action_cards.playable(player, session))
-                             for player in window.action_cards.participants(session))
+                             for player in window.action_cards.participants(session)
+                             if not window.ai.is_bot(player))
         if playable_cards:
             card_x, card_y = left + width - 162, bottom + height - 68
             button(window, 'combat_action_cards', f'CARDS · {playable_cards}',
@@ -243,6 +245,11 @@ class CombatPanel:
 
         if session.stage == 'assault_choice':
             victims = window.movement.assault_victims(session)
+            if victims and window.ai.is_bot(next((player for player in window.player_panel.players
+                                                  if player.faction == victims[0].owner), None)):
+                window.text('assault_wait', 'AI is choosing a casualty…',
+                            left + 24, bottom + 67, 11, MUTED)
+                return
             pages = max(1, (len(victims) + 3) // 4)
             self.assault_page = min(self.assault_page, pages - 1)
             box_left, box_right = left + width * .19, left + width * .81
@@ -284,7 +291,7 @@ class CombatPanel:
             options = window.movement.retreat_options(session, session.retreat_announced)
             columns = min(6, max(1, len(options)))
             cell_width = (width - 48) / columns
-            for index, tile in enumerate(options):
+            for index, tile in enumerate(options if not window.ai.is_bot(session.player) else ()):
                 row, column = divmod(index, 6)
                 bx = left + 24 + column * cell_width
                 by = bottom + 24 - row * 27
@@ -318,12 +325,12 @@ class CombatPanel:
             color = DISABLED
         elif session.stage == 'retreat_selection':
             self.advance_hit = None
-        else:
+        elif not window.ai.is_bot(session.player) or playable_cards:
             bx, by, bw, bh = left + width - 320, bottom + 24, 296, 42
             button(window, 'combat_advance_button', label, bx, by, bw, bh,
                    primary=True, enabled=complete, size=11)
             self.advance_hit = (bx, bx + bw, by, by + bh) if complete else None
-        if session.fire_team_pending:
+        if session.fire_team_pending and session.fire_team_pending not in window.ai.bot_factions:
             faction = session.fire_team_pending
             selected_dice = len(session.fire_team_selected)
             bx, by, bw, bh = left + 20, bottom + 24, min(245, col_width - 24), 38
@@ -337,7 +344,8 @@ class CombatPanel:
                         INK if enabled else MUTED, bw - 18)
             if enabled:
                 self.action_hits.append((('fire_team_resolve', faction), bx, bx + bw, by, by + bh))
-        if session.stage == 'space_combat' and not session.retreat_announced:
+        if (session.stage == 'space_combat' and not session.retreat_announced and
+                not window.ai.is_bot(session.player)):
             retreat_options = window.movement.retreat_options(session, session.player.faction)
             rx, ry, rw, rh = left + 20, bottom + 24, min(220, col_width - 24), 38
             blocked = session.retreat_blocked_round == session.combat_round + 1
@@ -361,6 +369,7 @@ class CombatPanel:
                         left + 22, bottom + 75, 9, ACCENT, col_width)
         letnev = next((player for player in window.player_panel.players if player.faction == 'letnev'), None)
         if session.stage == 'space_combat' and session.combat_type == 'space' and letnev and \
+                not window.ai.is_bot(letnev) and \
                 'letnev' in session.combat_factions:
             button_x, button_y, button_w, button_h = left + width - 550, bottom + 24, 215, 38
             if not session.combat_needs_resolution:

@@ -35,6 +35,11 @@ def main(player_count=3):
         human = window.main_menu.active_factions[player_count - 1]
         assert window.ai.bot_factions == set(window.main_menu.active_factions) - {human}
         window.on_draw()
+        assert window.bot_actor and not window.strategy_modal
+        assert window.turn_button_hit is None and window.action_card_button_hit is None
+        assert not window.strategy_panel.hits
+        assert not any(control.action[0] in ('currency', 'pool')
+                       for control in window.player_panel.controls)
         # The renderer must keep a crowded two-planet home system drawable.
         crowded = next(tile for tile in window.board.values() if tile.number == 12)
         original_units = crowded.units[:]
@@ -102,6 +107,10 @@ def main(player_count=3):
             if (not movement_preview and window.movement.session and
                     window.movement.session.stage == 'movement'):
                 window.on_draw()
+                assert window.bot_actor and not window.movement_panel.hits
+                assert not window.movement_panel.buttons
+                if not window.human_card_participants():
+                    assert window.action_card_button_hit is None
                 arcade.get_image().save(preview.parent / f'ai-movement-{player_count}.png')
                 movement_preview = True
             if window.turn_order.round_number > initial_round + 1:

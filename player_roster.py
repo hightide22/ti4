@@ -133,9 +133,13 @@ class PlayerRoster:
             lines.append((f'{tech.get("name", tech_id)}: {tech.get("text", "")}', INK))
         if not player.technologies:
             lines.append(('None', INK))
-        names = [ACTION_CARD_DEFS.get(alias, {}).get('name', alias) for alias in player.action_cards]
-        lines.append((f'ACTION CARDS · {len(names)}/7', MUTED))
-        lines.append((', '.join(names) if names else 'None', INK))
+        lines.append((f'ACTION CARDS · {len(player.action_cards)}/7', MUTED))
+        if w.ai.is_bot(player):
+            lines.append(('Hidden until played', INK))
+        else:
+            names = [ACTION_CARD_DEFS.get(alias, {}).get('name', alias)
+                     for alias in player.action_cards]
+            lines.append((', '.join(names) if names else 'None', INK))
         return lines
 
     def draw_details(self, w):

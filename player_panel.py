@@ -98,8 +98,9 @@ class PlayerPanel:
             return self.player.planets[self.hovered_planet].planet.planet_id
         return None
 
-    def draw(self, window, show_details=True):
+    def draw(self, window, show_details=True, interactive=True):
         self.controls.clear()
+        self.interactive = interactive
         width = window.width - window.sidebar
         height = self.HEIGHT
         arcade.draw_lrbt_rectangle_filled(0, width, 0, height, SHELL)
@@ -119,7 +120,8 @@ class PlayerPanel:
         self.draw_currencies(window, reserve_left, height - 17, reserve_width)
         self.draw_reserves(window, reserve_left, 32, reserve_width)
         leadership = window.strategy.session and window.strategy.session.stage == 'leadership'
-        help_text = ('ORBITAL DROP · Click a controlled planet' if window.orbital_drop_mode else
+        help_text = ('AI TURN · Planet cards are read-only' if not interactive else
+                     'ORBITAL DROP · Click a controlled planet' if window.orbital_drop_mode else
                      'TECHNOLOGY · Click a planet to pay or use its specialty'
                      if window.strategy.session and window.strategy.session.stage == 'technology' else
                      'PLANETS · Click to pay influence' if leadership else
@@ -135,7 +137,7 @@ class PlayerPanel:
         can_trade = (self.player is active and not window.turn_order.command_allocation and
                      not window.turn_order.strategy_selection and not window.strategy.session and
                      not window.movement.session and not window.orbital_drop_mode)
-        if can_trade:
+        if interactive and can_trade:
             if self.player.faction == 'sol':
                 self.button(window, ('trade',), 'TRADE', width - 469, height - 45, 52, 24)
                 if can_use_orbital_drop or window.orbital_drop_mode:
@@ -143,13 +145,13 @@ class PlayerPanel:
                                 height - 45, 54, 24, selected=window.orbital_drop_mode)
             else:
                 self.button(window, ('trade',), 'TRADE', width - 469, height - 45, 111, 24)
-        elif can_use_orbital_drop or window.orbital_drop_mode:
+        elif interactive and (can_use_orbital_drop or window.orbital_drop_mode):
             self.button(window, ('orbital_drop',), 'CANCEL DROP' if window.orbital_drop_mode else 'ORBITAL DROP',
                         width - 469, height - 45, 111, 24, selected=window.orbital_drop_mode)
         card_width, gap = (138 if VARIANT == 'Atlas' else 126), 8
         slots = max(1, int((reserve_left - 28) // (card_width + gap)))
         self.card_offset = min(self.card_offset, max(0, len(self.player.planets) - slots))
-        if len(self.player.planets) > slots:
+        if interactive and len(self.player.planets) > slots:
             self.button(window, ('cards', -1), '<', reserve_left - 65, height - 69, 24, height=22)
             self.button(window, ('cards', 1), '>', reserve_left - 37, height - 69, 24, height=22)
         for slot, index in enumerate(range(self.card_offset, min(len(self.player.planets), self.card_offset + slots))):
@@ -166,8 +168,9 @@ class PlayerPanel:
             value = str(self.player.trade_goods) if kind == 'trade_goods' else f'{self.player.commodities}/{self.player.commodity_limit}'
             window.text(('currency', kind), value, left + 33, y - 14, 18, GOLD)
             window.text(('currency_label', kind), name, left, y - 36, 11, MUTED)
-            self.button(window, ('currency', kind, -1), '-', left + 92, y - 26, 25, height=24)
-            self.button(window, ('currency', kind, 1), '+', left + 122, y - 26, 25, height=24)
+            if self.interactive:
+                self.button(window, ('currency', kind, -1), '-', left + 92, y - 26, 25, height=24)
+                self.button(window, ('currency', kind, 1), '+', left + 122, y - 26, 25, height=24)
 
     def draw_reserves(self, window, x, y, width):
         cell_width = (width - 12) / 3
@@ -185,7 +188,8 @@ class PlayerPanel:
             pool_label = 'Fleet limit' if pool == 'fleet' and self.player.faction == 'letnev' else pool.title()
             window.text(('pool_count', pool), count_label, left + 48, y + cell_height - 30, 20, ACCENT)
             window.text(('pool_name', pool), pool_label, left + 9, y + 9, 11, INK)
-            self.controls.append(Control(('pool', pool), left, y, cell_width, cell_height))
+            if self.interactive:
+                self.controls.append(Control(('pool', pool), left, y, cell_width, cell_height))
         if self.player.pending_commands:
             pending_bottom, pending_height = 3, 24
             selected_pending = self.source_pool == 'pending'
@@ -193,13 +197,17 @@ class PlayerPanel:
                                               SELECTED if selected_pending else CARD)
             arcade.draw_lrbt_rectangle_outline(x, x + width, pending_bottom, pending_bottom + pending_height,
                                                ACCENT if selected_pending else BORDER, 1)
-            instruction = 'choose a pool' if window.strategy.session else 'click to allocate to a pool'
+            instruction = ('AI is allocating' if not self.interactive else
+                           'choose a pool' if window.strategy.session else 'click to allocate to a pool')
             window.text('pending_command_help',
                         f'New commands: {self.player.pending_commands} · {instruction}',
                         x + 8, pending_bottom + 7, 10, ACCENT if selected_pending else INK, width - 16)
-            self.controls.append(Control(('pending',), x, pending_bottom, width, pending_height))
+            if self.interactive:
+                self.controls.append(Control(('pending',), x, pending_bottom, width, pending_height))
         else:
-            hint = ('Choose destination' if self.source_pool else 'Commands: source → destination') if window.turn_order.command_allocation else 'Command pools'
+            hint = ('AI command pools' if not self.interactive else
+                    ('Choose destination' if self.source_pool else 'Commands: source → destination')
+                    if window.turn_order.command_allocation else 'Command pools')
             window.text('pool_help', hint, x, 13, 11, MUTED)
 
     def trait_image(self, planet):
