@@ -144,6 +144,7 @@ class Session:
     afb_rolls: dict[str, list[dict]] = field(default_factory=dict)
     afb_log: list[str] = field(default_factory=list)
     assault_log: list[str] = field(default_factory=list)
+    assault_queue: list[str] = field(default_factory=list)
     afb_resolved: bool = False
     retreat_announced: str | None = None
     retreat_log: str = ''
@@ -868,15 +869,39 @@ class MovementController:
                              unit.owner == faction and unit.location.region == Region.SPACE and
                              capital_ship(unit) for unit in session.target.units) >= 3]
         session.assault_log.clear()
-        for faction in assault_users:
-            victims = [unit for unit in session.target.units if unit.owner != faction and
-                       unit.location.region == Region.SPACE and capital_ship(unit)]
-            if victims:
-                victim = sorted(victims, key=lambda unit: (unit_profile(unit).get('cost', 0),
-                                                           unit.unit_id))[0]
-                self.destroy_unit(session.target, victim, session)
-                session.assault_log.append(f'{faction.upper()} Assault Cannon destroyed a '
-                                           f'{victim.owner.upper()} {victim.kind}.')
+        session.assault_queue = assault_users
+        while session.assault_queue and not self.assault_victims(session):
+            session.assault_queue.pop(0)
+        if session.assault_queue and self.assault_victims(session):
+            session.stage = 'assault_choice'
+            return
+        self.finish_space_combat_setup(session)
+
+    def assault_victims(self, session):
+        if not session.assault_queue:
+            return []
+        attacker = session.assault_queue[0]
+        return [unit for unit in session.target.units if unit.owner != attacker and
+                unit.location.region == Region.SPACE and capital_ship(unit)]
+
+    def choose_assault_victim(self, unit_id):
+        session = self.session
+        if not session or session.stage != 'assault_choice':
+            raise MovementError('Assault Cannon is not being resolved.')
+        victim = next((unit for unit in self.assault_victims(session)
+                       if unit.unit_id == unit_id), None)
+        if victim is None:
+            raise MovementError('Choose one of your non-fighter ships to destroy.')
+        attacker = session.assault_queue.pop(0)
+        self.destroy_unit(session.target, victim, session)
+        session.assault_log.append(f'{attacker.upper()} Assault Cannon destroyed a '
+                                   f'{victim.owner.upper()} {victim.kind}.')
+        while session.assault_queue and not self.assault_victims(session):
+            session.assault_queue.pop(0)
+        if not session.assault_queue:
+            self.finish_space_combat_setup(session)
+
+    def finish_space_combat_setup(self, session):
         self.resolve_anti_fighter_barrage(session)
         session.combat_factions = tuple(faction for faction in session.combat_factions
                                         if self.combat_units(session, faction))

@@ -147,6 +147,29 @@ class TechnologyTests(unittest.TestCase):
         self.assertTrue(dread.damaged)
         self.assertTrue(any('Non-Euclidean' in line for line in session.cannon_log))
 
+    def test_assault_cannon_defender_chooses_ship_to_destroy(self):
+        sol = self.by_faction['sol']
+        sol.technologies |= {'asc'}
+        hacan = self.by_faction['hacan']
+        target = next(tile for tile in self.board.values() if not tile.units)
+        target.units.extend(Unit(f'test-sol-{index}', 'cruiser', 'sol', sol.color_code,
+                                 UnitLocation(Region.SPACE)) for index in range(3))
+        cruiser = Unit('test-hacan-cruiser', 'cruiser', 'hacan', hacan.color_code,
+                       UnitLocation(Region.SPACE))
+        dread = Unit('test-hacan-dread', 'dreadnought', 'hacan', hacan.color_code,
+                     UnitLocation(Region.SPACE))
+        target.units.extend((cruiser, dread))
+        session = Session(sol, target, {}, Snapshot.capture(self.board, sol, self.players))
+        self.movement.session = session
+        self.movement.start_combat(session)
+        self.assertEqual(session.stage, 'assault_choice')
+        self.assertEqual({unit.unit_id for unit in self.movement.assault_victims(session)},
+                         {cruiser.unit_id, dread.unit_id})
+        self.movement.choose_assault_victim(dread.unit_id)
+        self.assertNotIn(dread, target.units)
+        self.assertIn(cruiser, target.units)
+        self.assertEqual(session.stage, 'space_combat')
+
 
 if __name__ == '__main__':
     unittest.main()

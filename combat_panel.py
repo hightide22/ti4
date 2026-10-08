@@ -16,6 +16,7 @@ class CombatPanel:
         self.reroll_die_hits = []
         self.offset = [0.0, 0.0]
         self.bounds = None
+        self.assault_page = 0
 
     def drag_header(self, x, y):
         if not self.bounds:
@@ -173,6 +174,44 @@ class CombatPanel:
                        side_top, col_width)
         self.draw_side(window, session, defenders, left + width / 2 + 7,
                        side_top, col_width)
+
+        if session.stage == 'assault_choice':
+            victims = window.movement.assault_victims(session)
+            pages = max(1, (len(victims) + 3) // 4)
+            self.assault_page = min(self.assault_page, pages - 1)
+            box_left, box_right = left + width * .19, left + width * .81
+            arcade.draw_lrbt_rectangle_filled(box_left, box_right, bottom + 35,
+                                               bottom + 330, (17, 33, 49))
+            arcade.draw_lrbt_rectangle_outline(box_left, box_right, bottom + 35,
+                                                bottom + 330, ACCENT, 2)
+            attacker = session.assault_queue[0].upper()
+            window.text('assault_title', f'{attacker} · ASSAULT CANNON',
+                        box_left + 18, bottom + 298, 14, ACCENT)
+            window.text('assault_help', 'The defender chooses 1 non-fighter ship to destroy.',
+                        box_left + 18, bottom + 273, 10, INK)
+            for index, unit in enumerate(victims[self.assault_page * 4:self.assault_page * 4 + 4]):
+                top = bottom + 251 - index * 44
+                arcade.draw_lrbt_rectangle_filled(box_left + 18, box_right - 18,
+                                                   top - 35, top, (30, 62, 73))
+                label = f'{unit.owner.upper()} · {UNIT_TYPES[unit.kind]["name"]}'
+                if unit.damaged:
+                    label += ' · damaged'
+                window.text(('assault_victim', unit.unit_id), label,
+                            box_left + 28, top - 23, 10, INK)
+                self.action_hits.append((('assault_victim', unit.unit_id),
+                                         box_left + 18, box_right - 18, top - 35, top))
+            if pages > 1:
+                window.text('assault_page', f'{self.assault_page + 1}/{pages}',
+                            box_left + 65, bottom + 50, 10, MUTED)
+                for delta, label, x in ((-1, 'PREV', box_left + 18),
+                                        (1, 'NEXT', box_right - 88)):
+                    arcade.draw_lrbt_rectangle_filled(x, x + 70, bottom + 44,
+                                                       bottom + 73, (29, 66, 77))
+                    window.text(('assault_page_button', delta), label,
+                                x + 8, bottom + 54, 9, INK)
+                    self.action_hits.append((('assault_page', delta), x, x + 70,
+                                             bottom + 44, bottom + 73))
+            return
 
         if session.stage == 'retreat_selection':
             window.text('retreat_title', 'RETREAT TO AN ADJACENT SYSTEM', left + 24, bottom + 77, 10, ACCENT)

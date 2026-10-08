@@ -738,7 +738,7 @@ class BoardWindow(arcade.Window):
             self.roster.draw_details(self)
         if self.player_panel.hovered_planet is not None:
             self.player_panel.draw_details(self)
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection', 'assault_choice'):
             self.combat_panel.draw(self, self.movement.session)
         if self.strategy_modal and not self.technology_modal:
             self.strategy_panel.draw(self, self.turn_order)
@@ -906,7 +906,30 @@ class BoardWindow(arcade.Window):
             self.on_mouse_press((finish[1] + finish[2]) / 2,
                                 (finish[3] + finish[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
             assert self.turn_order.active_player is not hacan
-            print('PASS: technology research, unit upgrade, actions, QDN and end-turn Bio-Stims checked')
+            from movement import Session, Snapshot
+            player.technologies |= {'asc'}
+            battle_tile = next(tile for tile in self.board.values() if not tile.units)
+            for index in range(3):
+                battle_tile.units.append(Unit(f'smoke-assault-sol-{index}', 'cruiser',
+                                              player.faction, player.color_code,
+                                              UnitLocation(Region.SPACE)))
+            for kind in ('cruiser', 'dreadnought'):
+                battle_tile.units.append(Unit(f'smoke-assault-hacan-{kind}', kind,
+                                              hacan.faction, hacan.color_code,
+                                              UnitLocation(Region.SPACE)))
+            battle = Session(player, battle_tile, {}, Snapshot.capture(
+                self.board, player, self.player_panel.players))
+            self.movement.session = battle
+            self.movement.start_combat(battle)
+            assert battle.stage == 'assault_choice'
+            self.on_draw()
+            arcade.get_image().save(preview_dir / 'technology-assault-choice-preview.png')
+            victim = next(hit for hit in self.combat_panel.action_hits
+                          if hit[0] == ('assault_victim', 'smoke-assault-hacan-dreadnought'))
+            self.on_mouse_press((victim[1] + victim[2]) / 2,
+                                (victim[3] + victim[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert battle.stage == 'space_combat'
+            print('PASS: technology research, unit upgrade, actions, QDN, Bio-Stims and Assault Cannon checked')
             self.close()
             return
         if self.smoke and self.frames == 5:
@@ -1553,7 +1576,7 @@ class BoardWindow(arcade.Window):
             return
         if self.token_context and self.token_context[0] != self.selected:
             self.token_context = None
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection', 'assault_choice'):
             if self.combat_panel.drag_header(x, y):
                 self.dragging_modal = 'combat'
                 return
@@ -1575,6 +1598,11 @@ class BoardWindow(arcade.Window):
                     elif action[0] == 'retreat_to':
                         self.movement.resolve_retreat(action[1])
                         self.movement_panel.reset()
+                    elif action[0] == 'assault_victim':
+                        self.movement.choose_assault_victim(action[1])
+                        self.combat_panel.assault_page = 0
+                    elif action[0] == 'assault_page':
+                        self.combat_panel.assault_page += action[1]
                     self.movement_error = None
                 except MovementError as error:
                     self.movement_error = str(error)
