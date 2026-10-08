@@ -217,7 +217,7 @@ class BoardWindow(arcade.Window):
         self.focus_zoom = 1.0
 
     def frame_action_route(self, source_position, target_position):
-        """Show both ends of an AI move long enough to follow the action."""
+        """Keep both ends of an AI move visible while its action resolves."""
         start, end = world(source_position), world(target_position)
         self.target_map_center = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
         available_width = max(1, self.width - self.sidebar - self.roster.WIDTH - 100)
@@ -266,6 +266,25 @@ class BoardWindow(arcade.Window):
         radius = self.fit_scale * self.zoom * .98
         points = [(x + radius * math.cos(math.pi * i / 3), y + radius * math.sin(math.pi * i / 3)) for i in range(6)]
         arcade.draw_polygon_outline(points, color, thickness)
+
+    def draw_ai_activation_highlight(self):
+        """Mark the newly activated system through the movement transition."""
+        ai = self.ai
+        position = ai.activation_flash_position
+        if (position not in self.board or ai.activation_flash_remaining <= 0 or
+                ai.activation_flash_duration <= 0):
+            return
+        fade = min(1.0, ai.activation_flash_remaining / ai.activation_flash_duration)
+        x, y = self.screen(position)
+        radius = self.fit_scale * self.zoom * .98
+
+        def corners(scale):
+            return [(x + radius * scale * math.cos(math.pi * index / 3),
+                     y + radius * scale * math.sin(math.pi * index / 3))
+                    for index in range(6)]
+        arcade.draw_polygon_filled(corners(1), (*GOLD, round(27 * fade)))
+        arcade.draw_polygon_outline(corners(1.035), (*GOLD, round(95 * fade)), 7)
+        arcade.draw_polygon_outline(corners(1.01), (*GOLD, round(245 * fade)), 3)
 
     def draw_tile(self, tile, x, y, width, detailed=False, scope='main', interactive=True):
         texture = self.tile_sprites[tile].texture
@@ -770,6 +789,8 @@ class BoardWindow(arcade.Window):
         self.unit_renderer.hits.clear()
         self.token_hits.clear()
         movement_route = self.movement_panel.preview_route(self.movement.session)
+        if self.ai.activation_flash_remaining > 0 and self.ai.activation_flash_route:
+            movement_route = self.ai.activation_flash_route
         if self.focus_view:
             tile = self.board[self.selected]
             cx, cy = self.viewport_center
@@ -796,6 +817,7 @@ class BoardWindow(arcade.Window):
                 self.outline(self.hover, (170, 185, 207), 2)
             self.outline(self.selected, ACCENT, 3)
             self.draw_route_preview(movement_route)
+            self.draw_ai_activation_highlight()
         if self.strategy.session and self.strategy.session.stage in (
                 'construction', 'diplomacy_system', 'ready_planets', 'warfare_system'):
             for position in self.strategy.selectable_systems():

@@ -81,7 +81,7 @@ def main(player_count=3):
         # Use the same scheduler for all seats to exercise a complete round
         # without synthetic mouse input for the human seat.
         window.ai.bot_factions = {p.faction for p in window.turn_order.players}
-        window.ai.speed = 4.0
+        window.ai.speed = 1.0
         initial_units = sum(len(tile.units) for tile in window.board.values())
         initial_planets = {p.faction: len(p.planets) for p in window.turn_order.players}
         initial_round = window.turn_order.round_number
@@ -106,6 +106,12 @@ def main(player_count=3):
                 window.on_draw()
             if (not movement_preview and window.movement.session and
                     window.movement.session.stage == 'movement'):
+                session = window.movement.session
+                assert window.ai.activation_flash_position == session.target.position
+                assert window.ai.activation_flash_remaining > 0
+                assert window.ai.wait <= .22 / window.ai.speed + 1e-6
+                if window.ai.activation_flash_route:
+                    assert window.ai.activation_flash_route[-1] == session.target.position
                 window.on_draw()
                 assert window.bot_actor and not window.movement_panel.hits
                 assert not window.movement_panel.buttons
@@ -113,6 +119,9 @@ def main(player_count=3):
                     assert window.action_card_button_hit is None
                 arcade.get_image().save(preview.parent / f'ai-movement-{player_count}.png')
                 movement_preview = True
+                window.ai.cycle_speed()
+                window.ai.cycle_speed()
+                assert window.ai.speed == 4.0
             if window.turn_order.round_number > initial_round + 1:
                 break
         else:
