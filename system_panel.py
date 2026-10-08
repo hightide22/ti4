@@ -4,13 +4,11 @@ import math
 from dataclasses import dataclass
 
 import arcade
+from ui_theme import (CARD, INK, MUTED, ACCENT, BORDER, SELECTED, DISABLED, DANGER, ROW_HEIGHT,
+                      surface)
 
 from units import UNIT_TYPES, Unit, system_inventory, unit_profile
 
-INK = (223, 232, 244)
-MUTED = (130, 151, 177)
-ACCENT = (100, 207, 224)
-CARD = (20, 33, 51)
 PLANET_TYPES = {"CULTURAL": "Cultural", "INDUSTRIAL": "Industrial", "HAZARDOUS": "Hazardous", "FACTION": "Homeworld", "MR": "Mecatol Rex"}
 ORDER = ("warsun", "flagship", "dreadnought", "carrier", "cruiser", "destroyer", "fighter", "infantry", "mech", "pds", "spacedock")
 
@@ -52,27 +50,20 @@ class SystemPanel:
             window.text((key, 'empty'), 'No units', x + 12, y - 21, 12, MUTED)
             return y - 36
         kinds = [kind for kind in ORDER if kind in groups]
-        columns = 2
-        cell_width = (width - 10) / columns
+        stride = ROW_HEIGHT - 8
         for index, kind in enumerate(kinds):
-            row, column = divmod(index, columns)
-            cx, top = x + column * (cell_width + 10), y - row * 38
+            top = y - index * stride
             members = tuple(groups[kind])
             selected = any(u.unit_id in window.selected_units for u in members)
-            arcade.draw_lrbt_rectangle_filled(cx, cx + cell_width, top - 32, top, (28, 52, 69) if selected else CARD)
+            surface(x, x + width, top - (stride - 6), top, SELECTED if selected else CARD, ACCENT if selected else None)
             unit = members[0]
-            renderer = window.unit_renderer
-            if unit.image_path not in renderer.textures:
-                renderer.textures[unit.image_path] = arcade.load_texture(unit.image_path)
-            texture = renderer.textures[unit.image_path]
-            size = 23
-            tw, th = size * texture.width / max(texture.width, texture.height), size * texture.height / max(texture.width, texture.height)
-            arcade.draw_texture_rect(texture, arcade.XYWH(cx + 17, top - 16, tw, th))
+            window.player_panel.image(f'units/{unit.color_code}_{UNIT_TYPES[kind]["sprite"]}.png',
+                                      x + 21, top - 17, 26)
             label = 'Space dock' if kind == 'spacedock' else UNIT_TYPES[kind]['name']
-            window.text((key, kind, 'name'), label, cx + 33, top - 21, 11, INK)
-            window.text((key, kind, 'count'), str(len(members)), cx + cell_width - 23, top - 21, 14, ACCENT)
-            self.hits.append(InventoryHit(members, cx, cx + cell_width, top - 32, top))
-        return y - math.ceil(len(kinds) / columns) * 38
+            window.text((key, kind, 'name'), label, x + 45, top - 22, 11, INK, max_width=width - 94)
+            window.text((key, kind, 'count'), f'×{len(members)}', x + width - 43, top - 23, 14, ACCENT)
+            self.hits.append(InventoryHit(members, x, x + width, top - (stride - 6), top))
+        return y - len(kinds) * stride
 
     def draw(self, window, tile, left):
         self.remove_token_hit = None
@@ -85,9 +76,9 @@ class SystemPanel:
         text = window.text
         text('system_label', 'SELECTED SYSTEM', px, window.height - 26, 10, MUTED)
         name = tile.name.split(' - ')[0]
-        text('system_name', name, px, window.height - 62, 14, INK, width - 96)
+        text('system_name', name, px, window.height - 62, 17, INK, max_width=width - 108)
         arcade.draw_lrbt_rectangle_filled(self.strategy_tab_hit[0], self.strategy_tab_hit[1],
-                                           self.strategy_tab_hit[2], self.strategy_tab_hit[3], (28, 62, 75))
+                                           self.strategy_tab_hit[2], self.strategy_tab_hit[3], SELECTED)
         text('strategy_tab', 'STRATEGY', px + width - 83, window.height - 61, 9, ACCENT)
         arcade.draw_lrbt_rectangle_filled(self.technology_tab_hit[0], self.technology_tab_hit[1],
                                            self.technology_tab_hit[2], self.technology_tab_hit[3], (28, 62, 75))
@@ -95,11 +86,11 @@ class SystemPanel:
         shields = list(dict.fromkeys(unit.owner.upper() for unit in tile.units if unit.kind == 'pds' and
                                      unit_profile(unit).get('planetaryShield')))
         shield_text = f' · PLANETARY SHIELD: {", ".join(shields)}' if shields else ''
-        text('system_id', f'Tile {tile.system_id} · {len(tile.units)} units in system{shield_text}',
-             px, window.height - 88, 10, MUTED, width)
+        text('system_id', f'Tile {tile.system_id} / {len(tile.units)} units{shield_text}',
+             px, window.height - 88, 10, MUTED, max_width=width)
         system_owners = list(dict.fromkeys(tile.planet_owners.values()))
         owner_text = ', '.join(faction.upper() for faction in system_owners) if system_owners else 'None'
-        text('owner', f'SYSTEM CONTROL: {owner_text}', px, window.height - 111, 10, tuple(tile.color) if tile.player else MUTED, width)
+        text('owner', f'SYSTEM CONTROL: {owner_text}', px, window.height - 111, 10, ACCENT if system_owners else MUTED, width)
         token_players = [player for player in window.player_panel.players if player.faction in tile.command_tokens]
         if token_players:
             text('token_info_title', 'COMMAND TOKENS', px, window.height - 143, 9, MUTED)
@@ -112,14 +103,14 @@ class SystemPanel:
                 text(('token_info', player.faction), player.faction.upper(), x + 20, y + 2, 9, INK, cell_width - 22)
         else:
             text('token_info_title', 'COMMAND TOKENS', px, window.height - 143, 9, MUTED)
-            text('token_info_empty', 'None', px + 95, window.height - 143, 9, MUTED)
+            text('token_info_empty', 'None', px + width - 43, window.height - 143, 9, MUTED)
         if window.token_context and window.token_context[0] == tile.position:
             faction = window.token_context[1]
             if faction in tile.command_tokens:
                 label = f'Remove {faction.upper()} token · debug'
                 bx, by, bw, bh = px, window.height - 201, width, 23
-                arcade.draw_lrbt_rectangle_filled(bx, bx + bw, by, by + bh, (80, 43, 47))
-                arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh, (184, 94, 91), 1)
+                arcade.draw_lrbt_rectangle_filled(bx, bx + bw, by, by + bh, SELECTED)
+                arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh, DANGER, 1)
                 text('remove_token_button', label, bx + 8, by + 6, 10, INK, bw - 16)
                 self.remove_token_hit = (bx, bx + bw, by, by + bh)
             elif faction is None:
@@ -130,19 +121,14 @@ class SystemPanel:
                          f'{player.faction.upper()} already has a token here')
                 bx, by, bw, bh = px, window.height - 201, width, 23
                 arcade.draw_lrbt_rectangle_filled(bx, bx + bw, by, by + bh,
-                                                   (30, 76, 79) if available else (42, 49, 60))
+                                                   SELECTED if available else DISABLED)
                 arcade.draw_lrbt_rectangle_outline(bx, bx + bw, by, by + bh,
-                                                    (75, 164, 152) if available else (80, 91, 106), 1)
+                                                    ACCENT if available else BORDER, 1)
                 text('add_token_button', label, bx + 8, by + 6, 10, INK if available else MUTED, bw - 16)
                 if available:
                     self.add_token_hit = (bx, bx + bw, by, by + bh)
         inventory = system_inventory(tile)
-        texture = window.tile_sprites[tile].texture
-        preview_width = min(250, width)
-        preview_height = preview_width * texture.height / texture.width
-        arcade.draw_texture_rect(texture, arcade.XYWH(px + width / 2, window.height - 218 - preview_height / 2,
-                                                     preview_width, preview_height))
-        top, bottom = window.height - 236 - preview_height, 100
+        top, bottom = window.height - 222, 100
         self.viewport = (int(left), bottom, int(window.sidebar), max(1, int(top - bottom)))
         self.hits.clear()
         previous_scissor = window.ctx.scissor
@@ -156,8 +142,8 @@ class SystemPanel:
                 text('cargo_title', 'TRANSPORTED UNITS', px, y, 11, MUTED)
                 y = self.draw_counts(window, 'cargo', inventory['cargo'], px, y - 15, width) - 10
             for planet in tile.planets:
-                arcade.draw_line(px, y + 6, px + width, y + 6, (41, 60, 80), 1)
-                text((planet.planet_id, 'name'), planet.name, px, y - 17, 15, INK)
+                arcade.draw_line(px, y + 6, px + width, y + 6, BORDER, 1)
+                text((planet.planet_id, 'name'), planet.name, px, y - 17, 15, INK, max_width=width - 106)
                 label = PLANET_TYPES.get(planet.planet_type, planet.planet_type or '')
                 text((planet.planet_id, 'type'), label, px + width - 92, y - 17, 10, MUTED)
                 owner = tile.planet_owners.get(planet.planet_id)
@@ -176,16 +162,16 @@ class SystemPanel:
             window.ctx.scissor = previous_scissor
         if self.scroll_max:
             track_top = top - 5
-            arcade.draw_line(window.width - 9, bottom, window.width - 9, track_top, (39, 54, 75), 2)
+            arcade.draw_line(window.width - 9, bottom, window.width - 9, track_top, BORDER, 2)
             thumb = max(35, (track_top - bottom) ** 2 / (track_top - bottom + self.scroll_max))
             thumb_top = track_top - self.scroll / self.scroll_max * (track_top - bottom - thumb)
             arcade.draw_lrbt_rectangle_filled(window.width - 12, window.width - 6, thumb_top - thumb, thumb_top, ACCENT)
-        arcade.draw_line(px, 90, px + width, 90, (41, 60, 80), 1)
+        arcade.draw_line(px, 90, px + width, 90, BORDER, 1)
         picked = next((u for u in tile.units if u.unit_id in window.selected_units), None)
         if picked:
             location = next((p.name for p in tile.planets if p.planet_id == picked.location.planet_id), 'Space')
             count = sum(u.unit_id in window.selected_units for u in tile.units)
             text('selection', f'{UNIT_TYPES[picked.kind]["name"]}: {count} · {location}', px, 69, 11, ACCENT)
         else:
-            text('selection_tip', 'Select a unit or an inventory row', px, 69, 11, MUTED)
+            text('selection_tip', 'Double-click a system to activate', px, 69, 11, MUTED)
         text('help', 'Space: detail · F: fit · Right drag: pan\nScroll here for system information', px, 37, 10, MUTED, width)

@@ -30,11 +30,15 @@ class StrategyResolution:
     technology_brilliant: bool = False
     technology_planets: set[str] = field(default_factory=set)
     technology_use_aida: bool = False
+    selected_system: tuple[int, int] | None = None
+    pending_system: tuple[int, int] | None = None
+    drawn_cards: list[str] = field(default_factory=list)
 
 
 class StrategyController:
-    def __init__(self, board, turn, movement):
+    def __init__(self, board, turn, movement, action_cards=None):
         self.board, self.turn, self.movement = board, turn, movement
+        self.action_cards = action_cards
         self.session = None
 
     @property
@@ -60,6 +64,8 @@ class StrategyController:
                    7: 'technology', 8: 'placeholder'}[card]
         if card == 1:
             s.base_gain = min(3, command_tokens_in_reinforcements(player, self.board))
+        elif card == 3 and self.action_cards:
+            s.drawn_cards = self.action_cards.draw(player, 2)
 
     def _participant_done(self):
         s = self.session
@@ -80,6 +86,8 @@ class StrategyController:
             s.technology_use_aida = False
             s.ready_planets.clear()
             s.pool_source = None
+            s.selected_system = None
+            s.pending_system = None
         else:
             self.session = self.turn.strategy_resolution = None
             self.turn.mark_action_completed()
@@ -91,12 +99,16 @@ class StrategyController:
 
     def secondary_unavailable(self):
         s = self.session
-        if s.card in (3, 8):
+        if s.card == 8:
             return 'This secondary ability is not implemented yet.'
         if s.player.command_pools['strategic'] < self.secondary_cost():
             return 'No token in the strategy pool.'
         if s.card == 1 and not command_tokens_in_reinforcements(s.player, self.board):
             return 'No command tokens remain in reinforcements.'
+        if s.card == 2 and not self.readyable_planets(s.player):
+            return 'No exhausted planets to ready.'
+        if s.card == 3 and (not self.action_cards or not self.action_cards.can_draw(s.player, 2)):
+            return 'Your hand is full or the action-card deck is empty.'
         if s.card == 6 and not self.home_docks():
             return 'No controlled Space Dock in your home system.'
         return ''
@@ -114,10 +126,14 @@ class StrategyController:
         # Warfare pays when the player chooses a dock.
         if s.card not in (4, 6):
             s.player.command_pools['strategic'] -= self.secondary_cost()
-        s.stage = {1: 'leadership', 2: 'ready_planets', 4: 'construction',
-                   5: 'trade_secondary', 6: 'production_site', 7: 'technology'}[s.card]
+        s.stage = {1: 'leadership', 2: 'diplomacy_secondary_system', 3: 'action_cards',
+                   4: 'construction', 5: 'trade_secondary', 6: 'production_site',
+                   7: 'technology'}[s.card]
         s.technology_brilliant = brilliant
         s.builds_left = 1
+        if s.card == 3:
+            s.drawn_cards = self.action_cards.draw(s.player, 2)
+            self._participant_done()
         if s.card == 5:
             s.player.commodities = s.player.commodity_limit
             self._participant_done()
@@ -280,32 +296,114 @@ class StrategyController:
     def select_system(self, position):
         s = self.session
         tile = self.board[position]
-        if s.stage == 'diplomacy_system':
-            if tile.number == 18 or s.player.faction not in tile.planet_owners.values():
-                raise ValueError('Choose a system with a planet you control, excluding Mecatol Rex.')
-            for player in self.turn.players:
-                if player is s.player or player.faction in tile.command_tokens:
-                    continue
-                if not command_tokens_in_reinforcements(player, self.board):
-                    pool = next((p for p in ('tactical', 'strategic', 'fleet') if player.command_pools[p]), None)
-                    if pool is None:
+        if s.stage in ('diplomacy_system', 'diplomacy_secondary_system'):
+            if s.stage == 'diplomacy_system' and tile.number == 18:
+                raise ValueError('Choose a system other than Mecatol Rex.')
+            if s.player.faction not in tile.planet_owners.values():
+                raise ValueError('Choose a system with a planet you control.')
+            if s.stage == 'diplomacy_secondary_system' and not any(
+                    self.planet_system(card.planet.planet_id) is tile
+                    for card in self.readyable_planets(s.player)):
+                raise ValueError('Choose a system with an exhausted planet you control.')
+            if s.stage == 'diplomacy_system':
+                for player in self.turn.players:
+                    if player is s.player or player.faction in tile.command_tokens:
                         continue
-                    player.command_pools[pool] -= 1
-                tile.command_tokens.add(player.faction)
+                    if not command_tokens_in_reinforcements(player, self.board):
+                        pool = next((p for p in ('tactical', 'strategic', 'fleet') if player.command_pools[p]), None)
+                        if pool is None:
+                            continue
+                        player.command_pools[pool] -= 1
+                    tile.command_tokens.add(player.faction)
+            s.selected_system = position
+            s.ready_planets.clear()
             s.stage = 'ready_planets'
         elif s.stage == 'warfare_system':
             if s.player.faction not in tile.command_tokens:
                 raise ValueError('Choose a system containing your command token.')
-            tile.command_tokens.remove(s.player.faction)
-            s.player.pending_commands += 1
-            s.stage = 'warfare_allocate'
+            s.selected_system = position
+            s.pending_system = None
+        elif s.stage == 'construction':
+            if not any(self.planet_system(card.planet.planet_id) is tile
+                       for card in self.buildable_planets(selected_only=False)):
+                raise ValueError('Choose a system with an eligible planet you control.')
+            s.selected_system = position
         else:
             raise ValueError('This ability does not select a system.')
 
+    def selectable_systems(self):
+        s = self.session
+        if not s:
+            return set()
+        if s.stage == 'diplomacy_system':
+            return {tile.position for tile in self.board.values()
+                    if tile.number != 18 and s.player.faction in tile.planet_owners.values()}
+        if s.stage == 'diplomacy_secondary_system':
+            return {tile.position for tile in self.board.values()
+                    if any(
+                        self.planet_system(card.planet.planet_id) is tile
+                        for card in self.readyable_planets(s.player))}
+        if s.stage == 'warfare_system':
+            return {tile.position for tile in self.board.values() if s.player.faction in tile.command_tokens}
+        if s.stage == 'construction':
+            return {self.planet_system(card.planet.planet_id).position
+                    for card in self.buildable_planets(selected_only=False)}
+        return set()
+
+    def planet_system(self, planet_id):
+        return next((tile for tile in self.board.values()
+                     if any(planet.planet_id == planet_id for planet in tile.planets)), None)
+
+    def readyable_planets(self, player=None):
+        player = player or self.player
+        result = []
+        for card in player.planets:
+            planet_id = card.planet.planet_id
+            tile = self.planet_system(planet_id)
+            if (card.exhausted and tile is not None and
+                    tile.planet_owners.get(planet_id) == player.faction):
+                result.append(card)
+        return result
+
+    def buildable_planets(self, selected_only=True):
+        s = self.session
+        if not s or s.stage != 'construction':
+            return []
+        kind = s.structure
+        owned = [unit for tile in self.board.values()
+                 for unit in tile.units if unit.owner == s.player.faction and unit.kind == kind]
+        if len(owned) >= (6 if kind == 'pds' else 3):
+            return []
+        per_planet_limit = 2 if kind == 'pds' else 1
+        return [card for card in s.player.planets
+                if (tile := self.planet_system(card.planet.planet_id)) is not None
+                and (not selected_only or s.selected_system is None or tile.position == s.selected_system)
+                and tile.planet_owners.get(card.planet.planet_id) == s.player.faction
+                and sum(unit.location.planet_id == card.planet.planet_id for unit in owned) < per_planet_limit]
+
+    def select_warfare_token(self, position, faction):
+        s = self.session
+        if s.stage != 'warfare_system' or position not in self.selectable_systems() or \
+                position != s.selected_system or faction != s.player.faction:
+            raise ValueError('Select your command token in a highlighted system.')
+        s.pending_system = None if s.pending_system == position else position
+
+    def confirm_warfare_removal(self):
+        s = self.session
+        if s.stage != 'warfare_system' or s.pending_system is None:
+            raise ValueError('Select a command token on the map first.')
+        tile = self.board[s.pending_system]
+        if s.player.faction not in tile.command_tokens:
+            raise ValueError('That command token is no longer in the system.')
+        tile.command_tokens.remove(s.player.faction)
+        s.player.pending_commands += 1
+        s.selected_system = s.pending_system = None
+        s.stage = 'warfare_allocate'
+
     def toggle_ready(self, planet_id):
         s = self.session
-        card = next((c for c in s.player.planets if c.planet.planet_id == planet_id), None)
-        if s.stage != 'ready_planets' or not card or not card.exhausted:
+        if s.stage != 'ready_planets' or not any(
+                card.planet.planet_id == planet_id for card in self.readyable_planets(s.player)):
             return
         if planet_id in s.ready_planets:
             s.ready_planets.remove(planet_id)
@@ -315,7 +413,9 @@ class StrategyController:
     def confirm_ready(self):
         s = self.session
         for card in s.player.planets:
-            if card.planet.planet_id in s.ready_planets:
+            tile = self.planet_system(card.planet.planet_id)
+            if (card.planet.planet_id in s.ready_planets and tile and
+                    tile.planet_owners.get(card.planet.planet_id) == s.player.faction):
                 card.exhausted = False
         self._participant_done()
 
@@ -331,15 +431,11 @@ class StrategyController:
 
     def build(self, planet_id):
         s = self.session
-        tile = next((t for t in self.board.values() if t.planet_owners.get(planet_id) == s.player.faction), None)
-        if s.stage != 'construction' or tile is None:
-            raise ValueError('Choose a planet you control.')
+        tile = self.planet_system(planet_id)
+        if s.stage != 'construction' or tile is None or tile.position != s.selected_system or \
+                not any(card.planet.planet_id == planet_id for card in self.buildable_planets()):
+            raise ValueError('Choose an eligible planet in the selected system.')
         kind = s.structure
-        owned = [u for t in self.board.values() for u in t.units if u.owner == s.player.faction and u.kind == kind]
-        if len(owned) >= (6 if kind == 'pds' else 3):
-            raise ValueError('No structure of this type remains in reinforcements.')
-        if sum(u.location.planet_id == planet_id for u in owned) >= (2 if kind == 'pds' else 1):
-            raise ValueError('That planet already has the maximum number of these structures.')
         if not s.primary:
             if not s.player.command_pools['strategic']:
                 raise ValueError('A strategy token is required.')
@@ -351,6 +447,7 @@ class StrategyController:
         s.builds_left -= 1
         if s.builds_left:
             s.structure = 'pds'
+            s.selected_system = None
         else:
             self._participant_done()
 
@@ -380,8 +477,8 @@ class StrategyController:
             self._participant_done()
         elif s.stage == 'warfare_system' and not any(s.player.faction in t.command_tokens for t in self.board.values()):
             s.stage = 'warfare_allocate'
-        elif s.stage == 'diplomacy_system' and not any(
-                s.player.faction in t.planet_owners.values() and t.number != 18 for t in self.board.values()):
+        elif s.stage in ('diplomacy_system', 'diplomacy_secondary_system', 'warfare_system') and \
+                not self.selectable_systems():
             self._participant_done()
         else:
             raise ValueError('Complete the current step first.')

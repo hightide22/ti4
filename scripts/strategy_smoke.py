@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import arcade
 from app import BoardWindow
+from player import PlanetCard
 
 
 def main():
@@ -105,6 +106,103 @@ def main():
         click(('skip_production',), w.movement_panel)
         assert w.strategy.session.stage == 'offer'
         click(('decline',))
+        # The large strategy-card face can be moved by itself while planet selection stays open.
+        construction_owner = w.turn_order.active_player
+        if 4 not in w.turn_order.strategy_assignments[construction_owner.faction]:
+            w.turn_order.strategy_assignments[construction_owner.faction].append(4)
+        w.turn_order.strategy_used[construction_owner.faction].discard(4)
+        w.turn_order.action_used = False
+        w.turn_order.actions_used = 0
+        w.strategy.start(4)
+        w.sync_strategy_actor()
+        render('construction-card-before-drag')
+        panel_before = w.strategy_panel.bounds
+        card_before = w.strategy_panel.card_bounds
+        card_x, card_y = (card_before[0] + card_before[1]) / 2, (card_before[2] + card_before[3]) / 2
+        w.on_mouse_press(card_x, card_y, arcade.MOUSE_BUTTON_LEFT, 0)
+        assert w.dragging_modal == 'strategy_card'
+        w.on_mouse_drag(card_x - 500, card_y, -500, 0, arcade.MOUSE_BUTTON_LEFT, 0)
+        w.on_mouse_release(card_x - 500, card_y, arcade.MOUSE_BUTTON_LEFT, 0)
+        render('construction-card-moved')
+        assert w.strategy_panel.bounds == panel_before
+        assert w.strategy_panel.card_bounds[1] < panel_before[0]
+        selectable = []
+        for position in w.strategy.selectable_systems():
+            sx, sy = w.screen(position)
+            in_viewport = (w.roster.WIDTH <= sx < w.width - w.sidebar and
+                           w.player_panel.HEIGHT <= sy < w.height - 80)
+            in_modal = (panel_before[0] <= sx <= panel_before[1] and
+                        panel_before[2] <= sy <= panel_before[3])
+            in_card = (w.strategy_panel.card_bounds[0] <= sx <= w.strategy_panel.card_bounds[1] and
+                       w.strategy_panel.card_bounds[2] <= sy <= w.strategy_panel.card_bounds[3])
+            if in_viewport and not in_modal and not in_card:
+                selectable.append((position, sx, sy))
+        assert selectable, 'No planet system remained clickable after moving the strategy card.'
+        position, sx, sy = selectable[0]
+        w.on_mouse_press(sx, sy, arcade.MOUSE_BUTTON_LEFT, 0)
+        assert w.strategy.session.selected_system == position
+        w.strategy.session = w.turn_order.strategy_resolution = None
+        w.strategy_view = False
+
+        # Diplomacy first selects a system, then offers every exhausted planet, including other systems.
+        diplomacy_owner = w.turn_order.active_player
+        for assignments in w.turn_order.strategy_assignments.values():
+            if 2 in assignments:
+                assignments.remove(2)
+        w.turn_order.strategy_assignments[diplomacy_owner.faction].append(2)
+        w.turn_order.strategy_used[diplomacy_owner.faction].discard(2)
+        w.turn_order.action_used = False
+        selected_system = next(tile for tile in w.board.values()
+                               if diplomacy_owner.faction in tile.planet_owners.values() and tile.number != 18)
+        remote_system = next(tile for tile in w.board.values()
+                             if tile.position != selected_system.position and tile.planets and
+                             not tile.planet_owners)
+        stale_system = next(tile for tile in w.board.values()
+                            if tile.position not in (selected_system.position, remote_system.position)
+                            and tile.planets and not tile.planet_owners)
+        remote_planet = remote_system.planets[0]
+        remote_system.planet_owners[remote_planet.planet_id] = diplomacy_owner.faction
+        remote_card = PlanetCard(remote_planet, exhausted=True)
+        stale_card = PlanetCard(stale_system.planets[0], exhausted=True)
+        diplomacy_owner.planets.append(remote_card)
+        diplomacy_owner.planets.append(stale_card)
+        for planet_card in diplomacy_owner.planets:
+            planet_card.exhausted = True
+        w.strategy.start(2)
+        w.sync_strategy_actor()
+        render('diplomacy-map-selection')
+        before_pan = tuple(w.map_center)
+        w.on_mouse_drag(w.roster.WIDTH + 160, 420, 28, -16, arcade.MOUSE_BUTTON_MIDDLE, 0)
+        assert tuple(w.map_center) != before_pan, 'The map should pan while the Diplomacy window is open.'
+        sx, sy = w.screen(selected_system.position)
+        bounds = w.strategy_panel.bounds
+        assert not (bounds[0] <= sx <= bounds[1] and bounds[2] <= sy <= bounds[3]), \
+            'The selected controlled system should remain clickable beside the modal.'
+        assert w.pick(sx, sy) == selected_system.position
+        w.on_mouse_press(sx, sy, arcade.MOUSE_BUTTON_LEFT, 0)
+        assert w.strategy.session.stage == 'ready_planets'
+        assert w.strategy.session.selected_system == selected_system.position
+        assert all(player.faction in selected_system.command_tokens
+                   for player in w.player_panel.players if player is not diplomacy_owner)
+        render('diplomacy-ready-planets')
+        remote_action = ('ready_planet', remote_planet.planet_id)
+        displayed_planets = {hit[0][1] for hit in w.strategy_panel.hits if hit[0][0] == 'ready_planet'}
+        controlled_exhausted = {card.planet.planet_id for card in diplomacy_owner.planets
+                                if card.exhausted and
+                                w.strategy.planet_system(card.planet.planet_id).planet_owners.get(
+                                    card.planet.planet_id) == diplomacy_owner.faction}
+        assert displayed_planets == controlled_exhausted
+        assert stale_card.planet.planet_id not in displayed_planets
+        remote_hit = next(hit for hit in w.strategy_panel.hits if hit[0] == remote_action)
+        _, left, right, card_bottom, card_top = remote_hit
+        w.on_mouse_motion((left + right) / 2, (card_bottom + card_top) / 2, 0, 0)
+        assert w.strategy_hover_system == remote_system.position
+        render('diplomacy-remote-planet-hover')
+        click(remote_action)
+        assert remote_planet.planet_id in w.strategy.session.ready_planets
+        assert w.strategy.session.selected_system == selected_system.position
+        w.strategy.session = w.turn_order.strategy_resolution = None
+        w.strategy_view = False
         # Repeat the draft layout at the minimum supported window size.
         w.turn_order.begin_strategy_phase()
         w.sync_strategy_actor()
@@ -112,7 +210,7 @@ def main():
         w.dispatch_events()
         render('draft-compact')
         assert len(w.strategy_panel.hits) == 8
-        print('PASS: strategy draft, manual payment, allocation, ordered secondaries, Trade, Warfare, roster and compact layout', flush=True)
+        print('PASS: strategy draft, modal and card dragging, Diplomacy planet cards and map hover, payment, allocation, Trade, Warfare and compact layout', flush=True)
     finally:
         w.unit_renderer.layout_executor.shutdown(wait=True, cancel_futures=True)
         w.close()

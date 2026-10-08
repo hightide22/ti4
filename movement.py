@@ -42,9 +42,11 @@ class Snapshot:
     card_states: list
     currencies: list
     technology_states: list
+    action_hands: list
+    action_state: object | None = None
 
     @classmethod
-    def capture(cls, board, player, players):
+    def capture(cls, board, player, players, action_controller=None):
         all_players = players or [player]
         cards = [(other, list(other.planets)) for other in all_players]
         return cls(player, dict(player.command_pools),
@@ -54,7 +56,9 @@ class Snapshot:
                    [(card, card.exhausted) for _, player_cards in cards for card in player_cards],
                    [(other, other.trade_goods, other.commodities) for other in all_players],
                    [(other, set(other.exhausted_technologies), dict(other.infantry_on_cards))
-                    for other in all_players])
+                    for other in all_players],
+                   [(other, list(other.action_cards)) for other in all_players],
+                   (action_controller, action_controller.snapshot()) if action_controller else None)
 
     def restore(self):
         self.player.command_pools.clear()
@@ -80,6 +84,11 @@ class Snapshot:
             player.exhausted_technologies.update(exhausted)
             player.infantry_on_cards.clear()
             player.infantry_on_cards.update(infantry)
+        for player, hand in self.action_hands:
+            player.action_cards[:] = hand
+        if self.action_state:
+            controller, state = self.action_state
+            controller.restore(state)
 
 
 @dataclass
@@ -91,7 +100,8 @@ class SessionCheckpoint:
 
     @classmethod
     def capture(cls, controller, session, stage):
-        return cls(Snapshot.capture(controller.board, session.player, controller.players),
+        return cls(Snapshot.capture(controller.board, session.player, controller.players,
+                                    controller.action_cards),
                    stage, dict(session.landings), dict(session.bombard_targets))
 
     def restore(self, session):
@@ -193,6 +203,11 @@ class Session:
     bombardment_checkpoint: SessionCheckpoint | None = None
     invasion_checkpoint: SessionCheckpoint | None = None
     production_checkpoint: SessionCheckpoint | None = None
+    movement_bonus: int = 0
+    combat_modifiers: dict[str, int] = field(default_factory=dict)
+    fighter_combat_modifiers: dict[str, int] = field(default_factory=dict)
+    skilled_retreat: bool = False
+    played_action_windows: set[tuple] = field(default_factory=set)
 
     @property
     def choices(self):
@@ -240,6 +255,7 @@ class MovementController:
         self.players = list(players)
         self.session = None
         self.history: list[UndoEntry] = []
+        self.action_cards = None
 
     def faction_player(self, faction):
         return next((player for player in self.players if player.faction == faction), None)
@@ -279,10 +295,10 @@ class MovementController:
         session.rolled_any_dice = True
         return random.randint(1, 10)
 
-    def route(self, origin, target, unit, player, bonus=0):
+    def route(self, origin, target, unit, player, bonus=0, move_bonus=0):
         if player.faction in origin.command_tokens or origin is target or unit.move_value <= 0:
             return None
-        budget = (min(unit.move_value, 1) if 'nebula' in origin.anomalies else unit.move_value) + bonus
+        budget = (min(unit.move_value, 1) if 'nebula' in origin.anomalies else unit.move_value) + bonus + move_bonus
         queue = deque([(origin, (origin.position,))])
         seen = {origin.position}
         while queue:
@@ -337,7 +353,7 @@ class MovementController:
                               ((u.kind == 'fighter' and u.location.region == Region.SPACE and u not in ships) or
                                (u.kind in ('infantry', 'mech') and u.location.region == Region.PLANET))]
                 sources[origin.position] = Source(origin, ships, passengers, routes)
-        snapshot = Snapshot.capture(self.board, player, self.players or [player])
+        snapshot = Snapshot.capture(self.board, player, self.players or [player], self.action_cards)
         player.command_pools['tactical'] -= 1
         target.command_tokens.add(player.faction)
         self.session = Session(player, target, sources, snapshot)
@@ -380,6 +396,43 @@ class MovementController:
                                      ((u.kind == 'fighter' and u.location.region == Region.SPACE and
                                        u not in source.ships) or
                                       (u.kind in ('infantry', 'mech') and u.location.region == Region.PLANET))]
+
+    def apply_flank_speed(self, session):
+        """Rebuild eligible movement routes after the activation-window bonus."""
+        session.movement_bonus = 1
+        sources = {}
+        gravity_bonus_ids = set()
+        for origin in self.board.values():
+            routes, ships = {}, []
+            for unit in origin.units:
+                independent_fighter = (unit.kind == 'fighter' and
+                                       'ff2' in session.player.technologies and
+                                       unit.location.region == Region.SPACE)
+                if unit.owner != session.player.faction or not (capital_ship(unit) or independent_fighter):
+                    continue
+                path = ((session.target.position,) if origin is session.target else
+                        self.route(origin, session.target, unit, session.player,
+                                   bonus=session.movement_bonus))
+                if not path and 'gd' in session.player.technologies:
+                    path = self.route(origin, session.target, unit, session.player,
+                                      bonus=session.movement_bonus + 1)
+                    if path:
+                        gravity_bonus_ids.add(unit.unit_id)
+                if not path and session.spatial_conduit_active and origin is not session.target and \
+                        session.player.faction not in origin.command_tokens:
+                    path = (origin.position, session.target.position)
+                if path:
+                    ships.append(unit)
+                    routes[unit.unit_id] = path
+            if ships:
+                passengers = [unit for unit in origin.units if unit.owner == session.player.faction and
+                              ((unit.kind == 'fighter' and unit.location.region == Region.SPACE and unit not in ships) or
+                               (unit.kind in ('infantry', 'mech') and unit.location.region == Region.PLANET))]
+                sources[origin.position] = Source(origin, ships, passengers, routes)
+        eligible = {unit.unit_id for source in sources.values() for unit in source.ships + source.passengers}
+        session.selected.intersection_update(eligible)
+        session.sources = sources
+        session.gravity_bonus_ids = gravity_bonus_ids
 
     def add_command_token(self, player, position):
         tile = self.board[position]
@@ -683,6 +736,13 @@ class MovementController:
                                 UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
             has_friendly = any(unit.owner == faction and unit.location.region == Region.SPACE and
                                UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
+            if session.skilled_retreat:
+                retreating_player = next((player for player in self.players if player.faction == faction),
+                                         session.player)
+                if (not hostile_fleet and faction not in tile.command_tokens and
+                        self.action_cards and self.action_cards.has_reinforcement(retreating_player)):
+                    options.append(tile)
+                continue
             # A fleet may retreat into a system that already carries its faction's
             # command token.  Retreat does not spend another token.
             if not hostile_fleet and (has_friendly or
@@ -717,7 +777,12 @@ class MovementController:
         for unit in retreating:
             session.target.units.remove(unit)
             destination.units.append(unit)
-        if session.retreat_announced not in destination.command_tokens:
+        retreating_player = next((player for player in self.players
+                                  if player.faction == session.retreat_announced), session.player)
+        if (session.skilled_retreat and session.retreat_announced not in destination.command_tokens and
+                self.action_cards and self.action_cards.has_reinforcement(retreating_player)):
+            destination.command_tokens.add(session.retreat_announced)
+        elif not session.skilled_retreat and session.retreat_announced not in destination.command_tokens:
             destination.command_tokens.add(session.retreat_announced)
         session.retreat_log = f'{session.retreat_announced.upper()} retreated to tile {destination.system_id}.'
         session.space_combat_resolved = True
@@ -861,6 +926,7 @@ class MovementController:
     def start_combat(self, session):
         session.combat_type = 'space'
         session.space_combat_resolved = False
+        session.skilled_retreat = False
         session.combat_planet_id = None
         session.combat_factions = (session.player.faction,) + self.hostile_space_factions(
             session.target, session.player.faction)
@@ -913,6 +979,9 @@ class MovementController:
         session.munitions_available.clear()
         session.reroll_selected.clear()
         session.combat_needs_resolution = False
+        session.combat_modifiers.clear()
+        session.fighter_combat_modifiers.clear()
+        session.played_action_windows.clear()
         if len(session.combat_factions) > 1:
             session.stage = 'space_combat'
         else:
@@ -946,6 +1015,9 @@ class MovementController:
                 session.magen_suppressed = next((enemy for enemy in session.combat_factions
                                                  if enemy != faction), None)
                 break
+        session.combat_rolls.clear()
+        session.combat_modifiers.clear()
+        session.fighter_combat_modifiers.clear()
         session.stage = 'ground_combat'
 
     def combat_units(self, session, faction):
@@ -1004,8 +1076,11 @@ class MovementController:
 
     def advance_combat(self):
         session = self.session
-        if not session or session.stage not in ('space_combat', 'ground_combat'):
+        if not session or session.stage not in ('space_combat', 'ground_combat', 'combat_end'):
             raise MovementError('Combat is not active')
+        if session.stage == 'combat_end':
+            self._finish_combat_round(session)
+            return
         if session.combat_needs_resolution:
             if not self.combat_assignments_complete(session):
                 raise MovementError('Assign all available hits before continuing')
@@ -1033,16 +1108,12 @@ class MovementController:
                     if damaged:
                         damaged[0].damaged = False
             session.combat_needs_resolution = False
-            own_alive = bool(self.combat_units(session, session.player.faction))
-            enemies_alive = any(self.combat_units(session, faction)
-                                for faction in session.combat_factions if faction != session.player.faction)
-            if session.combat_type == 'ground' and (not own_alive or not enemies_alive):
-                self.finish_ground_battle(session, own_alive, enemies_alive)
-            elif not own_alive or not enemies_alive:
-                session.space_combat_resolved = True
-                self.prepare_invasion(session)
-            elif session.combat_type == 'space' and session.retreat_announced:
-                session.stage = 'retreat_selection'
+            session.stage = 'combat_end'
+            if self.action_cards and any(
+                    self.action_cards.can_play(faction, 'emergency_repairs', session)
+                    for faction in session.combat_factions):
+                return
+            self._finish_combat_round(session)
             return
 
         session.combat_round += 1
@@ -1059,8 +1130,13 @@ class MovementController:
                 profile = unit_profile(unit)
                 for _ in range(int(profile.get('combatDieCount') or 1)):
                     value = self.roll_d10(session)
-                    rolls.append({'unit_id': unit.unit_id, 'kind': unit.kind, 'value': value,
-                                  'hit': value >= self.combat_threshold(faction, profile),
+                    modifier = session.combat_modifiers.get(faction, 0)
+                    if unit.kind == 'fighter':
+                        modifier += session.fighter_combat_modifiers.get(faction, 0)
+                    result = value + modifier
+                    rolls.append({'unit_id': unit.unit_id, 'kind': unit.kind, 'value': result,
+                                  'natural': value, 'modifier': modifier,
+                                  'hit': result >= self.combat_threshold(faction, profile),
                                   'rerolled': False})
             session.combat_rolls[faction] = rolls
             outgoing_hits[faction] = sum(result['hit'] for result in rolls)
@@ -1070,6 +1146,25 @@ class MovementController:
                                              if shooter != faction)
                                for faction in session.combat_factions}
         session.combat_needs_resolution = True
+
+    def _finish_combat_round(self, session):
+        own_alive = bool(self.combat_units(session, session.player.faction))
+        enemies_alive = any(self.combat_units(session, faction)
+                            for faction in session.combat_factions if faction != session.player.faction)
+        if session.combat_type == 'ground' and (not own_alive or not enemies_alive):
+            self.finish_ground_battle(session, own_alive, enemies_alive)
+        elif not own_alive or not enemies_alive:
+            session.space_combat_resolved = True
+            self.prepare_invasion(session)
+        elif session.combat_type == 'space' and session.retreat_announced:
+            session.stage = 'retreat_selection'
+        else:
+            session.stage = 'space_combat' if session.combat_type == 'space' else 'ground_combat'
+            session.combat_rolls.clear()
+            session.combat_hits.clear()
+            session.combat_assignments = {faction: [] for faction in session.combat_factions}
+            session.combat_modifiers.clear()
+            session.fighter_combat_modifiers.clear()
 
     def production_sites(self, session):
         sites = []
@@ -1144,7 +1239,8 @@ class MovementController:
     def start_strategy_production(self, player, target, dock):
         if self.session:
             raise MovementError('Finish the current action first.')
-        session = Session(player, target, {}, Snapshot.capture(self.board, player, self.players),
+        session = Session(player, target, {}, Snapshot.capture(self.board, player, self.players,
+                                                               self.action_cards),
                           strategic_production=True)
         planet = next(p for p in target.planets if p.planet_id == dock.location.planet_id)
         value = str(unit_profile(dock).get('productionValue', '+2'))

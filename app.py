@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 
 import arcade
+from ui_theme import (BG, PANEL, SHELL, INK, MUTED, ACCENT, GOLD, DANGER, SIDEBAR_WIDTH, FONT,
+                      VARIANT, button)
 
 from board import Board, Tile, load_board
 from units import Region, Unit, UnitLocation, UNIT_TYPES
@@ -30,13 +32,11 @@ from technology_panel import TechnologyPanel
 from technology_actions import TechnologyActions
 from technology import restore_infantry_on_cards
 
+from action_cards import ActionCardController
+from action_card_panel import ActionCardPanel
+
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
-BG = (7, 12, 23)
-PANEL = (14, 23, 38)
-INK = (223, 232, 244)
-MUTED = (130, 151, 177)
-ACCENT = (100, 207, 224)
 COLLAPSED_SIDEBAR_WIDTH = 38
 
 
@@ -89,6 +89,8 @@ class BoardWindow(arcade.Window):
             map_path, factions if len(factions) == slot_count else None)
         self.tile_sprites = {tile: TileSprite(tile) for tile in self.board.values()}
         self.labels = {}
+        self.label_specs = {}
+        self.mouse_position = (-1, -1)
         self.unit_renderer = UnitRenderer()
         self.unit_renderer.blocking_layouts = self.smoke
         self.system_panel = SystemPanel()
@@ -110,9 +112,12 @@ class BoardWindow(arcade.Window):
         self.turn_history_size = 0
         self.last_infantry_return_turn = None
         self.turn_button_hit = None
+        self.action_card_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
         self.technology_actions = TechnologyActions(self.board, self.movement, self.turn_order)
-        self.strategy = StrategyController(self.board, self.turn_order, self.movement)
+        self.action_cards = ActionCardController(self.player_panel.players, self.movement)
+        self.action_card_panel = ActionCardPanel()
+        self.strategy = StrategyController(self.board, self.turn_order, self.movement, self.action_cards)
         self.transaction = TransactionController(self.board, self.player_panel.players,
                                                 self.turn_order, self.movement)
         self.transaction_panel = TransactionPanel()
@@ -131,6 +136,7 @@ class BoardWindow(arcade.Window):
         self.hover = None
         self.zoom = self.target_zoom = 1.0
         self.map_center = [0.0, 0.0]
+        self.target_map_center = [0.0, 0.0]
         self.fit()
 
     def start_from_menu(self):
@@ -152,6 +158,7 @@ class BoardWindow(arcade.Window):
         self.inspector_visible = not self.inspector_visible
         self.fit()
         self.map_center = center
+        self.target_map_center = center[:]
         self.zoom, self.target_zoom = zoom, target_zoom
         self.system_panel.reset()
         self.movement_panel.reset()
@@ -165,7 +172,39 @@ class BoardWindow(arcade.Window):
         xs, ys = zip(*coords)
         self.fit_scale = min((self.width - self.sidebar - self.roster.WIDTH - 80) / (max(xs) - min(xs) + 2), (self.height - 180 - self.player_panel.HEIGHT) / (max(ys) - min(ys) + math.sqrt(3)))
         self.map_center = [(max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2]
+        self.target_map_center = self.map_center[:]
         self.zoom = self.target_zoom = 1.0
+
+    def player_system_positions(self, player):
+        """List systems containing a player's planets, units, home system or command token."""
+        if player is None:
+            return []
+        faction = player.faction
+        return [tile.position for tile in self.board.values()
+                if (tile.player == faction or faction in tile.planet_owners.values() or
+                    faction in tile.command_tokens or
+                    any(unit.owner == faction for unit in tile.units))]
+
+    def frame_player_systems(self, player):
+        """Smoothly frame every map system that currently contains this player's assets."""
+        positions = self.player_system_positions(player)
+        if not positions:
+            return
+        coords = [world(position) for position in positions]
+        xs, ys = zip(*coords)
+        bounds_width = max(xs) - min(xs) + 2
+        bounds_height = max(ys) - min(ys) + math.sqrt(3)
+        available_width = max(1, self.width - self.sidebar - self.roster.WIDTH - 80)
+        available_height = max(1, self.height - 180 - self.player_panel.HEIGHT)
+        required_scale = min(available_width / bounds_width, available_height / bounds_height)
+        self.target_zoom = min(1.6, max(.55, required_scale / self.fit_scale))
+        self.target_map_center = [(max(xs) + min(xs)) / 2,
+                                  (max(ys) + min(ys)) / 2]
+        center = self.target_map_center
+        self.selected = min(positions, key=lambda position: math.dist(world(position), center))
+        self.system_panel.reset()
+        self.focus_view = False
+        self.focus_zoom = 1.0
 
     def screen(self, position):
         x, y = world(position)
@@ -181,13 +220,23 @@ class BoardWindow(arcade.Window):
         position = nearest_hex((x - cx) / scale + self.map_center[0], (y - cy) / scale + self.map_center[1])
         return position if position in self.board else None
 
-    def text(self, key, value, x, y, size=14, color=INK, width=None):
+    def text(self, key, value, x, y, size=14, color=INK, width=None, max_width=None):
+        heading = isinstance(key, str) and any(part in key for part in ('title', 'header', 'system_name', 'move_target'))
         if key not in self.labels:
-            self.labels[key] = arcade.Text('', x, y, color, size, font_name='Arial', width=width, multiline=width is not None)
+            self.labels[key] = arcade.Text('', x, y, color, size, font_name=FONT,
+                                          bold=heading, width=width, multiline=width is not None)
         label = self.labels[key]
-        label.text, label.x, label.y, label.color = value, x, y, color
-        if width is not None:
-            label.width = width
+        label.x, label.y, label.color = x, y, color
+        spec = (value, size, width, max_width)
+        if self.label_specs.get(key) != spec:
+            label.text = value
+            label.font_size = size
+            label.multiline = width is not None
+            if width is not None:
+                label.width = max(1, int(width))
+            if max_width and label.content_width > max_width:
+                label.font_size = max(8, size * max_width / label.content_width)
+            self.label_specs[key] = spec
         label.draw()
 
     def outline(self, position, color, thickness):
@@ -347,6 +396,11 @@ class BoardWindow(arcade.Window):
                                             self.strategy.session.stage == 'technology')
 
     def sync_strategy_actor(self):
+        if self.strategy.session and self.strategy.session.stage in (
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+            self.focus_view = False
+            if getattr(self, 'inspector_visible', True) is False and hasattr(self, 'toggle_inspector'):
+                self.toggle_inspector()
         player = self.strategy.player
         index = self.player_panel.players.index(player)
         if self.player_panel.active != index:
@@ -377,6 +431,7 @@ class BoardWindow(arcade.Window):
             elif kind == 'page':
                 self.strategy_panel.page = max(0, self.strategy_panel.page + args[0])
             elif kind == 'start':
+                self.action_card_panel.open = False
                 ctl.start(args[0])
                 self.sync_strategy_actor()
             elif session:
@@ -404,6 +459,8 @@ class BoardWindow(arcade.Window):
                             session.pool_source = pool
                 elif kind == 'system':
                     ctl.select_system(args[0])
+                elif kind == 'confirm_warfare_removal':
+                    ctl.confirm_warfare_removal()
                 elif kind == 'ready_planet':
                     ctl.toggle_ready(args[0])
                 elif kind == 'ready_confirm':
@@ -417,6 +474,7 @@ class BoardWindow(arcade.Window):
                 elif kind == 'structure':
                     if not (session.primary and session.builds_left == 1):
                         session.structure = args[0]
+                        session.selected_system = None
                 elif kind == 'build':
                     ctl.build(args[0])
                 elif kind == 'produce_at':
@@ -552,6 +610,37 @@ class BoardWindow(arcade.Window):
         elif session.stage in ('allocate', 'warfare_allocate') and kind == 'pool':
             self.handle_strategy_action(('allocate', args[0]))
 
+    def strategy_map_click(self, x, y):
+        session = self.strategy.session
+        if not session or session.stage not in (
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'):
+            return
+        position = self.pick(x, y)
+        if position is None:
+            return
+        if position not in self.strategy.selectable_systems():
+            return
+        try:
+            self.selected = position
+            self.focus_view = False
+            self.system_panel.reset()
+            if session.stage == 'warfare_system':
+                token = next((hit for hit in reversed(self.token_hits)
+                              if hit[0] == position and hit[1] == session.player.faction and
+                              math.dist((x, y), (hit[2], hit[3])) <= hit[4]), None)
+                if token:
+                    if session.selected_system != position:
+                        self.strategy.select_system(position)
+                    self.strategy.select_warfare_token(position, token[1])
+                else:
+                    self.strategy.select_system(position)
+            else:
+                self.strategy.select_system(position)
+            self.movement_error = None
+            self.sync_strategy_actor()
+        except ValueError as error:
+            self.movement_error = str(error)
+
     def pass_turn(self, skip_technology_prompt=False):
         if (not skip_technology_prompt and not self.smoke and self.turn_order.active_player and
                 not self.turn_order.strategy_selection and not self.turn_order.command_allocation and
@@ -581,17 +670,14 @@ class BoardWindow(arcade.Window):
                     card.exhausted = False
                 player.exhausted_technologies.clear()
                 for _ in range(2 if 'nm' in player.technologies else 1):
-                    if len(player.action_cards) >= 7:
-                        break
-                    action_card = self.action_card_deck.draw()
-                    if action_card:
-                        player.action_cards.append(action_card)
+                    self.action_cards.draw(player, 1)
             self.turn_order.begin_command_allocation()
             self.strategy_view = False
             if not self.turn_order.command_allocation and self.turn_order.strategy_enabled:
                 self.turn_order.begin_strategy_phase()
                 self.strategy_view = True
         self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
+        self.frame_player_systems(self.turn_order.active_player)
         self.player_panel.source_pool = None
         self.player_panel.card_offset = 0
         self.player_panel.hovered_planet = None
@@ -653,6 +739,19 @@ class BoardWindow(arcade.Window):
                 self.outline(self.hover, (170, 185, 207), 2)
             self.outline(self.selected, ACCENT, 3)
             self.draw_route_preview(movement_route)
+        if self.strategy.session and self.strategy.session.stage in (
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'ready_planets', 'warfare_system'):
+            for position in self.strategy.selectable_systems():
+                self.outline(position, GOLD, 4)
+            selected_system = self.strategy.session.selected_system
+            if selected_system is not None:
+                self.outline(selected_system, ACCENT, 5)
+            hovered_system = self.strategy_hover_system
+            if hovered_system is not None and hovered_system != selected_system:
+                self.outline(hovered_system, (112, 230, 245), 5)
+            pending_system = self.strategy.session.pending_system
+            if pending_system is not None:
+                self.outline(pending_system, (255, 230, 128), 6)
         if self.unit_renderer.is_loading:
             self.text('unit_layout_loading', 'Preparing fleet layouts…',
                       (self.width - self.sidebar) / 2, self.height * .55, 13, MUTED)
@@ -665,26 +764,29 @@ class BoardWindow(arcade.Window):
         else:
             toggle_left, toggle_right = left + 2, self.width - 2
             toggle_glyph = '‹'
-        arcade.draw_lrbt_rectangle_filled(0, left, self.height - 80, self.height, (10, 17, 29))
-        self.text('title', 'TWILIGHT IMPERIUM IV', 30, self.height - 34, 21)
-        self.text('subtitle', f'Game board · {len(self.board.home_tiles)} players · {len(self.board)} systems', 30, self.height - 61, 12, MUTED)
+        arcade.draw_lrbt_rectangle_filled(0, left, self.height - 80, self.height, SHELL)
+        self.text('title', 'TWILIGHT / IV', 22, self.height - 31, 18)
+        self.text('subtitle', f'{VARIANT}  /  {len(self.board.home_tiles)} players', 22, self.height - 55, 10, MUTED)
         self.text('zoom', f'{self.focus_zoom if self.focus_view else self.zoom:.1f}×', left - 62, self.height - 75, 11, ACCENT)
-        arcade.draw_lrbt_rectangle_filled(left - 225, left - 118, self.height - 56, self.height - 24, (25, 45, 63))
-        self.text('focus_button', 'Galaxy' if self.focus_view else 'Detail', left - 212, self.height - 46, 11, ACCENT)
-        control_left, control_right = left - 110, left - 4
-        arcade.draw_lrbt_rectangle_filled(control_left, control_right, self.height - 56, self.height - 24,
-                                           (35, 66, 77) if self.show_planet_control else (25, 45, 63))
-        self.text('control_toggle', 'BORDERS ON' if self.show_planet_control else 'BORDERS OFF',
-                  control_left + 7, self.height - 46, 9,
-                  (110, 218, 161) if self.show_planet_control else MUTED)
+        turn_left, turn_right = left - 250, left - 115
+        control_left, control_right = turn_right + 8, turn_right + 46
+        control_bottom = self.height - 58
+        button(self, 'control_toggle', '', control_left, control_bottom,
+               control_right - control_left, 34, selected=self.show_planet_control)
+        icon_color = ACCENT if self.show_planet_control else MUTED
+        icon_x, icon_y, icon_radius = (control_left + control_right) / 2, control_bottom + 17, 8
+        icon_points = [(icon_x + icon_radius * math.cos(math.pi / 3 * index),
+                        icon_y + icon_radius * math.sin(math.pi / 3 * index)) for index in range(6)]
+        arcade.draw_polygon_outline(icon_points, icon_color, 2)
+        if self.show_planet_control:
+            arcade.draw_circle_filled(icon_x, icon_y, 2.5, icon_color)
         self.control_toggle_hit = (control_left, control_right, self.height - 56, self.height - 24)
         active_player = self.turn_order.active_player
         active_faction = active_player.faction.upper() if active_player else 'NO PLAYER'
         allocation_status = (' · RESOLVING ' + self.strategy.player.faction.upper() if self.strategy.session else
                              ' · COMMAND ALLOCATION' if self.turn_order.command_allocation else '')
         self.text('turn_status', f'ROUND {self.turn_order.round_number} · {active_faction}{allocation_status}',
-                  left - 370, self.height - 19, 9, ACCENT if self.turn_order.action_used else MUTED)
-        turn_left, turn_right = left - 370, left - 233
+                  left - 370, self.height - 19, 9, ACCENT if self.turn_order.action_used else MUTED, max_width=364)
         turn_bottom, turn_top = self.height - 58, self.height - 27
         pending_commands = active_player.pending_commands if active_player else 0
         enabled = (not self.movement.session and not pending_commands and
@@ -693,13 +795,19 @@ class BoardWindow(arcade.Window):
                         'STRATEGY ACTION' if self.strategy.session else
                         'ALLOCATE COMMANDS' if pending_commands else
                         'END TURN' if self.turn_order.action_used else 'PASS')
-        arcade.draw_lrbt_rectangle_filled(turn_left, turn_right, turn_bottom, turn_top,
-                                           (31, 78, 83) if enabled else (34, 41, 52))
-        arcade.draw_lrbt_rectangle_outline(turn_left, turn_right, turn_bottom, turn_top,
-                                            (77, 151, 151) if enabled else (61, 75, 92), 1)
-        self.text('pass_turn_button', button_label, turn_left + 10, turn_bottom + 10, 9,
-                  INK if enabled else MUTED)
+        button(self, 'pass_turn_button', button_label, turn_left, turn_bottom,
+               turn_right - turn_left, turn_top - turn_bottom, primary=True,
+               enabled=enabled, size=10)
         self.turn_button_hit = (turn_left, turn_right, turn_bottom, turn_top) if enabled else None
+        card_player = (self.movement.session.player if self.movement.session else active_player)
+        card_count = len(card_player.action_cards) if card_player else 0
+        playable_count = (len(self.action_cards.playable(card_player, self.movement.session))
+                          if card_player and self.movement.session else 0)
+        card_left, card_right = left - 370, left - 258
+        button(self, 'action_card_hand_button', f'CARDS · {card_count}',
+               card_left, turn_bottom, card_right - card_left, turn_top - turn_bottom,
+               primary=bool(playable_count), selected=self.action_card_panel.open, size=9)
+        self.action_card_button_hit = (card_left, card_right, turn_bottom, turn_top)
         if not self.inspector_visible:
             self.system_panel.hits.clear()
             self.system_panel.remove_token_hit = None
@@ -713,12 +821,12 @@ class BoardWindow(arcade.Window):
         elif self.movement.session:
             self.movement_panel.draw(self, self.movement.session, left)
             if self.movement_error:
-                self.text('movement_error', self.movement_error, left + 18, 112, 10, (245, 142, 128), self.sidebar - 36)
+                self.text('movement_error', self.movement_error, left + 18, 155, 9, DANGER, self.sidebar - 36)
         else:
             self.system_panel.draw(self, self.board[self.selected], left)
             if self.movement_error:
                 self.text('movement_error', self.movement_error, left + 18, 34, 10,
-                          (245, 142, 128), self.sidebar - 36)
+                          DANGER, self.sidebar - 36)
         arcade.draw_lrbt_rectangle_filled(toggle_left, toggle_right, tab_bottom, tab_bottom + 36,
                                            (25, 45, 63))
         arcade.draw_lrbt_rectangle_outline(toggle_left, toggle_right, tab_bottom, tab_bottom + 36,
@@ -738,7 +846,7 @@ class BoardWindow(arcade.Window):
             self.roster.draw_details(self)
         if self.player_panel.hovered_planet is not None:
             self.player_panel.draw_details(self)
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection', 'assault_choice'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice'):
             self.combat_panel.draw(self, self.movement.session)
         if self.strategy_modal and not self.technology_modal:
             self.strategy_panel.draw(self, self.turn_order)
@@ -750,6 +858,8 @@ class BoardWindow(arcade.Window):
                                        self.strategy.session.stage == 'technology' else None)
         if self.transaction_modal:
             self.transaction_panel.draw(self, self.transaction)
+        elif self.action_card_panel.open:
+            self.action_card_panel.draw(self)
 
     def on_update(self, delta_time):
         if self.main_menu_visible:
@@ -823,6 +933,9 @@ class BoardWindow(arcade.Window):
         self.unit_renderer.update(delta_time)
         self.sync_turn_action()
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
+        for axis in range(2):
+            shift = (self.target_map_center[axis] - self.map_center[axis]) * min(1, delta_time * 7)
+            self.map_center[axis] += shift
         self.frames += 1
         if self.technology_smoke_test and self.frames == 3:
             preview_dir = ROOT / 'previews'
@@ -959,13 +1072,13 @@ class BoardWindow(arcade.Window):
             self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
             self.on_draw()
             arcade.get_image().save(preview_dir / 'board-preview.png')
-            assert self.show_planet_control and self.labels['control_toggle'].text == 'BORDERS ON'
+            assert self.show_planet_control
             bounds = self.control_toggle_hit
             self.on_mouse_press((bounds[0] + bounds[1]) / 2,
                                 (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
             assert not self.show_planet_control
             self.on_draw()
-            assert self.labels['control_toggle'].text == 'BORDERS OFF'
+            assert not self.show_planet_control
             bounds = self.control_toggle_hit
             self.on_mouse_press((bounds[0] + bounds[1]) / 2,
                                 (bounds[2] + bounds[3]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
@@ -1070,8 +1183,7 @@ class BoardWindow(arcade.Window):
                 self.movement.activate(sol_player, target.position)
                 self.selected = target.position
                 self.on_draw()
-                assert all(self.labels[('action_status', index)].text == 'Wait' for index in range(3, 13)), \
-                    {index: self.labels[('action_status', index)].text for index in range(13)}
+                assert all(status == 'Wait' for _, status in self.movement_panel.timeline_rows[3:])
                 source = self.movement.session.sources[home.position]
                 route_hit = self.movement_panel.route_hits[0]
                 self.on_mouse_motion((route_hit[2] + route_hit[3]) / 2,
@@ -1116,13 +1228,13 @@ class BoardWindow(arcade.Window):
                            for unit in target.units)
                 self.focus_view = True
                 self.on_draw()
-                step_statuses = [self.labels[('action_status', index)].text for index in range(13)]
+                step_statuses = [status for _, status in self.movement_panel.timeline_rows]
                 assert step_statuses.count('Current') == 1
-                assert self.labels[('action_step', 11)].text == 'STEP 5 · PRODUCTION'
-                assert all(self.labels[('action_status', index)].text == 'Skipped' for index in (4, 6))
-                assert self.labels[('action_status', 5)].text == 'In progress'
-                assert self.labels[('action_status', 7)].text == 'Current'
-                assert all(self.labels[('action_status', index)].text == 'Wait' for index in (9, 10, 11, 12))
+                assert self.movement_panel.timeline_rows[11][0] == 'STEP 5 · PRODUCTION'
+                assert all(self.movement_panel.timeline_rows[index][1] == 'Skipped' for index in (4, 6))
+                assert self.movement_panel.timeline_rows[5][1] == 'In progress'
+                assert self.movement_panel.timeline_rows[7][1] == 'Current'
+                assert all(self.movement_panel.timeline_rows[index][1] == 'Wait' for index in (9, 10, 11, 12))
                 arcade.get_image().save(preview_dir / 'cargo-preview.png')
                 self.focus_view = False
                 self.on_draw()
@@ -1139,10 +1251,10 @@ class BoardWindow(arcade.Window):
                 assert self.movement.session and self.movement.session.stage == 'production'
                 assert target.planet_owners[planet_id] == 'sol'
                 assert next(card for card in sol_player.planets if card.planet.planet_id == planet_id).exhausted
-                step_statuses = [self.labels[('action_status', index)].text for index in range(13)]
+                step_statuses = [status for _, status in self.movement_panel.timeline_rows]
                 assert step_statuses.count('Current') == 1
-                assert self.labels[('action_step', 11)].text == 'STEP 5 · PRODUCTION'
-                assert self.labels[('action_status', 11)].text == 'In progress'
+                assert self.movement_panel.timeline_rows[11][0] == 'STEP 5 · PRODUCTION'
+                assert self.movement_panel.timeline_rows[11][1] == 'In progress'
                 arcade.get_image().save(preview_dir / 'production-preview.png')
                 infantry_plus = next(hit for hit in self.movement_panel.hits
                                      if hit[0] == ('production_unit', 'infantry', 1))
@@ -1480,11 +1592,20 @@ class BoardWindow(arcade.Window):
     def on_mouse_motion(self, x, y, dx, dy):
         if self.main_menu_visible:
             return
+        self.mouse_position = (x, y)
         self.roster.hover(x, y)
         self.player_panel.hover(x, y)
         if self.strategy_modal and not self.technology_modal:
             self.strategy_panel.update_hover(x, y)
-            self.strategy_hover_system = self.strategy_panel.hover_system
+            session = self.strategy.session
+            map_stage = bool(session and session.stage in (
+                'construction', 'diplomacy_system', 'diplomacy_secondary_system', 'warfare_system'))
+            bounds = self.strategy_panel.bounds
+            over_modal = bounds and bounds[0] <= x <= bounds[1] and bounds[2] <= y <= bounds[3]
+            over_strategy_card = self.strategy_panel.drag_card(x, y)
+            position = self.pick(x, y) if map_stage and not over_modal and not over_strategy_card else None
+            self.strategy_hover_system = (position if position in self.strategy.selectable_systems()
+                                          else self.strategy_panel.hover_system)
         else:
             self.strategy_hover_system = None
         if self.movement.session and self.movement.session.stage == 'movement':
@@ -1530,6 +1651,9 @@ class BoardWindow(arcade.Window):
             return
         if self.strategy_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
+                if self.strategy_panel.drag_card(x, y):
+                    self.dragging_modal = 'strategy_card'
+                    return
                 if self.strategy_panel.drag_header(x, y):
                     self.dragging_modal = 'strategy'
                     return
@@ -1538,6 +1662,77 @@ class BoardWindow(arcade.Window):
                     self.handle_strategy_action(action)
                 else:
                     self.strategy_tray_click(x, y)
+                    bounds = self.strategy_panel.bounds
+                    if not bounds or not (bounds[0] <= x <= bounds[1] and bounds[2] <= y <= bounds[3]):
+                        self.strategy_map_click(x, y)
+            return
+        if self.action_card_panel.open:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                action = self.action_card_panel.hit_test(x, y)
+                if action and action[0] == 'player':
+                    self.action_card_panel.player_faction = action[1]
+                elif action and action[0] == 'play':
+                    participants = ([p for p in self.player_panel.players
+                                     if p.faction in self.movement.session.combat_factions]
+                                    if self.movement.session and
+                                    self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection')
+                                    else [self.movement.session.player] if self.movement.session else
+                                    [self.turn_order.active_player])
+                    player = next((p for p in participants
+                                   if p and p.faction == self.action_card_panel.player_faction),
+                                  participants[0])
+                    try:
+                        self.action_cards.play(player, action[1])
+                        self.movement_error = None
+                    except ValueError as error:
+                        self.movement_error = str(error)
+                    self.action_card_panel.open = False
+                elif action and action[0] == 'close':
+                    self.action_card_panel.open = False
+                elif not (self.action_card_panel.bounds and
+                          self.action_card_panel.bounds[0] <= x <= self.action_card_panel.bounds[1] and
+                          self.action_card_panel.bounds[2] <= y <= self.action_card_panel.bounds[3]):
+                    self.action_card_panel.open = False
+            return
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice'):
+            if button != arcade.MOUSE_BUTTON_LEFT:
+                return
+            if self.combat_panel.drag_header(x, y):
+                self.dragging_modal = 'combat'
+                return
+            action = self.combat_panel.hit_test(x, y)
+            if action:
+                try:
+                    if action[0] == 'assign_hit':
+                        self.movement.assign_combat_hit(action[1], action[2])
+                    elif action[0] == 'spend_munitions':
+                        self.movement.spend_munitions(action[1])
+                    elif action[0] == 'reroll_die':
+                        self.movement.toggle_combat_reroll(action[1], action[2])
+                    elif action[0] == 'reroll_dice':
+                        self.movement.reroll_selected_combat_dice(action[1])
+                    elif action[0] == 'advance':
+                        self.movement.advance_combat()
+                    elif action[0] == 'announce_retreat':
+                        self.movement.announce_retreat()
+                    elif action[0] == 'retreat_to':
+                        self.movement.resolve_retreat(action[1])
+                        self.movement_panel.reset()
+                    elif action[0] == 'assault_victim':
+                        self.movement.choose_assault_victim(action[1])
+                        self.combat_panel.assault_page = 0
+                    elif action[0] == 'assault_page':
+                        self.combat_panel.assault_page += action[1]
+                    elif action[0] == 'action_cards':
+                        self.action_card_panel.open = True
+                    self.movement_error = None
+                except ValueError as error:
+                    self.movement_error = str(error)
+            return
+        if button == arcade.MOUSE_BUTTON_LEFT and self.action_card_button_hit and \
+                self.action_card_button_hit[0] <= x <= self.action_card_button_hit[1] and \
+                self.action_card_button_hit[2] <= y <= self.action_card_button_hit[3]:
+            self.action_card_panel.open = True
             return
         if button == arcade.MOUSE_BUTTON_LEFT and self.inspector_toggle_hit and all((
                 self.inspector_toggle_hit[0] <= x <= self.inspector_toggle_hit[1],
@@ -1576,37 +1771,6 @@ class BoardWindow(arcade.Window):
             return
         if self.token_context and self.token_context[0] != self.selected:
             self.token_context = None
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection', 'assault_choice'):
-            if self.combat_panel.drag_header(x, y):
-                self.dragging_modal = 'combat'
-                return
-            action = self.combat_panel.hit_test(x, y)
-            if action:
-                try:
-                    if action[0] == 'assign_hit':
-                        self.movement.assign_combat_hit(action[1], action[2])
-                    elif action[0] == 'spend_munitions':
-                        self.movement.spend_munitions(action[1])
-                    elif action[0] == 'reroll_die':
-                        self.movement.toggle_combat_reroll(action[1], action[2])
-                    elif action[0] == 'reroll_dice':
-                        self.movement.reroll_selected_combat_dice(action[1])
-                    elif action[0] == 'advance':
-                        self.movement.advance_combat()
-                    elif action[0] == 'announce_retreat':
-                        self.movement.announce_retreat()
-                    elif action[0] == 'retreat_to':
-                        self.movement.resolve_retreat(action[1])
-                        self.movement_panel.reset()
-                    elif action[0] == 'assault_victim':
-                        self.movement.choose_assault_victim(action[1])
-                        self.combat_panel.assault_page = 0
-                    elif action[0] == 'assault_page':
-                        self.combat_panel.assault_page += action[1]
-                    self.movement_error = None
-                except MovementError as error:
-                    self.movement_error = str(error)
-            return
         left = self.width - self.sidebar
         if self.movement.session:
             if self.movement.session.stage == 'production' and y < self.player_panel.HEIGHT:
@@ -1620,11 +1784,16 @@ class BoardWindow(arcade.Window):
                 action = self.movement_panel.hit_test(x, y)
                 if action:
                     try:
-                        if action[0] == 'unit':
+                        if action[0] == 'timeline':
+                            self.movement_panel.timeline_expanded = not self.movement_panel.timeline_expanded
+                            self.movement_panel.scroll = 0
+                        elif action[0] == 'unit':
                             self.movement.session.toggle(action[1])
                             self.movement_error = None
                         elif action[0] == 'spatial_conduit':
                             self.movement.use_spatial_conduit()
+                        elif action[0] == 'action_cards':
+                            self.action_card_panel.open = True
                         elif action[0] == 'confirm':
                             self.movement.confirm()
                             self.movement_error = None
@@ -1716,6 +1885,7 @@ class BoardWindow(arcade.Window):
                     self.turn_order.begin_strategy_phase()
                     self.strategy_view = True
                 self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
+                self.frame_player_systems(self.turn_order.active_player)
                 self.player_panel.source_pool = None
                 self.player_panel.card_offset = 0
             return
@@ -1726,9 +1896,6 @@ class BoardWindow(arcade.Window):
         if self.control_toggle_hit and self.control_toggle_hit[0] <= x <= self.control_toggle_hit[1] and \
                 self.control_toggle_hit[2] <= y <= self.control_toggle_hit[3]:
             self.show_planet_control = not self.show_planet_control
-            return
-        if left - 225 <= x <= left - 118 and self.height - 56 <= y <= self.height - 24:
-            self.toggle_focus()
             return
         if x >= left:
             if self.system_panel.technology_tab_hit and all((
@@ -1801,27 +1968,36 @@ class BoardWindow(arcade.Window):
                 self.last_click = (picked, now)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
-        if self.main_menu_visible:
+        if self.main_menu_visible or self.transaction_modal:
             return
-        if self.transaction_modal:
+        if (not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and
+                self.roster.WIDTH <= x < self.width - self.sidebar and
+                self.player_panel.HEIGHT <= y < self.height - 80):
+            scale = self.fit_scale * self.zoom
+            self.map_center[0] -= dx / scale
+            self.map_center[1] -= dy / scale
+            self.target_map_center[0] -= dx / scale
+            self.target_map_center[1] -= dy / scale
             return
         if self.dragging_modal:
             if buttons & arcade.MOUSE_BUTTON_LEFT:
-                panel = (self.strategy_panel if self.dragging_modal == 'strategy' else
-                         self.technology_panel if self.dragging_modal == 'technology' else self.combat_panel)
-                panel.move(dx, dy)
-                if self.dragging_modal == 'strategy':
+                if self.dragging_modal == 'strategy_card':
+                    self.strategy_panel.move_card(dx, dy)
+                else:
+                    panel = (self.strategy_panel if self.dragging_modal == 'strategy' else
+                             self.technology_panel if self.dragging_modal == 'technology' else self.combat_panel)
+                    panel.move(dx, dy)
+                if self.dragging_modal in ('strategy', 'strategy_card'):
                     self.strategy_panel.update_hover(x, y)
                     self.strategy_hover_system = self.strategy_panel.hover_system
             else:
                 self.dragging_modal = None
             return
-        if self.strategy_modal or self.technology_modal or x < self.roster.WIDTH:
+        if (self.strategy_modal or self.technology_modal or
+                (self.movement.session and self.movement.session.stage in
+                 ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice')) or
+                x < self.roster.WIDTH):
             return
-        if not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and x < self.width - self.sidebar and y >= self.player_panel.HEIGHT:
-            scale = self.fit_scale * self.zoom
-            self.map_center[0] -= dx / scale
-            self.map_center[1] -= dy / scale
 
     def on_mouse_release(self, x, y, button, modifiers):
         if button == arcade.MOUSE_BUTTON_LEFT:
@@ -1834,6 +2010,8 @@ class BoardWindow(arcade.Window):
             return
         if self.technology_modal:
             self.technology_panel.scroll_by(-scroll_y)
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection'):
+            self.combat_panel.scroll_by(x, -scroll_y * 42)
             return
         if self.strategy_modal:
             self.strategy_panel.page = max(0, self.strategy_panel.page - int(scroll_y))

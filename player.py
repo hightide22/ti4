@@ -38,6 +38,7 @@ class PlayerState:
     trade_goods: int = 0
     commodities: int = 0
     pending_commands: int = 0
+    action_cards: list[str] = field(default_factory=list)
     command_pools: dict[str, int] = field(default_factory=lambda: {
         'tactical': 3, 'fleet': 3, 'strategic': 2})
     technologies: frozenset[str] = frozenset()
