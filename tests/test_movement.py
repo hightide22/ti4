@@ -229,6 +229,153 @@ class MovementTests(unittest.TestCase):
         self.assertIn(infantry, self.home.units)
         self.assertNotIn('sol', self.target.command_tokens)
 
+    def test_unupgraded_fighters_without_capacity_must_be_destroyed_after_movement(self):
+        self.target.units.clear()
+        fighters = [Unit(f'capacity-fighter-{index}', 'fighter', 'sol', self.player.color_code,
+                         UnitLocation(Region.SPACE)) for index in range(2)]
+        self.target.units.extend(fighters)
+        session = self.controller.activate(self.player, self.target.position)
+
+        self.controller.confirm()
+
+        self.assertEqual(session.stage, 'capacity_overflow')
+        self.assertEqual(session.capacity_required, 2)
+        self.assertEqual({unit.unit_id for unit in self.controller.capacity_overflow_units(
+            self.target, 'sol')}, {unit.unit_id for unit in fighters})
+        for unit in fighters:
+            self.controller.toggle_capacity_overflow_unit(unit.unit_id)
+        self.controller.resolve_capacity_overflow()
+        self.assertNotIn(session.stage, ('capacity_overflow', 'fleet_overflow'))
+        self.assertFalse(any(unit.kind == 'fighter' and unit.owner == 'sol'
+                             for unit in self.target.units))
+
+    def test_transported_infantry_and_fighters_share_capacity_but_planet_forces_do_not(self):
+        self.target.units.clear()
+        carrier = Unit('capacity-test-carrier', 'carrier', 'sol', self.player.color_code,
+                       UnitLocation(Region.SPACE))
+        fighters = [Unit(f'capacity-test-fighter-{index}', 'fighter', 'sol', self.player.color_code,
+                         UnitLocation(Region.SPACE)) for index in range(7)]
+        aboard = Unit('capacity-test-infantry-aboard', 'infantry', 'sol', self.player.color_code,
+                      UnitLocation(Region.TRANSPORT, carrier_id=carrier.unit_id))
+        planet_force = Unit('capacity-test-infantry-planet', 'infantry', 'sol', self.player.color_code,
+                            UnitLocation(Region.PLANET, planet_id=self.home.planets[0].planet_id))
+        self.target.units.extend([carrier, *fighters, aboard, planet_force])
+        session = self.controller.activate(self.player, self.target.position)
+
+        self.controller.confirm()
+
+        self.assertEqual(session.stage, 'capacity_overflow')
+        self.assertEqual(session.capacity_required, 2)
+        self.assertNotIn(planet_force, self.controller.capacity_overflow_units(self.target, 'sol'))
+        self.controller.toggle_capacity_overflow_unit(aboard.unit_id)
+        self.controller.toggle_capacity_overflow_unit(fighters[0].unit_id)
+        self.controller.resolve_capacity_overflow()
+        self.assertNotIn(aboard, self.target.units)
+        self.assertNotIn(fighters[0], self.target.units)
+        self.assertIn(planet_force, self.target.units)
+
+    def test_departing_capacity_ship_triggers_check_in_the_origin_system(self):
+        self.home.units.clear()
+        self.target.units.clear()
+        carrier = Unit('departing-capacity-carrier', 'carrier', 'sol', self.player.color_code,
+                       UnitLocation(Region.SPACE))
+        fighters = [Unit(f'origin-capacity-fighter-{index}', 'fighter', 'sol', self.player.color_code,
+                         UnitLocation(Region.SPACE)) for index in range(carrier.capacity)]
+        self.home.units.extend([carrier, *fighters])
+        session = self.controller.activate(self.player, self.target.position)
+        session.toggle(carrier.unit_id)
+
+        self.controller.confirm()
+
+        self.assertEqual(session.stage, 'capacity_overflow')
+        self.assertEqual(session.capacity_position, self.home.position)
+        self.assertEqual(session.capacity_required, len(fighters))
+        self.controller.cancel()
+
+    def test_fighter_ii_over_capacity_uses_fleet_supply_instead_of_capacity_overflow(self):
+        self.target.units.clear()
+        self.player.technologies = self.player.technologies | {'ff2'}
+        self.player.command_pools['fleet'] = 4
+        carrier = Unit('fighter-ii-carrier', 'carrier', 'sol', self.player.color_code,
+                       UnitLocation(Region.SPACE))
+        fighters = [Unit(f'fighter-ii-{index}', 'fighter', 'sol', self.player.color_code,
+                         UnitLocation(Region.SPACE)) for index in range(10)]
+        self.target.units.extend([carrier, *fighters])
+        session = self.controller.activate(self.player, self.target.position)
+
+        self.controller.confirm()
+
+        self.assertEqual(self.controller.capacity_overflow(self.target, 'sol'), 0)
+        self.assertEqual(session.stage, 'fleet_overflow')
+        self.assertEqual(session.overflow_required, 1)
+        self.assertTrue(any(unit.kind == 'fighter' for unit in self.controller.fleet_ships(session)))
+        fighter_to_remove = next(unit for unit in self.controller.fleet_ships(session)
+                                 if unit.kind == 'fighter')
+        self.controller.toggle_overflow_ship(fighter_to_remove.unit_id)
+        self.controller.resolve_fleet_overflow()
+        self.assertNotIn(fighter_to_remove, self.target.units)
+        self.assertNotEqual(session.stage, 'capacity_overflow')
+
+    def test_space_dock_provides_three_fighter_capacity_without_capacity_for_infantry(self):
+        self.target.units.clear()
+        dock = Unit('fighter-capacity-dock', 'spacedock', 'sol', self.player.color_code,
+                    UnitLocation(Region.PLANET, planet_id=self.home.planets[0].planet_id))
+        fighters = [Unit(f'dock-fighter-{index}', 'fighter', 'sol', self.player.color_code,
+                         UnitLocation(Region.SPACE)) for index in range(4)]
+        self.target.units.extend([dock, *fighters])
+        session = self.controller.activate(self.player, self.target.position)
+
+        self.controller.confirm()
+
+        self.assertEqual(self.controller.capacity_overflow(self.target, 'sol'), 1)
+        self.assertEqual(session.stage, 'capacity_overflow')
+        self.assertEqual(session.capacity_required, 1)
+
+    def test_fighter_production_checks_capacity_before_finishing_activation(self):
+        self.home.units.clear()
+        planet = self.home.planets[0]
+        dock = Unit('production-capacity-dock', 'spacedock', 'sol', self.player.color_code,
+                    UnitLocation(Region.PLANET, planet_id=planet.planet_id))
+        self.home.units.append(dock)
+        self.player.trade_goods = 2
+        session = self.controller.activate(self.player, self.home.position)
+        self.controller.confirm()
+        self.controller.establish_control()
+        self.assertEqual(session.stage, 'production')
+        session.production_choices['fighter'] = 4
+        self.controller.change_production_trade_goods(2)
+
+        self.controller.produce()
+
+        self.assertEqual(session.stage, 'capacity_overflow')
+        self.assertEqual(session.capacity_required, 1)
+        fighter = self.controller.capacity_overflow_units(self.home, 'sol')[0]
+        self.controller.toggle_capacity_overflow_unit(fighter.unit_id)
+        self.controller.resolve_capacity_overflow()
+        self.assertIsNone(self.controller.session)
+        self.assertEqual(sum(unit.kind == 'fighter' and unit.owner == 'sol'
+                             for unit in self.home.units), 3)
+
+    def test_capacity_is_rechecked_after_space_combat_destroys_capacity_ship(self):
+        self.target.units.clear()
+        carrier = Unit('combat-capacity-carrier', 'carrier', 'sol', self.player.color_code,
+                       UnitLocation(Region.SPACE))
+        fighters = [Unit(f'combat-capacity-fighter-{index}', 'fighter', 'sol', self.player.color_code,
+                         UnitLocation(Region.SPACE)) for index in range(2)]
+        enemy = Unit('combat-capacity-enemy', 'cruiser', 'hacan', 'ylw', UnitLocation(Region.SPACE))
+        self.target.units.extend([carrier, *fighters, enemy])
+        session = self.controller.activate(self.player, self.target.position)
+        session.combat_type = 'space'
+        session.combat_factions = ('sol', 'hacan')
+        session.stage = 'combat_end'
+        self.target.units.remove(carrier)
+        self.target.units.remove(enemy)
+
+        self.controller._finish_combat_round(session)
+
+        self.assertEqual(session.stage, 'capacity_overflow')
+        self.assertEqual(session.capacity_required, 2)
+
     def test_space_combat_rolls_hits_sustains_damage_and_destroys_carrier_cargo(self):
         self.player.command_pools['fleet'] = 6
         defender = Unit('hacan-test-dread', 'dreadnought', 'hacan', 'ylw', UnitLocation(Region.SPACE))
@@ -316,11 +463,12 @@ class MovementTests(unittest.TestCase):
         self.assertNotIn(carrier, self.target.units)
         self.assertEqual(session.stage, 'invasion')
 
-    def test_anti_fighter_barrage_rolls_once_and_can_end_space_combat(self):
+    def test_anti_fighter_barrage_rolls_once_before_space_combat(self):
         destroyer = next(unit for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'destroyer')
+        enemy_carrier = Unit('hacan-afb-carrier', 'carrier', 'hacan', 'ylw', UnitLocation(Region.SPACE))
         enemy_fighters = [Unit(f'hacan-afb-fighter-{index}', 'fighter', 'hacan', 'ylw',
                                UnitLocation(Region.SPACE)) for index in range(2)]
-        self.target.units.extend(enemy_fighters)
+        self.target.units.extend([enemy_carrier, *enemy_fighters])
         session = self.controller.activate(self.player, self.target.position)
         session.toggle(destroyer.unit_id)
 
@@ -330,8 +478,8 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(len(session.afb_rolls['sol']), 2)
         self.assertTrue(all(unit not in self.target.units for unit in enemy_fighters))
         self.assertTrue(session.afb_resolved)
-        self.assertTrue(session.space_combat_resolved)
-        self.assertEqual(session.stage, 'invasion')
+        self.assertFalse(session.space_combat_resolved)
+        self.assertEqual(session.stage, 'space_combat')
 
     def test_retreat_can_use_system_with_own_token_without_spending_another(self):
         destroyer = next(unit for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'destroyer')

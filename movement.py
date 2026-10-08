@@ -109,6 +109,19 @@ class SessionCheckpoint:
         session.stage = self.stage
         session.landings = dict(self.landings)
         session.outcome = ''
+        session.capacity_required = 0
+        session.capacity_selected.clear()
+        session.capacity_position = None
+        session.capacity_faction = None
+        session.capacity_queue.clear()
+        session.capacity_next_stage = None
+        session.capacity_affected.clear()
+        session.fleet_queue.clear()
+        session.overflow_required = 0
+        session.overflow_selected.clear()
+        session.overflow_position = None
+        session.overflow_faction = None
+        session.overflow_next_stage = None
         if self.stage == 'invasion':
             session.landed_planets.clear()
             session.captured_planets.clear()
@@ -180,6 +193,16 @@ class Session:
     overflow_required: int = 0
     overflow_selected: set[str] = field(default_factory=set)
     overflow_next_stage: str | None = None
+    overflow_position: tuple | None = None
+    overflow_faction: str | None = None
+    capacity_required: int = 0
+    capacity_selected: set[str] = field(default_factory=set)
+    capacity_position: tuple | None = None
+    capacity_faction: str | None = None
+    capacity_queue: list[tuple[tuple, str]] = field(default_factory=list)
+    capacity_next_stage: str | None = None
+    capacity_affected: list[tuple[tuple, str]] = field(default_factory=list)
+    fleet_queue: list[tuple[tuple, str]] = field(default_factory=list)
     production_limit: int = 0
     production_sites: list[tuple[str, int]] = field(default_factory=list)
     production_choices: dict[str, int] = field(default_factory=dict)
@@ -633,11 +656,9 @@ class MovementController:
                             if session.target.planets else {})
         next_stage = ('space_combat' if self.hostile_space_factions(session.target, session.player.faction)
                       else 'invasion')
-        moved_ships = any(session.ships(source) for source in session.sources.values())
-        if moved_ships:
-            self._check_fleet_limit(session, next_stage)
-        else:
-            self.continue_after_movement(session, next_stage)
+        affected = [(origin.position, session.player.faction) for origin, _, _ in transfers]
+        affected.append((session.target.position, session.player.faction))
+        self._check_capacity_and_fleet(session, affected, next_stage)
         return len(transfers)
 
     @staticmethod
@@ -646,37 +667,137 @@ class MovementController:
                              if unit.owner != faction and unit.location.region == Region.SPACE and
                              UNIT_TYPES[unit.kind]['ship']}))
 
+    def _capacity_units(self, tile, faction):
+        return [unit for unit in tile.units if unit.owner == faction and
+                ((unit.kind == 'fighter' and unit.location.region in (Region.SPACE, Region.TRANSPORT)) or
+                 (unit.kind == 'infantry' and unit.location.region == Region.TRANSPORT))]
+
+    def _capacity_value(self, tile, faction):
+        return sum(unit.capacity for unit in tile.units if unit.owner == faction and
+                   unit.location.region == Region.SPACE and capital_ship(unit))
+
+    def _fighter_ii(self, unit):
+        player = self.faction_player(unit.owner)
+        return unit.kind == 'fighter' and player is not None and 'ff2' in player.technologies
+
+    def capacity_overflow_units(self, tile, faction):
+        """Return basic fighters and transported ground forces eligible to destroy."""
+        return [unit for unit in self._capacity_units(tile, faction)
+                if not (unit.kind == 'fighter' and unit.location.region == Region.SPACE and
+                        self._fighter_ii(unit))]
+
+    def _capacity_accounting(self, tile, faction):
+        units = self._capacity_units(tile, faction)
+        capacity = self._capacity_value(tile, faction)
+        ground_forces = sum(cargo_cost(unit) for unit in units if unit.kind == 'infantry')
+        base_fighters = [unit for unit in units if unit.kind == 'fighter' and
+                         not self._fighter_ii(unit)]
+        fighter_ii_in_space = sorted((unit for unit in units if unit.kind == 'fighter' and
+                                      unit.location.region == Region.SPACE and self._fighter_ii(unit)),
+                                     key=lambda unit: unit.unit_id)
+        fighter_ii_transported = [unit for unit in units if unit.kind == 'fighter' and
+                                  unit.location.region == Region.TRANSPORT and self._fighter_ii(unit)]
+        dock_slots = 3 * sum(unit.owner == faction and unit.kind == 'spacedock'
+                             for unit in tile.units)
+        free_base = min(dock_slots, len(base_fighters))
+        remaining_dock_slots = max(0, dock_slots - free_base)
+        free_transported_fighter_ii = min(remaining_dock_slots, len(fighter_ii_transported))
+        remaining_dock_slots -= free_transported_fighter_ii
+        free_space_fighter_ii = min(remaining_dock_slots, len(fighter_ii_in_space))
+        used = (ground_forces + len(base_fighters) - free_base + len(fighter_ii_transported) -
+                free_transported_fighter_ii + len(fighter_ii_in_space) - free_space_fighter_ii)
+        eligible_fighter_ii = fighter_ii_in_space[free_space_fighter_ii:]
+        excess_count = max(0, used - capacity)
+        fleet_fighter_count = min(len(eligible_fighter_ii), excess_count)
+        return {
+            'capacity': capacity,
+            'used': used,
+            'fleet_fighter_ids': [unit.unit_id for unit in eligible_fighter_ii[:fleet_fighter_count]],
+            'overflow': max(0, excess_count - fleet_fighter_count),
+        }
+
+    def capacity_overflow(self, tile, faction):
+        return self._capacity_accounting(tile, faction)['overflow']
+
+    def _fleet_ships_at(self, tile, faction):
+        ships = [unit for unit in tile.units if unit.owner == faction and
+                 unit.location.region == Region.SPACE and capital_ship(unit)]
+        accounting = self._capacity_accounting(tile, faction)
+        fighters = {unit.unit_id: unit for unit in tile.units}
+        return ships + [fighters[unit_id] for unit_id in accounting['fleet_fighter_ids']]
+
     def fleet_ships(self, session):
-        return [unit for unit in session.target.units if unit.owner == session.player.faction and
-                unit.location.region == Region.SPACE and
-                (capital_ship(unit) or (unit.kind == 'fighter' and
-                                        'ff2' in session.player.technologies))]
+        tile = self.board.get(session.overflow_position) if session.overflow_position else session.target
+        faction = session.overflow_faction or session.player.faction
+        return self._fleet_ships_at(tile, faction)
 
     def fleet_ship_count(self, session):
-        ships = self.fleet_ships(session)
-        capital = [unit for unit in ships if unit.kind != 'fighter']
-        if 'ff2' not in session.player.technologies:
-            return len(capital)
-        fighters = len(ships) - len(capital)
-        aboard = sum(cargo_cost(unit) for unit in session.target.units
-                     if unit.owner == session.player.faction and
-                     unit.location.region == Region.TRANSPORT)
-        docks = sum(unit.owner == session.player.faction and unit.kind == 'spacedock'
-                    for unit in session.target.units)
-        free_capacity = max(0, sum(unit.capacity for unit in capital) - aboard) + 3 * docks
-        return len(capital) + max(0, fighters - free_capacity)
+        return len(self.fleet_ships(session))
 
-    def _check_fleet_limit(self, session, next_stage):
-        excess = max(0, self.fleet_ship_count(session) - self.fleet_supply(session.player))
-        if excess:
+    def _check_capacity_and_fleet(self, session, affected, next_stage):
+        unique = []
+        for position, faction in affected:
+            key = (position, faction)
+            if key not in unique and position in self.board:
+                unique.append(key)
+        session.capacity_affected = unique
+        session.capacity_next_stage = next_stage
+        session.overflow_next_stage = next_stage
+        session.capacity_queue = list(unique)
+        session.fleet_queue = []
+        self._advance_capacity_checks(session)
+
+    def _advance_capacity_checks(self, session):
+        while session.capacity_queue:
+            position, faction = session.capacity_queue.pop(0)
+            tile = self.board[position]
+            required = self.capacity_overflow(tile, faction)
+            if not required:
+                continue
+            session.capacity_position = position
+            session.capacity_faction = faction
+            session.capacity_required = required
+            session.capacity_selected.clear()
+            session.stage = 'capacity_overflow'
+            return
+        session.capacity_position = None
+        session.capacity_faction = None
+        session.capacity_required = 0
+        session.capacity_selected.clear()
+        session.fleet_queue = list(session.capacity_affected)
+        self._advance_fleet_checks(session)
+
+    def _advance_fleet_checks(self, session):
+        while session.fleet_queue:
+            position, faction = session.fleet_queue.pop(0)
+            tile = self.board[position]
+            player = self.faction_player(faction)
+            if player is None:
+                continue
+            session.overflow_position = position
+            session.overflow_faction = faction
+            excess = max(0, len(self._fleet_ships_at(tile, faction)) - self.fleet_supply(player))
+            if not excess:
+                continue
             session.stage = 'fleet_overflow'
             session.overflow_required = excess
             session.overflow_selected.clear()
-            session.overflow_next_stage = next_stage
-        elif next_stage in ('invasion', 'space_combat'):
+            return
+        session.overflow_position = None
+        session.overflow_faction = None
+        session.overflow_required = 0
+        session.overflow_selected.clear()
+        self._continue_after_limits(session, session.capacity_next_stage)
+
+    def _continue_after_limits(self, session, next_stage):
+        if next_stage in ('invasion', 'space_combat'):
             self.continue_after_movement(session, next_stage)
         elif next_stage == 'integrated_continue':
             self.advance_integrated_production(session)
+        elif next_stage == 'after_cannon':
+            self._finish_after_space_cannon(session)
+        elif next_stage in ('after_combat', 'after_retreat'):
+            self.prepare_invasion(session)
         else:
             session.stage = 'complete'
             self.finish()
@@ -703,6 +824,14 @@ class MovementController:
             session.space_cannon_direct_hit = None
         if session.space_cannon_events and not self.resolve_space_cannon_hits(session):
             return
+        factions = {unit.owner for unit in session.target.units
+                    if unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']}
+        factions.add(session.player.faction)
+        self._check_capacity_and_fleet(
+            session, [(session.target.position, faction) for faction in sorted(factions)],
+            'after_cannon')
+
+    def _finish_after_space_cannon(self, session):
         next_stage = session.space_cannon_next_stage or 'invasion'
         if next_stage == 'space_combat' and self.hostile_space_factions(
                 session.target, session.player.faction) and self.combat_units(session, session.player.faction):
@@ -912,7 +1041,10 @@ class MovementController:
             destination.command_tokens.add(session.retreat_announced)
         session.retreat_log = f'{session.retreat_announced.upper()} retreated to tile {destination.system_id}.'
         session.space_combat_resolved = True
-        self.prepare_invasion(session)
+        factions = {session.retreat_announced, *session.combat_factions}
+        affected = [(tile.position, faction) for tile in (session.target, destination)
+                    for faction in factions]
+        self._check_capacity_and_fleet(session, affected, 'after_retreat')
 
     def has_planetary_shield(self, tile):
         session = self.session if self.session and self.session.target is tile else None
@@ -1039,31 +1171,55 @@ class MovementController:
         elif len(session.overflow_selected) < session.overflow_required:
             session.overflow_selected.add(unit_id)
 
+    def toggle_capacity_overflow_unit(self, unit_id):
+        session = self.session
+        if not session or session.stage != 'capacity_overflow':
+            raise MovementError('Capacity is not being checked')
+        tile = self.board[session.capacity_position]
+        eligible = {unit.unit_id for unit in self.capacity_overflow_units(tile, session.capacity_faction)}
+        if unit_id not in eligible:
+            raise MovementError('This unit does not exceed capacity')
+        if unit_id in session.capacity_selected:
+            session.capacity_selected.remove(unit_id)
+        elif len(session.capacity_selected) < session.capacity_required:
+            session.capacity_selected.add(unit_id)
+
+    def resolve_capacity_overflow(self):
+        session = self.session
+        if not session or session.stage != 'capacity_overflow':
+            raise MovementError('Capacity is not being checked')
+        if len(session.capacity_selected) != session.capacity_required:
+            raise MovementError(f'Select exactly {session.capacity_required} fighters or ground forces to destroy')
+        tile = self.board[session.capacity_position]
+        selected = set(session.capacity_selected)
+        for unit in list(tile.units):
+            if unit.unit_id in selected:
+                tile.units.remove(unit)
+        session.capacity_required = 0
+        session.capacity_selected.clear()
+        session.capacity_position = None
+        session.capacity_faction = None
+        self._advance_capacity_checks(session)
+
     def resolve_fleet_overflow(self):
         session = self.session
         if not session or session.stage != 'fleet_overflow':
             raise MovementError('Fleet limit is not being checked')
         if len(session.overflow_selected) != session.overflow_required:
-            raise MovementError(f'Select exactly {session.overflow_required} ships to destroy')
+            raise MovementError(f'Select exactly {session.overflow_required} ships or fighters to destroy')
         destroyed = set(session.overflow_selected)
-        for unit in list(session.target.units):
+        tile = self.board[session.overflow_position]
+        for unit in list(tile.units):
             if unit.unit_id in destroyed or (
                     unit.location.region == Region.TRANSPORT and unit.location.carrier_id in destroyed):
-                session.target.units.remove(unit)
-        next_stage = session.overflow_next_stage
+                tile.units.remove(unit)
+        next_stage = session.capacity_next_stage
         session.overflow_required = 0
         session.overflow_selected.clear()
-        if self.fleet_ship_count(session) > self.fleet_supply(session.player):
-            session.overflow_required = self.fleet_ship_count(session) - self.fleet_supply(session.player)
-            return
+        session.overflow_position = None
+        session.overflow_faction = None
         session.overflow_next_stage = None
-        if next_stage in ('invasion', 'space_combat'):
-            self.continue_after_movement(session, next_stage)
-        elif next_stage == 'integrated_continue':
-            self.advance_integrated_production(session)
-        else:
-            session.stage = 'complete'
-            self.finish()
+        self._check_capacity_and_fleet(session, session.capacity_affected, next_stage)
 
     def start_combat(self, session):
         session.combat_type = 'space'
@@ -1128,7 +1284,9 @@ class MovementController:
             session.stage = 'space_combat'
         else:
             session.space_combat_resolved = True
-            self.prepare_invasion(session)
+            self._check_capacity_and_fleet(
+                session, [(session.target.position, faction) for faction in session.combat_factions],
+                'after_combat')
 
     def start_ground_combat(self, session, planet_id):
         session.combat_type = 'ground'
@@ -1323,7 +1481,9 @@ class MovementController:
                     for alias in player.action_cards):
                 session.stage = 'space_combat_won'
                 return
-            self.prepare_invasion(session)
+            self._check_capacity_and_fleet(
+                session, [(session.target.position, faction) for faction in session.combat_factions],
+                'after_combat')
         elif session.combat_type == 'space' and session.retreat_announced:
             session.stage = 'retreat_selection'
         else:
@@ -1338,7 +1498,9 @@ class MovementController:
         if not session or session.stage != 'space_combat_won':
             raise MovementError('Space combat has not been won.')
         session.space_combat_resolved = True
-        self.prepare_invasion(session)
+        self._check_capacity_and_fleet(
+            session, [(session.target.position, faction) for faction in session.combat_factions],
+            'after_combat')
 
     def production_sites(self, session):
         sites = []
@@ -1523,13 +1685,8 @@ class MovementController:
                                                  profile_id=(upgrade_profile(session.player, kind) or {}).get('id')))
         session.stage = 'complete'
         next_stage = 'integrated_continue' if session.integrated_current else 'complete'
-        if any(UNIT_TYPES[kind]['ship'] and (kind != 'fighter' or 'ff2' in session.player.technologies) and count
-               for kind, count in session.production_choices.items()):
-            self._check_fleet_limit(session, next_stage)
-        elif session.integrated_current:
-            self.advance_integrated_production(session)
-        else:
-            self.finish()
+        self._check_capacity_and_fleet(
+            session, [(session.target.position, session.player.faction)], next_stage)
 
     def skip_production(self):
         session = self.session

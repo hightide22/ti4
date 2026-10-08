@@ -106,17 +106,17 @@ class MovementPanel:
 
     def timeline(self, window, session, x, y, width):
         stage = session.stage
-        movement_done = stage != 'movement'
+        overflow_current = stage in ('fleet_overflow', 'capacity_overflow')
+        overflow_after_move = overflow_current and session.capacity_next_stage in ('invasion', 'space_combat')
+        overflow_after_production = overflow_current and session.capacity_next_stage in ('complete', 'integrated_continue')
+        movement_done = stage != 'movement' and not overflow_after_move
         invasion_done = stage == 'complete'
         ships_selected = any(session.ships(source) for source in session.sources.values())
         landing_assigned = any(planet_id is not None for planet_id in session.landings.values())
         has_forces = bool(session.landings)
         invasion_current = stage == 'invasion'
         ground_current = stage == 'ground_combat'
-        overflow_current = stage == 'fleet_overflow'
         production_current = stage == 'production'
-        overflow_after_move = overflow_current and session.overflow_next_stage == 'invasion'
-        overflow_after_production = overflow_current and session.overflow_next_stage == 'complete'
         has_production = bool(window.movement.production_sites(session))
         combat_current = stage in ('space_combat', 'retreat_selection')
         combat_resolved = session.space_combat_resolved
@@ -330,7 +330,8 @@ class MovementPanel:
                 window.text('fleet_overflow_title', 'FLEET LIMIT CHECK', x, y, 11, ACCENT)
                 y -= 20
                 window.text('fleet_overflow_count',
-                            f'Destroy {session.overflow_required} of {len(ships)} non-fighter ships',
+                            f'{session.overflow_faction.upper()} · destroy {session.overflow_required} '
+                            f'ship{"s" if session.overflow_required != 1 else ""}',
                             x, y, 10, MUTED, width)
                 y -= 27
                 for unit in ships:
@@ -346,6 +347,32 @@ class MovementPanel:
                     self.hits.append((('overflow', unit.unit_id), x, x + width, top - 35, top))
                     y -= 39
                 y -= 12
+            elif session.stage == 'capacity_overflow':
+                tile = window.movement.board[session.capacity_position]
+                units = window.movement.capacity_overflow_units(tile, session.capacity_faction)
+                window.text('capacity_overflow_title', 'FIGHTER CAPACITY', x, y, 11, ACCENT)
+                y -= 20
+                window.text('capacity_overflow_count',
+                            f'{session.capacity_faction.upper()} · system {tile.system_id} · destroy '
+                            f'{session.capacity_required} unit{"s" if session.capacity_required != 1 else ""}',
+                            x, y, 10, MUTED, width)
+                y -= 27
+                for unit in units:
+                    top = y
+                    selected = unit.unit_id in session.capacity_selected
+                    arcade.draw_lrbt_rectangle_filled(x, x + width, top - 35, top,
+                                                       SELECTED if selected else CARD)
+                    window.player_panel.image(f'units/{unit.color_code}_{UNIT_TYPES[unit.kind]["sprite"]}.png',
+                                              x + 17, top - 17, 23)
+                    label = 'Destroy' if selected else 'Keep'
+                    window.text(('capacity_unit', unit.unit_id),
+                                f'{UNIT_TYPES[unit.kind]["name"]} · {label}', x + 34, top - 12, 10, INK)
+                    self.hits.append((('capacity_overflow', unit.unit_id), x, x + width, top - 35, top))
+                    y -= 39
+                y -= 12
+                window.text('capacity_overflow_help',
+                            'Fighter II above capacity counts against fleet supply.', x, y, 9, MUTED, width)
+                y -= 19
             elif session.stage == 'production':
                 selected_cost = window.movement.production_cost(session)
                 paid = window.movement.production_payment(session)
@@ -422,7 +449,10 @@ class MovementPanel:
                    f'{window.movement.production_total(session)} units · Cost {amount(window.movement.production_cost(session))}'
                    if session.stage == 'production' else
                    f'{len(session.bombard_targets)} ships assigned to bombard' if session.stage == 'bombardment' else
-                   f'{session.overflow_required} ships to destroy' if session.stage == 'fleet_overflow' else
+                   f'{session.overflow_required} ship{"s" if session.overflow_required != 1 else ""} to destroy'
+                   if session.stage == 'fleet_overflow' else
+                   f'{session.capacity_required} unit{"s" if session.capacity_required != 1 else ""} to destroy'
+                   if session.stage == 'capacity_overflow' else
                    f'{landed} ground force{"s" if landed != 1 else ""} assigned to planet{"s" if landed != 1 else ""}')
         surface(x - 18, x + width + 18, 0, 153, PANEL, None)
         arcade.draw_line(x, 153, x + width, 153, BORDER, 1)
@@ -440,8 +470,15 @@ class MovementPanel:
                        ('cancel', 'Cancel', split, x + width, CARD))
         elif session.stage == 'fleet_overflow':
             ready = len(session.overflow_selected) == session.overflow_required
-            actions = (('resolve_overflow', f'Destroy {session.overflow_required} ships' if ready else
-                        f'Select {session.overflow_required} ships', x, split - 6, SELECTED),
+            noun = 'ship' if session.overflow_required == 1 else 'ships'
+            actions = (('resolve_overflow', f'Destroy {session.overflow_required} {noun}' if ready else
+                        f'Select {session.overflow_required} {noun}', x, split - 6, SELECTED),
+                       ('cancel', 'Cancel', split, x + width, CARD))
+        elif session.stage == 'capacity_overflow':
+            ready = len(session.capacity_selected) == session.capacity_required
+            noun = 'unit' if session.capacity_required == 1 else 'units'
+            actions = (('resolve_capacity_overflow', f'Destroy {session.capacity_required} {noun}' if ready else
+                        f'Select {session.capacity_required} {noun}', x, split - 6, SELECTED),
                        ('cancel', 'Cancel', split, x + width, CARD))
         elif session.stage == 'production':
             can_produce = bool(session.production_choices) and window.movement.production_payment(session) >= window.movement.production_cost(session)

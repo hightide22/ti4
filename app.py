@@ -1791,6 +1791,11 @@ class BoardWindow(arcade.Window):
                         elif action[0] == 'resolve_overflow':
                             self.movement.resolve_fleet_overflow()
                             self.movement_panel.reset()
+                        elif action[0] == 'capacity_overflow':
+                            self.movement.toggle_capacity_overflow_unit(action[1])
+                        elif action[0] == 'resolve_capacity_overflow':
+                            self.movement.resolve_capacity_overflow()
+                            self.movement_panel.reset()
                         elif action[0] == 'production_unit':
                             self.movement.adjust_production(action[1], action[2])
                         elif action[0] == 'production_trade_goods':

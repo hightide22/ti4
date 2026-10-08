@@ -114,6 +114,32 @@ def main():
         w.movement.cancel()
         w.movement_panel.reset()
 
+        # The fighter-capacity overflow must render its own selectable rows and
+        # keep selection state in sync with the real mouse handler.
+        capacity_units_before = list(target.units)
+        capacity_fighters = [Unit(f'preview-capacity-fighter-{index}', 'fighter', player.faction,
+                                  player.color_code, UnitLocation(Region.SPACE)) for index in range(4)]
+        target.units[:] = capacity_fighters
+        capacity_session = Session(player, target, {},
+                                   Snapshot.capture(w.board, player, w.player_panel.players))
+        capacity_session.stage = 'capacity_overflow'
+        capacity_session.capacity_position = target.position
+        capacity_session.capacity_faction = player.faction
+        capacity_session.capacity_required = 1
+        w.movement.session = capacity_session
+        w.selected = target.position
+        render('fighter-capacity-overflow')
+        capacity_hit = next(hit for hit in w.movement_panel.hits
+                            if hit[0] == ('capacity_overflow', capacity_fighters[0].unit_id))
+        w.on_mouse_press((capacity_hit[1] + capacity_hit[2]) / 2,
+                         (capacity_hit[3] + capacity_hit[4]) / 2,
+                         arcade.MOUSE_BUTTON_LEFT, 0)
+        assert capacity_fighters[0].unit_id in capacity_session.capacity_selected
+        render('fighter-capacity-selected')
+        w.movement.session = None
+        target.units[:] = capacity_units_before
+        w.movement_panel.reset()
+
         # Fixed dice values make wrapping and hit assignment repeatable.
         target = copy(target)
         target.units = []
@@ -152,7 +178,7 @@ def main():
         w.combat_panel.move(12, 8)
         render()
         assert len(w.labels) == label_count, 'Dragging must reuse dice labels'
-        print('PASS: compact source scrolling, hover routes, timeline expansion, dense dice and scrolled hit assignment', flush=True)
+        print('PASS: compact source scrolling, hover routes, capacity overflow selection, timeline expansion, dense dice and scrolled hit assignment', flush=True)
     finally:
         w.unit_renderer.layout_executor.shutdown(wait=True, cancel_futures=True)
         w.close()
