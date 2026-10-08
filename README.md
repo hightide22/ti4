@@ -22,6 +22,8 @@ Validation:
 
 The board opens in a maximized desktop window with its normal title bar and window controls. Fleet layouts are computed in the background so the board appears without waiting for every starting system to finish arranging its units. Players can activate systems and move ships and carried units. Assets are loaded from assets/source/asyncti4/src/main/resources. The source bundle includes other editions, but gameplay catalogs and maps expose base-game content only.
 
+At the new-game screen, choose the three- or four-player map and the factions in each seat. Check **PLAY AGAINST AI** and click your faction row; the other seats become computer opponents. Their draft, command allocation, strategy actions and secondaries, technology research, movement, invasions, combat hit assignment and production proceed automatically. Their choices use board position, available resources, transport capacity, fleet supply and enemy strength. A contested human planet receives 65% of the opponent-pressure weight and a bot-owned planet 35%; neutral expansion remains valuable. At the end of each full round, every player's remaining commodities become trade goods before command allocation and the next strategy draft. Run `scripts/ai_smoke.py --players 3` or `--players 4` for a two-round GUI smoke test.
+
 
 ## Tile objects and custom maps
 

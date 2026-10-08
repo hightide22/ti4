@@ -34,6 +34,7 @@ from technology import restore_infantry_on_cards
 
 from action_cards import ActionCardController
 from action_card_panel import ActionCardPanel
+from game_ai import GameAI
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -120,6 +121,7 @@ class BoardWindow(arcade.Window):
                                                  turn=self.turn_order)
         self.action_card_panel = ActionCardPanel()
         self.strategy = StrategyController(self.board, self.turn_order, self.movement, self.action_cards)
+        self.ai = GameAI(self, set())
         self.transaction = TransactionController(self.board, self.player_panel.players,
                                                 self.turn_order, self.movement)
         self.transaction_panel = TransactionPanel()
@@ -145,6 +147,10 @@ class BoardWindow(arcade.Window):
         count = self.main_menu.player_count
         map_path = ROOT / ('maps/three_player.json' if count == 3 else 'maps/four_player.json')
         self.configure_game(map_path, self.main_menu.active_factions)
+        if self.main_menu.vs_ai:
+            human = self.main_menu.active_factions[self.main_menu.human_slot]
+            self.ai.bot_factions = {faction for faction in self.main_menu.active_factions
+                                    if faction != human}
         self.main_menu_visible = False
 
     @property
@@ -647,6 +653,8 @@ class BoardWindow(arcade.Window):
         if round_complete:
             self.clear_round_tokens()
             for player in self.turn_order.players:
+                player.trade_goods += player.commodities
+                player.commodities = 0
                 player.receive_round_commands()
                 for card in player.planets:
                     card.exhausted = False
@@ -920,6 +928,8 @@ class BoardWindow(arcade.Window):
             shift = (self.target_map_center[axis] - self.map_center[axis]) * min(1, delta_time * 7)
             self.map_center[axis] += shift
         self.frames += 1
+        if self.ai.bot_factions and not self.smoke:
+            self.ai.update(delta_time)
         if self.technology_smoke_test and self.frames == 3:
             preview_dir = ROOT / 'previews'
             preview_dir.mkdir(exist_ok=True)
@@ -1575,11 +1585,44 @@ class BoardWindow(arcade.Window):
                 if action:
                     if action[0] == 'map':
                         self.main_menu.player_count = action[1]
+                        self.main_menu.human_slot = min(self.main_menu.human_slot, action[1] - 1)
                     elif action[0] == 'faction':
                         self.main_menu.select_faction(action[1], action[2])
+                    elif action[0] == 'toggle_ai':
+                        self.main_menu.vs_ai = not self.main_menu.vs_ai
+                    elif action[0] == 'human_slot' and self.main_menu.vs_ai:
+                        self.main_menu.human_slot = action[1]
                     elif action[0] == 'start':
                         self.start_from_menu()
             return
+        if self.ai.bot_factions and not self.smoke:
+            turn = self.turn_order
+            if ((turn.strategy_selection or turn.command_allocation) and self.ai.is_bot(turn.active_player)):
+                return
+            if self.strategy.session and self.ai.is_bot(self.strategy.player) and not self.movement.session:
+                return
+            if self.movement.session and self.ai.is_bot(self.movement.session.player):
+                combat_stage = self.movement.session.stage in (
+                    'space_combat', 'ground_combat', 'combat_end', 'retreat_selection',
+                    'assault_choice', 'space_combat_won')
+                human_card = any(not self.ai.is_bot(player) for player in
+                                 self.action_cards.participants(self.movement.session))
+                card_button = (self.action_card_button_hit and
+                               self.action_card_button_hit[0] <= x <= self.action_card_button_hit[1] and
+                               self.action_card_button_hit[2] <= y <= self.action_card_button_hit[3])
+                if not combat_stage and not (human_card and (self.action_card_panel.open or card_button)):
+                    return
+                if combat_stage and not self.action_card_panel.open:
+                    response = self.combat_panel.hit_test(x, y)
+                    allowed = bool(response and (
+                        (response[0] in ('action_cards', 'advance') and human_card) or
+                        (response[0] in ('assign_hit', 'spend_munitions', 'reroll_die',
+                                         'reroll_dice', 'fire_team_die', 'fire_team_resolve') and
+                         len(response) > 1 and response[1] not in self.ai.bot_factions)))
+                    if not allowed:
+                        return
+            elif not self.movement.session and not self.strategy.session and self.ai.is_bot(turn.active_player):
+                return
         self.sync_turn_action()
         if self.transaction_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
@@ -1629,6 +1672,8 @@ class BoardWindow(arcade.Window):
                     player = next((p for p in participants
                                    if p and p.faction == self.action_card_panel.player_faction),
                                   participants[0])
+                    if self.ai.is_bot(player):
+                        return
                     try:
                         self.action_cards.play(player, action[1])
                         self.movement_error = None
@@ -1663,6 +1708,8 @@ class BoardWindow(arcade.Window):
             if action:
                 try:
                     if action[0] == 'assign_hit':
+                        if action[1] in self.ai.bot_factions:
+                            return
                         self.movement.assign_combat_hit(action[1], action[2])
                     elif action[0] == 'spend_munitions':
                         self.movement.spend_munitions(action[1])
@@ -2019,6 +2066,9 @@ class BoardWindow(arcade.Window):
         if self.main_menu_visible:
             if symbol in (arcade.key.ENTER, arcade.key.RETURN):
                 self.start_from_menu()
+            return
+        if (self.ai.bot_factions and symbol == arcade.key.Z and modifiers & arcade.key.MOD_CTRL and
+                self.ai.is_bot(self.turn_order.active_player)):
             return
         self.sync_turn_action()
         if self.transaction_modal:

@@ -95,6 +95,8 @@ class PlayerRoster:
                 arcade.draw_lrbt_rectangle_outline(8, self.WIDTH - 8, row_bottom, row_top,
                                                   GOLD if resolving else ACCENT, 1)
             tag = ' · PASSED' if index in w.turn_order.passed_indices else ' · ACTIVE' if active else ''
+            if w.ai.bot_factions:
+                tag += ' · AI' if player.faction in w.ai.bot_factions else ' · YOU'
             w.text(('roster_name', index), player.faction.upper() + tag, 17, row_top - 17, 10, INK)
             w.player_panel.image(f'factions/{player.faction}.png', 34, row_top - 55, 35)
             self.hits.append((('player', index), 8, self.WIDTH - 8, row_bottom, row_top))

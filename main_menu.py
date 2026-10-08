@@ -30,6 +30,8 @@ class MainMenu:
     def __init__(self):
         self.player_count = 3
         self.factions = ['sol', 'jolnar', 'hacan', 'letnev']
+        self.vs_ai = False
+        self.human_slot = 0
         self.hits = []
         self.textures = {}
 
@@ -72,7 +74,7 @@ class MainMenu:
     def draw(self, window):
         self.hits.clear()
         width = min(920, window.width - 36)
-        height = min(760, window.height - 36)
+        height = min(680, window.height - 36)
         left, bottom = (window.width - width) / 2, (window.height - height) / 2
         top = bottom + height
         arcade.draw_lrbt_rectangle_filled(0, window.width, 0, window.height, (5, 10, 18))
@@ -113,8 +115,9 @@ class MainMenu:
             top_y = row_top - slot * (row_height + row_gap)
             row_bottom = top_y - row_height
             active = slot < self.player_count
-            background = CARD if active else (15, 23, 35)
-            outline = (51, 76, 99) if active else (35, 45, 59)
+            human = active and self.vs_ai and slot == self.human_slot
+            background = (27, 58, 73) if human else CARD if active else (15, 23, 35)
+            outline = ACCENT if human else (51, 76, 99) if active else (35, 45, 59)
             arcade.draw_lrbt_rectangle_filled(left + 30, left + 30 + row_width,
                                                row_bottom, top_y, background)
             arcade.draw_lrbt_rectangle_outline(left + 30, left + 30 + row_width,
@@ -122,8 +125,9 @@ class MainMenu:
             if active:
                 alias = self.factions[slot]
                 self._image(FACTION_ICONS[alias], left + 63, row_bottom + row_height / 2, 36)
-                window.text(('menu_player_slot', slot), f'PLAYER {slot + 1}', left + 93,
-                            top_y - 18, 8, MUTED)
+                role = ('YOU' if slot == self.human_slot else 'AI') if self.vs_ai else f'PLAYER {slot + 1}'
+                window.text(('menu_player_slot', slot), role, left + 93,
+                            top_y - 18, 8, ACCENT if self.vs_ai and slot == self.human_slot else MUTED)
                 window.text(('menu_faction_name', slot), FACTION_NAMES[alias], left + 93,
                             row_bottom + 14, 12, INK)
                 bx = left + 30 + row_width - 80
@@ -135,12 +139,24 @@ class MainMenu:
                     window.text(('menu_faction_cycle', slot, direction), label,
                                 x + 11, row_bottom + 18, 16, ACCENT)
                     self._hit(('faction', slot, direction), x, row_bottom + 11, 32, 32)
-                self._hit(('faction_slot', slot), left + 30, row_bottom, 180, row_height)
+                self._hit(('human_slot', slot), left + 30, row_bottom, row_width - 90, row_height)
             else:
                 window.text(('menu_player_slot', slot), f'PLAYER {slot + 1}', left + 48,
                             top_y - 21, 8, (93, 106, 124))
                 window.text(('menu_faction_name', slot), 'Not in this game', left + 48,
                             row_bottom + 14, 11, (93, 106, 124))
+
+        ai_bottom = row_top - 4 * (row_height + row_gap) - 28
+        box_left = left + 32
+        arcade.draw_lrbt_rectangle_filled(box_left, box_left + 22, ai_bottom, ai_bottom + 22,
+                                           (31, 78, 83) if self.vs_ai else CARD)
+        arcade.draw_lrbt_rectangle_outline(box_left, box_left + 22, ai_bottom, ai_bottom + 22,
+                                            ACCENT, 2)
+        if self.vs_ai:
+            window.text('menu_ai_check', '✓', box_left + 4, ai_bottom + 3, 14, ACCENT)
+        window.text('menu_ai_label', 'PLAY AGAINST AI · CLICK YOUR FACTION ABOVE',
+                    box_left + 34, ai_bottom + 6, 11, INK if self.vs_ai else MUTED)
+        self._hit(('toggle_ai',), box_left, ai_bottom, width - 64, 24)
 
         start_bottom = bottom + 24
         start_width, start_height = 224, 42
