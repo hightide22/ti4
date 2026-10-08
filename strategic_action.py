@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from player import command_tokens_in_reinforcements
+from technology import (available_technologies, is_unit_upgrade, missing_prerequisites,
+                        research_technology, upgrade_profile)
 from units import Unit, UnitLocation, Region
 
 
@@ -23,6 +25,11 @@ class StrategyResolution:
     structure: str = 'spacedock'
     builds_left: int = 2
     pool_source: str | None = None
+    technology_selected: str | None = None
+    technology_count: int = 0
+    technology_brilliant: bool = False
+    technology_planets: set[str] = field(default_factory=set)
+    technology_use_aida: bool = False
 
 
 class StrategyController:
@@ -37,7 +44,8 @@ class StrategyController:
     def start(self, card):
         player = self.turn.active_player
         if (self.session or self.movement.session or self.turn.strategy_selection or
-                self.turn.command_allocation or self.turn.action_used or player.pending_commands):
+                self.turn.qdn_pending or
+                self.turn.command_allocation or not self.turn.can_take_action or player.pending_commands):
             raise ValueError('Finish the current action before playing a strategy card.')
         if (card not in self.turn.strategy_assignments[player.faction] or
                 card in self.turn.strategy_used[player.faction]):
@@ -49,7 +57,7 @@ class StrategyController:
         self.movement.history.clear()
         s.stage = {1: 'leadership', 2: 'diplomacy_system', 3: 'speaker',
                    4: 'construction', 5: 'trade', 6: 'warfare_system',
-                   7: 'placeholder', 8: 'placeholder'}[card]
+                   7: 'technology', 8: 'placeholder'}[card]
         if card == 1:
             s.base_gain = min(3, command_tokens_in_reinforcements(player, self.board))
 
@@ -65,6 +73,11 @@ class StrategyController:
             s.stage = 'offer'
             s.base_gain = s.purchases = s.trade_goods = 0
             s.payment_planets.clear()
+            s.technology_planets.clear()
+            s.technology_selected = None
+            s.technology_count = 0
+            s.technology_brilliant = False
+            s.technology_use_aida = False
             s.ready_planets.clear()
             s.pool_source = None
         else:
@@ -78,7 +91,7 @@ class StrategyController:
 
     def secondary_unavailable(self):
         s = self.session
-        if s.card in (3, 7, 8):
+        if s.card in (3, 8):
             return 'This secondary ability is not implemented yet.'
         if s.player.command_pools['strategic'] < self.secondary_cost():
             return 'No token in the strategy pool.'
@@ -88,19 +101,22 @@ class StrategyController:
             return 'No controlled Space Dock in your home system.'
         return ''
 
-    def accept_secondary(self):
+    def accept_secondary(self, brilliant=False):
         s = self.session
         if s.stage != 'offer':
             raise ValueError('There is no secondary offer to accept.')
         reason = self.secondary_unavailable()
         if reason:
             raise ValueError(reason)
+        if brilliant and (s.card != 7 or s.player.faction != 'jolnar'):
+            raise ValueError('Only Jol-Nar may use Brilliant with Technology.')
         # Construction puts its strategy token on the board when placing a structure;
         # Warfare pays when the player chooses a dock.
         if s.card not in (4, 6):
             s.player.command_pools['strategic'] -= self.secondary_cost()
         s.stage = {1: 'leadership', 2: 'ready_planets', 4: 'construction',
-                   5: 'trade_secondary', 6: 'production_site'}[s.card]
+                   5: 'trade_secondary', 6: 'production_site', 7: 'technology'}[s.card]
+        s.technology_brilliant = brilliant
         s.builds_left = 1
         if s.card == 5:
             s.player.commodities = s.player.commodity_limit
@@ -159,6 +175,95 @@ class StrategyController:
         s.payment_planets.clear()
         s.stage = 'allocate'
         if not s.player.pending_commands:
+            self._participant_done()
+
+    def technology_cost(self):
+        s = self.session
+        if s.primary or s.technology_brilliant:
+            return 0 if s.technology_count == 0 else 6
+        return 4
+
+    def technology_payment(self):
+        s = self.session
+        return s.trade_goods + sum(card.planet.resources for card in s.player.planets
+                                   if card.planet.planet_id in s.payment_planets)
+
+    def select_technology(self, alias):
+        s = self.session
+        if not s or s.stage != 'technology':
+            raise ValueError('Technology research is not active.')
+        if alias is not None and (not any(card['alias'] == alias for card in available_technologies(s.player)) or
+                                  alias in s.player.technologies):
+            raise ValueError('This technology is unavailable or already researched.')
+        s.technology_selected = alias
+        s.technology_planets.clear()
+        s.technology_use_aida = False
+
+    def toggle_technology_planet(self, planet_id, specialty=False):
+        s = self.session
+        if not s or s.stage != 'technology':
+            raise ValueError('Technology research is not active.')
+        card = next((card for card in s.player.planets if card.planet.planet_id == planet_id), None)
+        if not card:
+            raise ValueError('Choose a planet you control.')
+        selected = s.technology_planets if specialty else s.payment_planets
+        other = s.payment_planets if specialty else s.technology_planets
+        if planet_id in selected:
+            selected.remove(planet_id)
+            return
+        if planet_id in other or (card.exhausted and not (specialty and 'pa' in s.player.technologies)):
+            raise ValueError('This planet is exhausted or already committed.')
+        if specialty and not card.planet.tech_specialties:
+            raise ValueError('This planet has no technology specialty.')
+        selected.add(planet_id)
+
+    def toggle_aida(self):
+        s = self.session
+        if not s or s.stage != 'technology' or 'aida' not in s.player.technologies or \
+                'aida' in s.player.exhausted_technologies:
+            raise ValueError('AI Development Algorithm is not ready.')
+        s.technology_use_aida = not s.technology_use_aida
+
+    def research_selected(self):
+        s = self.session
+        if not s or s.stage != 'technology' or not s.technology_selected:
+            raise ValueError('Choose a technology to research.')
+        from technology import technology_catalog
+        tech = technology_catalog()[s.technology_selected]
+        if tech not in available_technologies(s.player) or tech['alias'] in s.player.technologies:
+            raise ValueError('This technology is unavailable or already researched.')
+        if s.technology_use_aida and (not is_unit_upgrade(tech) or
+                                      'aida' not in s.player.technologies or
+                                      'aida' in s.player.exhausted_technologies):
+            raise ValueError('AI Development Algorithm cannot be used for this research.')
+        cards = {card.planet.planet_id: card for card in s.player.planets}
+        specialties = [cards[planet_id] for planet_id in s.technology_planets]
+        if missing_prerequisites(s.player, tech, specialties, s.technology_use_aida):
+            raise ValueError('Technology prerequisites are not satisfied.')
+        if any(card.exhausted and 'pa' not in s.player.technologies for card in specialties):
+            raise ValueError('A selected specialty planet is exhausted.')
+        if any(cards[planet_id].exhausted for planet_id in s.payment_planets):
+            raise ValueError('A payment planet is exhausted.')
+        if s.trade_goods > s.player.trade_goods or self.technology_payment() < self.technology_cost():
+            raise ValueError('Choose enough ready resources or trade goods.')
+        s.player.trade_goods -= s.trade_goods
+        for planet_id in s.payment_planets:
+            cards[planet_id].exhausted = True
+        if 'pa' not in s.player.technologies:
+            for planet_id in s.technology_planets:
+                cards[planet_id].exhausted = True
+        if s.technology_use_aida:
+            s.player.exhausted_technologies.add('aida')
+        research_technology(s.player, s.technology_selected, self.board)
+        s.technology_count += 1
+        s.technology_selected = None
+        s.technology_planets.clear()
+        s.payment_planets.clear()
+        s.technology_use_aida = False
+        s.trade_goods = 0
+        if not (s.primary or s.technology_brilliant) or s.technology_count >= 2 or \
+                not any(card['alias'] not in s.player.technologies
+                        for card in available_technologies(s.player)):
             self._participant_done()
 
     def allocate(self, pool):
@@ -241,7 +346,8 @@ class StrategyController:
             s.player.command_pools['strategic'] -= 1
             tile.command_tokens.add(s.player.faction)
         tile.units.append(Unit(f'{s.player.faction}-structure-{uuid4().hex}', kind, s.player.faction,
-                               s.player.color_code, UnitLocation(Region.PLANET, planet_id)))
+                               s.player.color_code, UnitLocation(Region.PLANET, planet_id),
+                               profile_id=(upgrade_profile(s.player, kind) or {}).get('id')))
         s.builds_left -= 1
         if s.builds_left:
             s.structure = 'pds'
@@ -270,7 +376,7 @@ class StrategyController:
 
     def continue_stage(self):
         s = self.session
-        if s.stage in ('placeholder', 'construction', 'warfare_allocate'):
+        if s.stage in ('placeholder', 'construction', 'warfare_allocate', 'technology'):
             self._participant_done()
         elif s.stage == 'warfare_system' and not any(s.player.faction in t.command_tokens for t in self.board.values()):
             s.stage = 'warfare_allocate'

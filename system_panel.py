@@ -33,6 +33,7 @@ class SystemPanel:
         self.remove_token_hit = None
         self.add_token_hit = None
         self.strategy_tab_hit = None
+        self.technology_tab_hit = None
 
     def reset(self):
         self.scroll = 0
@@ -79,6 +80,8 @@ class SystemPanel:
         px, width = left + 18, window.sidebar - 36
         self.strategy_tab_hit = (px + width - 90, px + width,
                                  window.height - 69, window.height - 43)
+        self.technology_tab_hit = (px + width - 90, px + width,
+                                   window.height - 37, window.height - 13)
         text = window.text
         text('system_label', 'SELECTED SYSTEM', px, window.height - 26, 10, MUTED)
         name = tile.name.split(' - ')[0]
@@ -86,6 +89,9 @@ class SystemPanel:
         arcade.draw_lrbt_rectangle_filled(self.strategy_tab_hit[0], self.strategy_tab_hit[1],
                                            self.strategy_tab_hit[2], self.strategy_tab_hit[3], (28, 62, 75))
         text('strategy_tab', 'STRATEGY', px + width - 83, window.height - 61, 9, ACCENT)
+        arcade.draw_lrbt_rectangle_filled(self.technology_tab_hit[0], self.technology_tab_hit[1],
+                                           self.technology_tab_hit[2], self.technology_tab_hit[3], (28, 62, 75))
+        text('technology_tab', 'TECHNOLOGY', px + width - 84, window.height - 30, 9, ACCENT)
         shields = list(dict.fromkeys(unit.owner.upper() for unit in tile.units if unit.kind == 'pds' and
                                      unit_profile(unit).get('planetaryShield')))
         shield_text = f' · PLANETARY SHIELD: {", ".join(shields)}' if shields else ''

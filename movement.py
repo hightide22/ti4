@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from player import PlanetCard
 from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile, unit_profiles
+from technology import is_unit_upgrade, production_allowed, technology_catalog, upgrade_profile
 
 
 class MovementError(ValueError):
@@ -40,6 +41,7 @@ class Snapshot:
     planet_cards: list
     card_states: list
     currencies: list
+    technology_states: list
 
     @classmethod
     def capture(cls, board, player, players):
@@ -50,7 +52,9 @@ class Snapshot:
                    [(unit, unit.location, unit.damaged) for tile in board.values() for unit in tile.units],
                    cards,
                    [(card, card.exhausted) for _, player_cards in cards for card in player_cards],
-                   [(other, other.trade_goods, other.commodities) for other in all_players])
+                   [(other, other.trade_goods, other.commodities) for other in all_players],
+                   [(other, set(other.exhausted_technologies), dict(other.infantry_on_cards))
+                    for other in all_players])
 
     def restore(self):
         self.player.command_pools.clear()
@@ -71,6 +75,11 @@ class Snapshot:
         for player, trade_goods, commodities in self.currencies:
             player.trade_goods = trade_goods
             player.commodities = commodities
+        for player, exhausted, infantry in self.technology_states:
+            player.exhausted_technologies.clear()
+            player.exhausted_technologies.update(exhausted)
+            player.infantry_on_cards.clear()
+            player.infantry_on_cards.update(infantry)
 
 
 @dataclass
@@ -106,6 +115,8 @@ class SessionCheckpoint:
             session.production_choices.clear()
             session.production_planets.clear()
             session.trade_goods_to_spend = 0
+            session.production_aida = False
+            session.production_sar = False
             session.overflow_required = 0
             session.overflow_selected.clear()
             session.overflow_next_stage = None
@@ -132,6 +143,7 @@ class Session:
     cannon_checked: bool = False
     afb_rolls: dict[str, list[dict]] = field(default_factory=dict)
     afb_log: list[str] = field(default_factory=list)
+    assault_log: list[str] = field(default_factory=list)
     afb_resolved: bool = False
     retreat_announced: str | None = None
     retreat_log: str = ''
@@ -150,6 +162,11 @@ class Session:
     production_sites: list[tuple[str, int]] = field(default_factory=list)
     production_choices: dict[str, int] = field(default_factory=dict)
     production_planets: set[str] = field(default_factory=set)
+    production_aida: bool = False
+    production_sar: bool = False
+    sling_relay: bool = False
+    integrated_queue: list[str] = field(default_factory=list)
+    integrated_current: str | None = None
     trade_goods_to_spend: int = 0
     combat_round: int = 0
     combat_factions: tuple[str, ...] = ()
@@ -160,7 +177,10 @@ class Session:
     munitions_available: set[str] = field(default_factory=set)
     munitions_spent_round: set[tuple[str, int]] = field(default_factory=set)
     reroll_selected: dict[str, set[int]] = field(default_factory=dict)
+    gravity_bonus_ids: set[str] = field(default_factory=set)
+    spatial_conduit_active: bool = False
     combat_needs_resolution: bool = False
+    magen_suppressed: str | None = None
     combat_type: str = 'space'
     space_combat_resolved: bool = False
     combat_planet_id: str | None = None
@@ -205,6 +225,8 @@ class Session:
         capacity = sum(u.capacity for u in ships)
         if used > capacity:
             raise MovementError('Not enough capacity in this source system. Select a transport or remove passengers first.')
+        if sum(unit_id in self.gravity_bonus_ids for unit_id in trial) > 1:
+            raise MovementError('Gravity Drive can boost only one ship in this action.')
         self.selected = trial
 
 
@@ -217,6 +239,31 @@ class MovementController:
         self.players = list(players)
         self.session = None
         self.history: list[UndoEntry] = []
+
+    def faction_player(self, faction):
+        return next((player for player in self.players if player.faction == faction), None)
+
+    def has_tech(self, faction, alias):
+        player = self.faction_player(faction)
+        return bool(player and alias in player.technologies)
+
+    def destroy_unit(self, tile, unit, session=None):
+        """Destroy a unit and resolve technology reactions to its destruction."""
+        player = self.faction_player(unit.owner)
+        if player and unit.kind == 'mech' and 'sar' in player.technologies:
+            player.trade_goods += 1
+        if player and unit.kind == 'infantry':
+            upgrade = 'so2' if unit.owner == 'sol' and 'so2' in player.technologies else \
+                      'inf2' if 'inf2' in player.technologies else None
+            if upgrade and random.randint(1, 10) >= (5 if upgrade == 'so2' else 6):
+                player.infantry_on_cards[upgrade] = player.infantry_on_cards.get(upgrade, 0) + 1
+                if session:
+                    session.rolled_any_dice = True
+        tile.units.remove(unit)
+        if UNIT_TYPES[unit.kind]['ship']:
+            for cargo in list(tile.units):
+                if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == unit.unit_id:
+                    self.destroy_unit(tile, cargo, session)
 
     def neighbors(self, tile):
         neighbors = list(self.board.neighbors(tile.position))
@@ -231,10 +278,10 @@ class MovementController:
         session.rolled_any_dice = True
         return random.randint(1, 10)
 
-    def route(self, origin, target, unit, player):
+    def route(self, origin, target, unit, player, bonus=0):
         if player.faction in origin.command_tokens or origin is target or unit.move_value <= 0:
             return None
-        budget = min(unit.move_value, 1) if 'nebula' in origin.anomalies else unit.move_value
+        budget = (min(unit.move_value, 1) if 'nebula' in origin.anomalies else unit.move_value) + bonus
         queue = deque([(origin, (origin.position,))])
         seen = {origin.position}
         while queue:
@@ -253,7 +300,7 @@ class MovementController:
                     return next_path
                 enemy = any(u.owner != player.faction and UNIT_TYPES[u.kind]['ship']
                             and u.location.region == Region.SPACE for u in neighbor.units)
-                if enemy or 'nebula' in neighbor.anomalies:
+                if (enemy and 'lwd' not in player.technologies) or 'nebula' in neighbor.anomalies:
                     continue
                 seen.add(neighbor.position)
                 queue.append((neighbor, next_path))
@@ -268,25 +315,70 @@ class MovementController:
         if player.command_pools['tactical'] <= 0:
             raise MovementError('No command tokens in the tactical reserve')
         sources = {}
+        gravity_bonus_ids = set()
         for origin in self.board.values():
             routes = {}
             ships = []
             for unit in origin.units:
-                if unit.owner == player.faction and capital_ship(unit):
+                independent_fighter = unit.kind == 'fighter' and 'ff2' in player.technologies and \
+                    unit.location.region == Region.SPACE
+                if unit.owner == player.faction and (capital_ship(unit) or independent_fighter):
                     path = (target.position,) if origin is target else self.route(origin, target, unit, player)
+                    if not path and 'gd' in player.technologies:
+                        path = self.route(origin, target, unit, player, bonus=1)
+                        if path:
+                            gravity_bonus_ids.add(unit.unit_id)
                     if path:
                         ships.append(unit)
                         routes[unit.unit_id] = path
             if ships:
                 passengers = [u for u in origin.units if u.owner == player.faction and
-                              ((u.kind == 'fighter' and u.location.region == Region.SPACE) or
+                              ((u.kind == 'fighter' and u.location.region == Region.SPACE and u not in ships) or
                                (u.kind in ('infantry', 'mech') and u.location.region == Region.PLANET))]
                 sources[origin.position] = Source(origin, ships, passengers, routes)
         snapshot = Snapshot.capture(self.board, player, self.players or [player])
         player.command_pools['tactical'] -= 1
         target.command_tokens.add(player.faction)
         self.session = Session(player, target, sources, snapshot)
+        self.session.gravity_bonus_ids = gravity_bonus_ids
+        for opponent in self.players:
+            if opponent is not player and 'ers' in opponent.technologies and any(
+                    unit.owner == opponent.faction and unit.location.region == Region.SPACE and
+                    UNIT_TYPES[unit.kind]['ship'] for unit in target.units):
+                opponent.trade_goods += 4
         return self.session
+
+    def use_spatial_conduit(self):
+        session = self.session
+        if not session or session.stage != 'movement' or session.spatial_conduit_active:
+            raise MovementError('Spatial Conduit Cylinder is unavailable.')
+        player, target = session.player, session.target
+        if 'scc' not in player.technologies or 'scc' in player.exhausted_technologies or not any(
+                unit.owner == player.faction for unit in target.units):
+            raise MovementError('Spatial Conduit Cylinder requires your units in the activated system.')
+        player.exhausted_technologies.add('scc')
+        session.spatial_conduit_active = True
+        for origin in self.board.values():
+            if origin is target or player.faction in origin.command_tokens:
+                continue
+            source = session.sources.get(origin.position)
+            for unit in origin.units:
+                if unit.owner != player.faction or unit.location.region != Region.SPACE or \
+                        not UNIT_TYPES[unit.kind]['ship'] or not unit.move_value:
+                    continue
+                if unit.kind == 'fighter' and 'ff2' not in player.technologies:
+                    continue
+                if source is None:
+                    source = Source(origin, [], [], {})
+                    session.sources[origin.position] = source
+                if unit not in source.ships:
+                    source.ships.append(unit)
+                    source.routes[unit.unit_id] = (origin.position, target.position)
+            if source is not None:
+                source.passengers = [u for u in origin.units if u.owner == player.faction and
+                                     ((u.kind == 'fighter' and u.location.region == Region.SPACE and
+                                       u not in source.ships) or
+                                      (u.kind in ('infantry', 'mech') and u.location.region == Region.PLANET))]
 
     def add_command_token(self, player, position):
         tile = self.board[position]
@@ -318,7 +410,8 @@ class MovementController:
         for _ in range(2):
             target.units.append(Unit(f'{player.faction}-orbital-{uuid4().hex}', 'infantry',
                                      player.faction, player.color_code,
-                                     UnitLocation(Region.PLANET, planet_id=planet_id)))
+                                     UnitLocation(Region.PLANET, planet_id=planet_id),
+                                     profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
         self.history.append(UndoEntry(snapshot))
         return target
 
@@ -419,9 +512,8 @@ class MovementController:
                             if session.target.planets else {})
         next_stage = ('space_combat' if self.hostile_space_factions(session.target, session.player.faction)
                       else 'invasion')
-        moved_capital_ships = any(capital_ship(unit) for source in session.sources.values()
-                                  for unit in session.ships(source))
-        if moved_capital_ships:
+        moved_ships = any(session.ships(source) for source in session.sources.values())
+        if moved_ships:
             self._check_fleet_limit(session, next_stage)
         else:
             self.continue_after_movement(session, next_stage)
@@ -435,10 +527,26 @@ class MovementController:
 
     def fleet_ships(self, session):
         return [unit for unit in session.target.units if unit.owner == session.player.faction and
-                unit.location.region == Region.SPACE and capital_ship(unit)]
+                unit.location.region == Region.SPACE and
+                (capital_ship(unit) or (unit.kind == 'fighter' and
+                                        'ff2' in session.player.technologies))]
+
+    def fleet_ship_count(self, session):
+        ships = self.fleet_ships(session)
+        capital = [unit for unit in ships if unit.kind != 'fighter']
+        if 'ff2' not in session.player.technologies:
+            return len(capital)
+        fighters = len(ships) - len(capital)
+        aboard = sum(cargo_cost(unit) for unit in session.target.units
+                     if unit.owner == session.player.faction and
+                     unit.location.region == Region.TRANSPORT)
+        docks = sum(unit.owner == session.player.faction and unit.kind == 'spacedock'
+                    for unit in session.target.units)
+        free_capacity = max(0, sum(unit.capacity for unit in capital) - aboard) + 3 * docks
+        return len(capital) + max(0, fighters - free_capacity)
 
     def _check_fleet_limit(self, session, next_stage):
-        excess = max(0, len(self.fleet_ships(session)) - self.fleet_supply(session.player))
+        excess = max(0, self.fleet_ship_count(session) - self.fleet_supply(session.player))
         if excess:
             session.stage = 'fleet_overflow'
             session.overflow_required = excess
@@ -446,6 +554,8 @@ class MovementController:
             session.overflow_next_stage = next_stage
         elif next_stage in ('invasion', 'space_combat'):
             self.continue_after_movement(session, next_stage)
+        elif next_stage == 'integrated_continue':
+            self.advance_integrated_production(session)
         else:
             session.stage = 'complete'
             self.finish()
@@ -480,31 +590,53 @@ class MovementController:
                 shooters.append((source, unit, profile))
         if not shooters:
             return
+        plasma_used = set()
+        nes_cancel = 0
         for source, cannon, profile in shooters:
-            dice = [self.roll_d10(session) for _ in range(int(profile.get('spaceCannonDieCount') or 1))]
-            hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
+            shooter = self.faction_player(cannon.owner)
+            extra = int(bool(shooter and 'ps' in shooter.technologies and
+                             cannon.owner not in plasma_used))
+            if extra:
+                plasma_used.add(cannon.owner)
+            dice = [self.roll_d10(session) for _ in range(int(profile.get('spaceCannonDieCount') or 1) + extra)]
+            modifier = -1 if 'amd' in session.player.technologies else 0
+            hits = sum(value + modifier >= int(profile['spaceCannonHitsOn']) for value in dice)
+            graviton = bool(shooter and 'gls' in shooter.technologies and
+                            'gls' not in shooter.exhausted_technologies and
+                            any(unit in session.target.units and unit.kind == 'fighter'
+                                for unit in active_ships) and
+                            any(unit in session.target.units and unit.kind != 'fighter'
+                                for unit in active_ships))
+            if graviton:
+                shooter.exhausted_technologies.add('gls')
             session.cannon_log.append(
                 f'{cannon.owner.upper()} PDS in tile {source.system_id}: {dice} → {hits} hit(s)')
             for _ in range(hits):
+                if nes_cancel:
+                    nes_cancel -= 1
+                    session.cannon_log.append('Non-Euclidean Shielding canceled 1 additional hit.')
+                    continue
                 candidates = [unit for unit in active_ships if unit in session.target.units]
                 if not candidates:
                     break
-                target = self.apply_hit(session.target, candidates)
+                if graviton:
+                    nonfighters = [unit for unit in candidates if unit.kind != 'fighter']
+                    if nonfighters:
+                        candidates = nonfighters
+                target = self.apply_hit(session.target, candidates, session)
+                if target in session.target.units and target.damaged and \
+                        self.has_tech(target.owner, 'nes'):
+                    nes_cancel = 1
                 session.cannon_log.append(
                     f'{target.kind.title()} {"damaged" if target.damaged else "destroyed"}')
 
-    @staticmethod
-    def apply_hit(tile, candidates):
+    def apply_hit(self, tile, candidates, session=None):
         target = sorted(candidates, key=lambda unit: (
             not (unit_profile(unit).get('sustainDamage') and not unit.damaged), unit.unit_id))[0]
         if unit_profile(target).get('sustainDamage') and not target.damaged:
             target.damaged = True
         else:
-            tile.units.remove(target)
-            if UNIT_TYPES[target.kind]['ship']:
-                for cargo in list(tile.units):
-                    if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == target.unit_id:
-                        tile.units.remove(cargo)
+            self.destroy_unit(tile, target, session)
         return target
 
     def resolve_anti_fighter_barrage(self, session):
@@ -552,7 +684,9 @@ class MovementController:
                                UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
             # A fleet may retreat into a system that already carries its faction's
             # command token.  Retreat does not spend another token.
-            if not hostile_fleet and has_friendly:
+            if not hostile_fleet and (has_friendly or
+                                      (self.has_tech(faction, 'det') and
+                                       not any(unit.owner != faction for unit in tile.units))):
                 options.append(tile)
         return options
 
@@ -600,8 +734,11 @@ class MovementController:
         bombers = [unit for unit in session.target.units if unit.owner == faction and
                    unit.location.region == Region.SPACE and
                    unit_profile(unit).get('bombardHitsOn')]
+        war_sun_present = any(unit.kind == 'warsun' and unit.owner == faction and
+                              unit.location.region == Region.SPACE for unit in session.target.units)
         hostile_shield = any(unit.owner != faction and unit.kind == 'pds' and
-                             unit_profile(unit).get('planetaryShield') for unit in session.target.units)
+                             unit_profile(unit).get('planetaryShield') for unit in session.target.units) and \
+            not war_sun_present
         session.bombard_targets.clear()
         if hostile_shield:
             session.bombardment_resolved = True
@@ -637,6 +774,8 @@ class MovementController:
         if not session or session.stage != 'bombardment':
             raise MovementError('Bombardment is not active')
         faction = session.player.faction
+        plasma_available = 'ps' in session.player.technologies
+        nes_cancel = {}
         for unit_id, planet_id in session.bombard_targets.items():
             if planet_id is None:
                 continue
@@ -645,7 +784,9 @@ class MovementController:
                 continue
             profile = unit_profile(ship)
             rolls = []
-            for _ in range(int(profile.get('bombardDieCount') or 1)):
+            extra = int(plasma_available)
+            plasma_available = False
+            for _ in range(int(profile.get('bombardDieCount') or 1) + extra):
                 value = self.roll_d10(session)
                 rolls.append({'unit_id': unit_id, 'kind': ship.kind, 'planet_id': planet_id,
                               'value': value, 'hit': value >= int(profile['bombardHitsOn'])})
@@ -653,12 +794,18 @@ class MovementController:
             hits = sum(roll['hit'] for roll in rolls)
             destroyed = 0
             for _ in range(hits):
+                if nes_cancel.get(planet_id, 0):
+                    nes_cancel[planet_id] -= 1
+                    continue
                 defenders = [unit for unit in session.target.units if unit.owner != faction and
                              unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
                              unit.kind in ('infantry', 'mech')]
                 if not defenders:
                     break
-                self.apply_hit(session.target, defenders)
+                target = self.apply_hit(session.target, defenders, session)
+                if target in session.target.units and target.damaged and \
+                        self.has_tech(target.owner, 'nes'):
+                    nes_cancel[planet_id] = 1
                 destroyed += 1
             planet = next(planet for planet in session.target.planets if planet.planet_id == planet_id)
             session.bombard_log.append(
@@ -698,9 +845,14 @@ class MovementController:
         next_stage = session.overflow_next_stage
         session.overflow_required = 0
         session.overflow_selected.clear()
+        if self.fleet_ship_count(session) > self.fleet_supply(session.player):
+            session.overflow_required = self.fleet_ship_count(session) - self.fleet_supply(session.player)
+            return
         session.overflow_next_stage = None
         if next_stage in ('invasion', 'space_combat'):
             self.continue_after_movement(session, next_stage)
+        elif next_stage == 'integrated_continue':
+            self.advance_integrated_production(session)
         else:
             session.stage = 'complete'
             self.finish()
@@ -711,6 +863,20 @@ class MovementController:
         session.combat_planet_id = None
         session.combat_factions = (session.player.faction,) + self.hostile_space_factions(
             session.target, session.player.faction)
+        assault_users = [faction for faction in session.combat_factions
+                         if self.has_tech(faction, 'asc') and sum(
+                             unit.owner == faction and unit.location.region == Region.SPACE and
+                             capital_ship(unit) for unit in session.target.units) >= 3]
+        session.assault_log.clear()
+        for faction in assault_users:
+            victims = [unit for unit in session.target.units if unit.owner != faction and
+                       unit.location.region == Region.SPACE and capital_ship(unit)]
+            if victims:
+                victim = sorted(victims, key=lambda unit: (unit_profile(unit).get('cost', 0),
+                                                           unit.unit_id))[0]
+                self.destroy_unit(session.target, victim, session)
+                session.assault_log.append(f'{faction.upper()} Assault Cannon destroyed a '
+                                           f'{victim.owner.upper()} {victim.kind}.')
         self.resolve_anti_fighter_barrage(session)
         session.combat_factions = tuple(faction for faction in session.combat_factions
                                         if self.combat_units(session, faction))
@@ -742,6 +908,19 @@ class MovementController:
         session.combat_hits.clear()
         session.combat_assignments.clear()
         session.combat_needs_resolution = False
+        session.magen_suppressed = None
+        for faction in session.combat_factions:
+            player = self.faction_player(faction)
+            if player and 'md_base' in player.technologies and \
+                    'md_base' not in player.exhausted_technologies and not any(
+                        unit.owner != faction and unit.kind == 'warsun' and
+                        unit.location.region == Region.SPACE for unit in session.target.units) and any(
+                        unit.owner == faction and unit.location.planet_id == planet_id and
+                        unit_profile(unit).get('planetaryShield') for unit in session.target.units):
+                player.exhausted_technologies.add('md_base')
+                session.magen_suppressed = next((enemy for enemy in session.combat_factions
+                                                 if enemy != faction), None)
+                break
         session.stage = 'ground_combat'
 
     def combat_units(self, session, faction):
@@ -757,7 +936,9 @@ class MovementController:
         total = 0
         for unit in self.combat_units(session, faction):
             sustain = bool(unit_profile(unit).get('sustainDamage'))
-            total += 2 if sustain and not unit.damaged else 1
+            bonus = 2 if sustain and not unit.damaged and self.has_tech(faction, 'nes') else \
+                    1 if sustain and not unit.damaged else 0
+            total += 1 + bonus
         return total
 
     def combat_assignment_target(self, session, faction, kind):
@@ -766,7 +947,10 @@ class MovementController:
         for unit in sorted(self.combat_units(session, faction), key=lambda item: item.unit_id):
             if unit.kind != kind:
                 continue
-            max_hits = 2 if unit_profile(unit).get('sustainDamage') and not unit.damaged else 1
+            bonus = 2 if unit_profile(unit).get('sustainDamage') and not unit.damaged and \
+                self.has_tech(faction, 'nes') else 1 if unit_profile(unit).get('sustainDamage') and \
+                not unit.damaged else 0
+            max_hits = 1 + bonus
             if counts.get(unit.unit_id, 0) < max_hits:
                 return unit
         return None
@@ -784,6 +968,9 @@ class MovementController:
         if unit is None:
             raise MovementError('No eligible unit of this type can take another hit')
         assignments.append(unit.unit_id)
+        if (self.has_tech(faction, 'nes') and unit_profile(unit).get('sustainDamage') and
+                not unit.damaged and assignments.count(unit.unit_id) == 1 and len(assignments) < required):
+            assignments.append(unit.unit_id)
 
     def combat_assignments_complete(self, session):
         return all(len(session.combat_assignments.get(faction, [])) >=
@@ -797,18 +984,29 @@ class MovementController:
         if session.combat_needs_resolution:
             if not self.combat_assignments_complete(session):
                 raise MovementError('Assign all available hits before continuing')
+            sustained_this_round = set()
+            absorbed_extra = set()
             for faction in session.combat_factions:
                 for unit_id in session.combat_assignments.get(faction, []):
                     unit = next((unit for unit in session.target.units if unit.unit_id == unit_id), None)
                     if unit is None:
                         continue
+                    if unit_id in absorbed_extra:
+                        absorbed_extra.remove(unit_id)
+                        continue
                     if unit_profile(unit).get('sustainDamage') and not unit.damaged:
                         unit.damaged = True
+                        sustained_this_round.add(unit_id)
+                        if self.has_tech(faction, 'nes'):
+                            absorbed_extra.add(unit_id)
                         continue
-                    session.target.units.remove(unit)
-                    for cargo in list(session.target.units):
-                        if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == unit.unit_id:
-                            session.target.units.remove(cargo)
+                    self.destroy_unit(session.target, unit, session)
+            for faction in session.combat_factions:
+                if self.has_tech(faction, 'da'):
+                    damaged = [unit for unit in self.combat_units(session, faction)
+                               if unit.damaged and unit.unit_id not in sustained_this_round]
+                    if damaged:
+                        damaged[0].damaged = False
             session.combat_needs_resolution = False
             own_alive = bool(self.combat_units(session, session.player.faction))
             enemies_alive = any(self.combat_units(session, faction)
@@ -830,7 +1028,9 @@ class MovementController:
         outgoing_hits = {}
         for faction in session.combat_factions:
             rolls = []
-            for unit in self.combat_units(session, faction):
+            active_units = ([] if session.combat_type == 'ground' and session.combat_round == 1 and
+                            faction == session.magen_suppressed else self.combat_units(session, faction))
+            for unit in active_units:
                 profile = unit_profile(unit)
                 for _ in range(int(profile.get('combatDieCount') or 1)):
                     value = self.roll_d10(session)
@@ -895,6 +1095,27 @@ class MovementController:
         session.stage = 'production'
         return True
 
+    def advance_integrated_production(self, session):
+        """Resolve each newly captured planet before normal tactical production."""
+        while session.integrated_queue:
+            planet_id = session.integrated_queue.pop(0)
+            planet = next(planet for planet in session.target.planets
+                          if planet.planet_id == planet_id)
+            if not planet.resources:
+                continue
+            session.integrated_current = planet_id
+            session.production_sites = [(planet_id, 9999)]
+            session.production_limit = 9999
+            session.production_choices.clear()
+            session.production_planets.clear()
+            session.production_aida = session.production_sar = False
+            session.trade_goods_to_spend = 0
+            session.stage = 'production'
+            session.production_checkpoint = SessionCheckpoint.capture(self, session, 'production')
+            return True
+        session.integrated_current = None
+        return self.prepare_production(session)
+
     def start_strategy_production(self, player, target, dock):
         if self.session:
             raise MovementError('Finish the current action first.')
@@ -910,12 +1131,47 @@ class MovementController:
         self.session = session
         return session
 
+    def start_sling_relay(self, player, target, dock):
+        if self.session or 'sr' not in player.technologies or \
+                'sr' in player.exhausted_technologies:
+            raise MovementError('Sling Relay is not ready.')
+        if dock not in target.units or dock.owner != player.faction or dock.kind != 'spacedock':
+            raise MovementError('Choose one of your space docks.')
+        session = Session(player, target, {}, Snapshot.capture(self.board, player, self.players))
+        session.sling_relay = True
+        session.production_sites = [(dock.location.planet_id, 1)]
+        session.production_limit = 1
+        session.stage = 'production'
+        session.production_checkpoint = SessionCheckpoint.capture(self, session, 'production')
+        player.exhausted_technologies.add('sr')
+        self.session = session
+        return session
+
     def production_total(self, session):
         return sum(session.production_choices.values())
 
     def production_cost(self, session):
-        return sum(ceil(self.unit_cost(kind, session.player) * count)
-                   for kind, count in session.production_choices.items())
+        raw_cost = ceil(sum(self.unit_cost(kind, session.player) * count
+                            for kind, count in session.production_choices.items()))
+        if session.integrated_current or session.sling_relay:
+            return raw_cost
+        sarween = int('st' in session.player.technologies and bool(session.production_choices))
+        catalog = technology_catalog()
+        aida_discount = sum(is_unit_upgrade(catalog[alias]) for alias in session.player.technologies
+                            if alias in catalog) if session.production_aida else 0
+        return max(0, raw_cost - sarween - aida_discount)
+
+    def toggle_production_technology(self, alias):
+        session = self.session
+        if not session or session.stage != 'production' or session.integrated_current or \
+                session.sling_relay or \
+                alias not in ('aida', 'sar') or \
+                alias not in session.player.technologies or alias in session.player.exhausted_technologies:
+            raise MovementError('This production technology is not ready.')
+        if alias == 'aida':
+            session.production_aida = not session.production_aida
+        else:
+            session.production_sar = not session.production_sar
 
     def production_payment(self, session):
         card_resources = sum(card.planet.resources for card in session.player.planets
@@ -928,6 +1184,10 @@ class MovementController:
             raise MovementError('Production is not active')
         if kind not in self.PRODUCIBLE_KINDS:
             raise MovementError('Structures cannot be produced yet')
+        if not production_allowed(session.player, kind):
+            raise MovementError('Research War Sun before producing it.')
+        if session.sling_relay and not UNIT_TYPES[kind]['ship']:
+            raise MovementError('Sling Relay can produce only a ship.')
         current = session.production_choices.get(kind, 0)
         if delta > 0:
             remaining = session.production_limit - self.production_total(session)
@@ -972,12 +1232,19 @@ class MovementController:
             raise MovementError('Choose at least one unit or skip production')
         if self.production_total(session) > session.production_limit:
             raise MovementError('Production limit exceeded')
+        if session.integrated_current:
+            planet = next(planet for planet in session.target.planets
+                          if planet.planet_id == session.integrated_current)
+            if self.production_cost(session) > planet.resources:
+                raise MovementError('Integrated Economy exceeds this planet’s resource value.')
         if self.production_payment(session) < self.production_cost(session):
             raise MovementError('Not enough exhausted planet resources and trade goods')
         for card in session.player.planets:
             if card.planet.planet_id in session.production_planets:
                 card.exhausted = True
         session.player.trade_goods -= session.trade_goods_to_spend
+        if session.production_aida:
+            session.player.exhausted_technologies.add('aida')
         used_ids = {unit.unit_id for tile in self.board.values() for unit in tile.units}
         next_id = 1
         for kind, count in session.production_choices.items():
@@ -993,11 +1260,25 @@ class MovementController:
                 else:
                     location = UnitLocation(Region.SPACE)
                 session.target.units.append(Unit(unit_id, kind, session.player.faction,
-                                                 session.player.color_code, location))
+                                                 session.player.color_code, location,
+                                                 profile_id=(upgrade_profile(session.player, kind) or {}).get('id')))
+        if session.production_sar:
+            player = session.player
+            mechs = sum(unit.owner == player.faction and unit.kind == 'mech'
+                        for tile in self.board.values() for unit in tile.units)
+            if mechs < 4:
+                planet_id = session.production_sites[0][0]
+                session.target.units.append(Unit(f'{player.faction}-sar-{uuid4().hex}', 'mech',
+                                                 player.faction, player.color_code,
+                                                 UnitLocation(Region.PLANET, planet_id)))
+            player.exhausted_technologies.add('sar')
         session.stage = 'complete'
-        if any(UNIT_TYPES[kind]['ship'] and kind != 'fighter' and count
+        next_stage = 'integrated_continue' if session.integrated_current else 'complete'
+        if any(UNIT_TYPES[kind]['ship'] and (kind != 'fighter' or 'ff2' in session.player.technologies) and count
                for kind, count in session.production_choices.items()):
-            self._check_fleet_limit(session, 'complete')
+            self._check_fleet_limit(session, next_stage)
+        elif session.integrated_current:
+            self.advance_integrated_production(session)
         else:
             self.finish()
 
@@ -1009,7 +1290,10 @@ class MovementController:
             if card.planet.planet_id in session.production_planets:
                 card.exhausted = False
         session.stage = 'complete'
-        self.finish()
+        if session.integrated_current:
+            self.advance_integrated_production(session)
+        else:
+            self.finish()
 
     def landing_forces(self, session):
         return [unit for unit in session.target.units if unit.owner == session.player.faction and
@@ -1068,6 +1352,11 @@ class MovementController:
         session.defense_log.clear()
         session.defense_checked = True
         faction = session.player.faction
+        if 'l4' in session.player.technologies:
+            session.defense_log.append('L4 Disruptors prevent space cannon defense during this invasion.')
+            return
+        plasma_used = set()
+        nes_cancel = {}
         for planet_id in session.landed_planets:
             cannons = [unit for unit in session.target.units if unit.owner != faction and unit.kind == 'pds' and
                        unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
@@ -1076,18 +1365,31 @@ class MovementController:
                 continue
             for cannon in cannons:
                 profile = unit_profile(cannon)
+                shooter = self.faction_player(cannon.owner)
+                extra = int(bool(shooter and 'ps' in shooter.technologies and
+                                 cannon.owner not in plasma_used))
+                if extra:
+                    plasma_used.add(cannon.owner)
                 dice = [self.roll_d10(session)
-                        for _ in range(int(profile.get('spaceCannonDieCount') or 1))]
-                hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
+                        for _ in range(int(profile.get('spaceCannonDieCount') or 1) + extra)]
+                penalty = -1 if 'amd' in session.player.technologies else 0
+                hits = sum(value + penalty >= int(profile['spaceCannonHitsOn']) for value in dice)
                 session.defense_log.append(
                     f'{cannon.owner.upper()} PDS on {planet_id}: {dice} → {hits} hit(s)')
                 for _ in range(hits):
+                    if nes_cancel.get(planet_id, 0):
+                        nes_cancel[planet_id] -= 1
+                        session.defense_log.append('Non-Euclidean Shielding canceled 1 additional hit.')
+                        continue
                     attackers = [unit for unit in session.target.units if unit.owner == faction and
                                  unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
                                  unit.kind in ('infantry', 'mech')]
                     if not attackers:
                         break
-                    target = self.apply_hit(session.target, attackers)
+                    target = self.apply_hit(session.target, attackers, session)
+                    if target in session.target.units and target.damaged and \
+                            self.has_tech(target.owner, 'nes'):
+                        nes_cancel[planet_id] = 1
                     session.defense_log.append(
                         f'{target.kind.title()} on {planet_id} {"damaged" if target.damaged else "destroyed"}')
 
@@ -1111,6 +1413,22 @@ class MovementController:
         planet_id = session.combat_planet_id
         if attackers_alive and not defenders_alive:
             self.capture_planet(session, planet_id)
+            winner = session.player.faction
+        elif defenders_alive and not attackers_alive:
+            winner = next((faction for faction in session.combat_factions
+                           if faction != session.player.faction and
+                           self.combat_units(session, faction)), None)
+        else:
+            winner = None
+        if winner and self.has_tech(winner, 'dxa'):
+            player = self.faction_player(winner)
+            deployed = sum(unit.owner == winner and unit.kind == 'infantry'
+                           for tile in self.board.values() for unit in tile.units)
+            if deployed < 12:
+                session.target.units.append(Unit(f'{winner}-dacxive-{uuid4().hex}', 'infantry',
+                                                 winner, player.color_code,
+                                                 UnitLocation(Region.PLANET, planet_id),
+                                                 profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
         session.ground_planet_index += 1
         while session.ground_planet_index < len(session.ground_planets):
             next_planet = session.ground_planets[session.ground_planet_index]
@@ -1136,7 +1454,11 @@ class MovementController:
         session.outcome = ('Landed forces on ' + ', '.join(landed_names) + '. ' +
                            ('Captured: ' + ', '.join(captured_names) + '.' if captured_names else
                             'Control did not change.'))
-        self.prepare_production(session)
+        if 'ie' in session.player.technologies and session.captured_planets:
+            session.integrated_queue = list(session.captured_planets)
+            self.advance_integrated_production(session)
+        else:
+            self.prepare_production(session)
 
     def finish(self):
         if self.session and self.session.stage == 'complete':

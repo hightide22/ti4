@@ -16,6 +16,7 @@ Validation:
 ```powershell
 .\.venv\Scripts\python.exe app.py --validate
 .\.venv\Scripts\python.exe app.py --smoke-test
+.\.venv\Scripts\python.exe app.py --technology-smoke-test
 ```
 
 The board opens in a maximized desktop window with its normal title bar and window controls. Fleet layouts are computed in the background so the board appears without waiting for every starting system to finish arranging its units. Players can activate systems and move ships and carried units. Assets are loaded from assets/source/asyncti4/src/main/resources. The upstream directory also contains homebrew content; the current map uses base-game systems only.
@@ -80,7 +81,15 @@ A strategic action holds the current turn until the owner finishes the entire pr
 
 Leadership uses explicit payment: choose the extra token count, click ready planets for influence, and choose trade goods with +/- controls. The dialog shows paid influence versus required influence. Nothing selects payment automatically, and commodities cannot pay. New tokens must be distributed before the next secondary offer. The combined command-sheet, board, and unallocated-token count is capped at 16. Leadership's secondary has no strategy-token cost.
 
-Diplomacy lets the player select the controlled system and the exhausted planets to ready. Construction uses selected structures and planets. Trade lets the owner choose free secondary recipients. Warfare returns a selected board token for allocation and redistribution; its secondary uses exactly one selected Space Dock in the responder's home system, with the existing production payment interface. Politics changes the Speaker; action-card draws and cards 7–8 remain unimplemented.
+Diplomacy lets the player select the controlled system and the exhausted planets to ready. Construction uses selected structures and planets. Trade lets the owner choose free secondary recipients. Warfare returns a selected board token for allocation and redistribution; its secondary uses exactly one selected Space Dock in the responder's home system, with the existing production payment interface. Politics changes the Speaker; its action-card draws and card 8 remain placeholders.
+
+## Technologies
+
+Open **TECHNOLOGY** in the system inspector to view the faction's unit sheet and technology cards. The **UNITS** tab shows current unit values; researching a unit upgrade replaces the relevant profile on existing units and future production. The four colored tabs show the available generic and faction technologies using the bundled card scans. Researched cards are marked **OWNED**.
+
+Strategy card 7 opens the same dialog for research. Its owner researches one technology for free and may research a second for 6 resources. Other players may spend a strategy token and 4 resources for one technology; Jol-Nar may use Brilliant to resolve the primary effect instead. Select a card, meet its colored prerequisites with owned technologies or ready specialty planets, and click planet cards below the dialog to pay resources. Trade goods may cover resource cost; the AI Development Algorithm can ignore one unit-upgrade prerequisite. The dialog distinguishes resource payment from specialty use.
+
+Researched action technologies expose their targets in the card detail: Sling Relay, X-89 Bacterial Weapon, Transit Diodes, Psychoarchaeology, and Production Biomes. Bio-Stims and Predictive Intelligence appear before ending the turn. Quantum Datahub Node offers a strategy-card exchange at the end of drafting. Production discounts and unit-profile abilities apply to tactical production, movement, and combat. Exploration and agenda effects await those game phases.
 
 Strategy and roster artwork and reference data are included in the pinned asset manifest. The GUI scenario verifies central drafting at 1440×900 and 1120×720, manual influence payment, token allocation, immediate secondary offers, free Trade recipients, Warfare production, and player details:
 

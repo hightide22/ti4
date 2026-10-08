@@ -26,6 +26,9 @@ from main_menu import MainMenu
 from transactions import TransactionController, TransactionError
 from transaction_panel import TransactionPanel
 from action_card_deck import ActionCardDeck
+from technology_panel import TechnologyPanel
+from technology_actions import TechnologyActions
+from technology import restore_infantry_on_cards
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -63,7 +66,7 @@ class TileSprite(arcade.Sprite):
 
 class BoardWindow(arcade.Window):
     def __init__(self, smoke=False, map_path=ROOT / 'maps/three_player.json',
-                 show_menu=False, menu_smoke_test=False):
+                 show_menu=False, menu_smoke_test=False, technology_smoke_test=False):
         display_width, display_height = arcade.get_display_size()
         super().__init__(min(1440, display_width), min(960, display_height),
                          'Twilight Imperium IV', resizable=True, vsync=True)
@@ -71,6 +74,7 @@ class BoardWindow(arcade.Window):
         self.maximize()
         self.smoke = smoke
         self.menu_smoke_test = menu_smoke_test
+        self.technology_smoke_test = technology_smoke_test
         self.main_menu = MainMenu()
         self.main_menu_visible = show_menu
         self.frames = 0
@@ -93,6 +97,8 @@ class BoardWindow(arcade.Window):
         self.turn_order = TurnOrder(self.player_panel.players, strategy_enabled=not self.smoke)
         self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
         self.strategy_panel = StrategyPanel()
+        self.technology_panel = TechnologyPanel()
+        self.technology_view = False
         self.dragging_modal = None
         self.strategy_hover_system = None
         self.strategy_view = False
@@ -102,8 +108,10 @@ class BoardWindow(arcade.Window):
         self.show_planet_control = True
         self.control_toggle_hit = None
         self.turn_history_size = 0
+        self.last_infantry_return_turn = None
         self.turn_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
+        self.technology_actions = TechnologyActions(self.board, self.movement, self.turn_order)
         self.strategy = StrategyController(self.board, self.turn_order, self.movement)
         self.transaction = TransactionController(self.board, self.player_panel.players,
                                                 self.turn_order, self.movement)
@@ -304,24 +312,39 @@ class BoardWindow(arcade.Window):
             self.strategy.poll()
             self.sync_strategy_actor()
             return
+        self.restore_infantry_on_cards()
         if self.smoke:
             return
         history_size = len(self.movement.history)
         if history_size > self.turn_history_size:
             self.turn_order.mark_action_completed()
         elif history_size < self.turn_history_size and self.turn_order.action_used and not self.movement.session:
-            self.turn_order.action_used = False
+            self.turn_order.actions_used = max(0, self.turn_order.actions_used - 1)
+            self.turn_order.action_used = bool(self.turn_order.actions_used)
         self.turn_history_size = history_size
+
+    def restore_infantry_on_cards(self):
+        turn = self.turn_order
+        if (turn.strategy_selection or turn.command_allocation or
+                self.last_infantry_return_turn == turn.turn_serial or not turn.active_player):
+            return
+        self.last_infantry_return_turn = turn.turn_serial
+        restore_infantry_on_cards(turn.active_player, self.board)
 
     @property
     def strategy_modal(self):
-        return (self.turn_order.strategy_selection or
+        return (self.turn_order.strategy_selection or self.turn_order.qdn_pending or
                 bool(self.strategy.session and self.strategy.session.stage != 'production') or
                 bool(self.strategy_view and not self.movement.session))
 
     @property
     def transaction_modal(self):
         return bool(self.transaction.session)
+
+    @property
+    def technology_modal(self):
+        return self.technology_view or bool(self.strategy.session and
+                                            self.strategy.session.stage == 'technology')
 
     def sync_strategy_actor(self):
         player = self.strategy.player
@@ -343,6 +366,12 @@ class BoardWindow(arcade.Window):
             if kind == 'choose_strategy':
                 self.turn_order.choose_strategy_card(args[0])
                 self.sync_strategy_actor()
+            elif kind == 'qdn_exchange':
+                self.turn_order.qdn_exchange(args[0], args[1], args[2])
+                self.sync_strategy_actor()
+            elif kind == 'qdn_skip':
+                self.turn_order.skip_qdn()
+                self.sync_strategy_actor()
             elif kind == 'close':
                 self.strategy_view = False
             elif kind == 'page':
@@ -353,6 +382,8 @@ class BoardWindow(arcade.Window):
             elif session:
                 if kind == 'accept':
                     ctl.accept_secondary()
+                elif kind == 'accept_brilliant':
+                    ctl.accept_secondary(brilliant=True)
                 elif kind == 'decline':
                     ctl.decline_secondary()
                 elif kind == 'buy':
@@ -398,6 +429,82 @@ class BoardWindow(arcade.Window):
         except (ValueError, StopIteration) as error:
             self.movement_error = str(error) or 'This choice is no longer available.'
 
+    def handle_technology_action(self, action):
+        if not action:
+            return
+        kind, *args = action
+        panel, ctl = self.technology_panel, self.strategy
+        research = bool(ctl.session and ctl.session.stage == 'technology')
+        try:
+            if kind == 'close' and not research:
+                self.technology_actions.cancel_transit()
+                self.technology_actions.finish_end_turn()
+                self.technology_view = False
+            elif kind == 'tab':
+                if self.technology_actions.transit:
+                    raise ValueError('Finish or close Transit Diodes first.')
+                panel.tab = args[0]
+                panel.preview_alias = None
+                panel.scroll = 0
+                panel.action_page = 0
+            elif kind in ('unit', 'select'):
+                if self.technology_actions.transit and (kind != 'select' or args[0] != 'td'):
+                    raise ValueError('Finish or close Transit Diodes first.')
+                tech = None
+                if kind == 'unit':
+                    from technology import unit_upgrade
+                    panel.preview_alias = args[0]
+                    tech = unit_upgrade(ctl.player if research else self.player_panel.player, args[0])
+                else:
+                    from technology import technology_catalog
+                    panel.preview_alias = args[0]
+                    tech = technology_catalog()[args[0]]
+                panel.action_page = 0
+                if research:
+                    ctl.select_technology(tech['alias'] if tech and tech['alias'] not in ctl.player.technologies
+                                          else None)
+            elif kind == 'mode':
+                panel.planet_mode = args[0]
+            elif kind == 'goods' and research:
+                ctl.change_goods(args[0])
+            elif kind == 'aida' and research:
+                ctl.toggle_aida()
+            elif kind == 'research' and research:
+                ctl.research_selected()
+                panel.preview_alias = None
+                self.sync_strategy_actor()
+            elif kind == 'skip' and research:
+                ctl.continue_stage()
+                panel.preview_alias = None
+                self.sync_strategy_actor()
+            elif kind == 'action_page' and not research:
+                panel.action_page = max(0, panel.action_page + args[0])
+            elif kind == 'transit_unit' and not research:
+                self.technology_actions.select_transit_unit(self.player_panel.player, args[0])
+                panel.action_page = 0
+            elif kind == 'transit_planet' and not research:
+                self.technology_actions.place_transit_unit(self.player_panel.player, args[0])
+                panel.action_page = 0
+            elif kind == 'transit_back' and not research:
+                self.technology_actions.transit.selected_unit = None
+                panel.action_page = 0
+            elif kind == 'transit_finish' and not research:
+                self.technology_actions.finish_transit(self.player_panel.player)
+                self.technology_view = False
+                self.sync_turn_action()
+            elif kind == 'use' and not research:
+                self.technology_actions.use(self.player_panel.player, args[0], args[1])
+                if args[0] not in ('pa', 'bs', 'pi'):
+                    self.technology_view = False
+                self.sync_turn_action()
+            elif kind == 'finish_turn' and not research:
+                self.technology_actions.finish_end_turn()
+                self.technology_view = False
+                self.pass_turn(skip_technology_prompt=True)
+            self.movement_error = None
+        except (ValueError, StopIteration) as error:
+            self.movement_error = str(error) or 'This choice is no longer available.'
+
     def handle_transaction_action(self, action):
         if not action:
             return
@@ -438,10 +545,26 @@ class BoardWindow(arcade.Window):
             self.strategy.toggle_payment(session.player.planets[args[0]].planet.planet_id)
         elif session.stage == 'ready_planets' and kind == 'planet':
             self.strategy.toggle_ready(session.player.planets[args[0]].planet.planet_id)
+        elif session.stage == 'technology' and kind == 'planet':
+            self.strategy.toggle_technology_planet(
+                session.player.planets[args[0]].planet.planet_id,
+                specialty=self.technology_panel.planet_mode == 'specialty')
         elif session.stage in ('allocate', 'warfare_allocate') and kind == 'pool':
             self.handle_strategy_action(('allocate', args[0]))
 
-    def pass_turn(self):
+    def pass_turn(self, skip_technology_prompt=False):
+        if (not skip_technology_prompt and not self.smoke and self.turn_order.active_player and
+                not self.turn_order.strategy_selection and not self.turn_order.command_allocation and
+                not self.strategy.session and not self.movement.session and
+                self.technology_actions.begin_end_turn(self.turn_order.active_player)):
+            self.technology_view = True
+            bio_stims = ('bs' in self.turn_order.active_player.technologies and
+                         'bs' not in self.turn_order.active_player.exhausted_technologies)
+            self.technology_panel.tab = 'BIOTIC' if bio_stims else 'CYBERNETIC'
+            self.technology_panel.preview_alias = 'bs' if bio_stims else 'pi'
+            self.technology_panel.scroll = 0
+            self.technology_panel.action_page = 0
+            return
         self.strategy_view = False
         try:
             round_complete = self.turn_order.end_turn()
@@ -456,7 +579,10 @@ class BoardWindow(arcade.Window):
                 player.receive_round_commands()
                 for card in player.planets:
                     card.exhausted = False
-                if len(player.action_cards) < 7:
+                player.exhausted_technologies.clear()
+                for _ in range(2 if 'nm' in player.technologies else 1):
+                    if len(player.action_cards) >= 7:
+                        break
                     action_card = self.action_card_deck.draw()
                     if action_card:
                         player.action_cards.append(action_card)
@@ -579,6 +705,7 @@ class BoardWindow(arcade.Window):
             self.system_panel.remove_token_hit = None
             self.system_panel.add_token_hit = None
             self.system_panel.strategy_tab_hit = None
+            self.system_panel.technology_tab_hit = None
             self.movement_panel.hits.clear()
             self.movement_panel.buttons.clear()
             self.movement_panel.route_hits.clear()
@@ -600,6 +727,8 @@ class BoardWindow(arcade.Window):
                   (toggle_left + toggle_right) / 2 - 5, tab_bottom + 7, 19, ACCENT)
         self.inspector_toggle_hit = (toggle_left, toggle_right, tab_bottom, tab_bottom + 36)
         self.player_panel.production_planets = (
+            set(self.strategy.session.payment_planets | self.strategy.session.technology_planets)
+            if self.strategy.session and self.strategy.session.stage == 'technology' else
             set(self.strategy.session.payment_planets) if self.strategy.session and self.strategy.session.stage == 'leadership'
             else set(self.movement.session.production_planets)
             if self.movement.session and self.movement.session.stage == 'production' else set())
@@ -611,8 +740,14 @@ class BoardWindow(arcade.Window):
             self.player_panel.draw_details(self)
         if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'retreat_selection'):
             self.combat_panel.draw(self, self.movement.session)
-        if self.strategy_modal:
+        if self.strategy_modal and not self.technology_modal:
             self.strategy_panel.draw(self, self.turn_order)
+        if self.technology_modal:
+            self.technology_panel.draw(self,
+                                       self.strategy.player if self.strategy.session and
+                                       self.strategy.session.stage == 'technology' else self.player_panel.player,
+                                       self.strategy if self.strategy.session and
+                                       self.strategy.session.stage == 'technology' else None)
         if self.transaction_modal:
             self.transaction_panel.draw(self, self.transaction)
 
@@ -689,6 +824,91 @@ class BoardWindow(arcade.Window):
         self.sync_turn_action()
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
         self.frames += 1
+        if self.technology_smoke_test and self.frames == 3:
+            preview_dir = ROOT / 'previews'
+            preview_dir.mkdir(exist_ok=True)
+            player = self.turn_order.active_player
+            player.technologies = player.technologies | {'gd', 'lwd'}
+            self.turn_order.strategy_selection = False
+            self.turn_order.strategy_assignments[player.faction] = [7]
+            self.strategy.start(7)
+            self.on_draw()
+            assert self.technology_modal and self.technology_panel.hits
+            arcade.get_image().save(preview_dir / 'technology-research-preview.png')
+            carrier = next(hit for hit in self.technology_panel.hits
+                           if hit[0] == ('unit', 'carrier'))
+            self.on_mouse_press((carrier[1] + carrier[2]) / 2,
+                                (carrier[3] + carrier[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            self.on_draw()
+            arcade.get_image().save(preview_dir / 'technology-unit-upgrade-preview.png')
+            assert self.strategy.session.technology_selected == 'ac2'
+            research = next(hit for hit in self.technology_panel.hits
+                            if hit[0] == ('research',))
+            self.on_mouse_press((research[1] + research[2]) / 2,
+                                (research[3] + research[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert 'ac2' in player.technologies
+            assert all(unit.profile_id == 'sol_carrier2'
+                       for tile in self.board.values() for unit in tile.units
+                       if unit.owner == player.faction and unit.kind == 'carrier')
+            self.on_draw()
+            arcade.get_image().save(preview_dir / 'technology-upgraded-preview.png')
+            while self.strategy.session:
+                if self.strategy.session.stage == 'offer':
+                    self.strategy.decline_secondary()
+                else:
+                    self.strategy.continue_stage()
+            self.turn_order.actions_used = 0
+            self.turn_order.action_used = False
+            player.technologies |= {'sr'}
+            self.technology_view = True
+            self.technology_panel.tab = 'PROPULSION'
+            self.technology_panel.preview_alias = 'sr'
+            self.on_draw()
+            arcade.get_image().save(preview_dir / 'technology-action-preview.png')
+            sling = next(hit for hit in self.technology_panel.hits
+                         if hit[0][:2] == ('use', 'sr'))
+            self.on_mouse_press((sling[1] + sling[2]) / 2,
+                                (sling[3] + sling[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert self.movement.session and self.movement.session.sling_relay
+            self.on_draw()
+            arcade.get_image().save(preview_dir / 'technology-sling-relay-preview.png')
+            self.movement.cancel()
+            hacan = next(other for other in self.turn_order.players if other.faction == 'hacan')
+            hacan.technologies |= {'qdn'}
+            hacan.trade_goods = 3
+            self.turn_order.strategy_assignments = {
+                'sol': [1, 7], 'jolnar': [2, 3], 'hacan': [4, 5]}
+            self.turn_order.qdn_pending = True
+            self.strategy_view = True
+            self.on_draw()
+            arcade.get_image().save(preview_dir / 'technology-qdn-preview.png')
+            swap = next(hit for hit in self.strategy_panel.hits
+                        if hit[0][:2] == ('qdn_exchange', 'sol'))
+            self.on_mouse_press((swap[1] + swap[2]) / 2,
+                                (swap[3] + swap[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert not self.turn_order.qdn_pending and hacan.trade_goods == 0
+            assert self.turn_order.active_player is hacan
+            hacan.technologies |= {'bs', 'aida'}
+            hacan.exhausted_technologies.add('aida')
+            self.turn_order.strategy_enabled = False
+            self.pass_turn()
+            assert self.technology_view and self.technology_actions.end_turn_player is hacan
+            self.on_draw()
+            arcade.get_image().save(preview_dir / 'technology-bio-stims-preview.png')
+            ready = next(hit for hit in self.technology_panel.hits
+                         if hit[0] == ('use', 'bs', 'tech:aida'))
+            self.on_mouse_press((ready[1] + ready[2]) / 2,
+                                (ready[3] + ready[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert 'aida' not in hacan.exhausted_technologies
+            self.on_draw()
+            finish = next(hit for hit in self.technology_panel.hits
+                          if hit[0] == ('finish_turn',))
+            self.on_mouse_press((finish[1] + finish[2]) / 2,
+                                (finish[3] + finish[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
+            assert self.turn_order.active_player is not hacan
+            print('PASS: technology research, unit upgrade, actions, QDN and end-turn Bio-Stims checked')
+            self.close()
+            return
         if self.smoke and self.frames == 5:
             preview_dir = ROOT / 'previews'
             preview_dir.mkdir(exist_ok=True)
@@ -1136,7 +1356,8 @@ class BoardWindow(arcade.Window):
             assert not any(tile.command_tokens for tile in self.board.values())
             assert not self.token_hits
             assert all(not card.exhausted for player in expected_players for card in player.planets)
-            assert all(len(player.action_cards) == 1 for player in expected_players)
+            assert all(len(player.action_cards) == (2 if 'nm' in player.technologies else 1)
+                       for player in expected_players)
             assert [player.pending_commands for player in expected_players] == [
                 player.round_command_gain() for player in expected_players]
             expected_pool_counts = [(player, dict(player.command_pools)) for player in expected_players]
@@ -1238,7 +1459,7 @@ class BoardWindow(arcade.Window):
             return
         self.roster.hover(x, y)
         self.player_panel.hover(x, y)
-        if self.strategy_modal:
+        if self.strategy_modal and not self.technology_modal:
             self.strategy_panel.update_hover(x, y)
             self.strategy_hover_system = self.strategy_panel.hover_system
         else:
@@ -1268,6 +1489,21 @@ class BoardWindow(arcade.Window):
         if self.transaction_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
                 self.handle_transaction_action(self.transaction_panel.hit_test(x, y))
+            return
+        if self.technology_modal:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                if self.technology_panel.drag_header(x, y):
+                    self.dragging_modal = 'technology'
+                    return
+                action = self.technology_panel.hit_test(x, y)
+                if action:
+                    self.handle_technology_action(action)
+                elif self.strategy.session and self.strategy.session.stage == 'technology':
+                    try:
+                        self.strategy_tray_click(x, y)
+                        self.movement_error = None
+                    except ValueError as error:
+                        self.movement_error = str(error)
             return
         if self.strategy_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
@@ -1359,6 +1595,8 @@ class BoardWindow(arcade.Window):
                         if action[0] == 'unit':
                             self.movement.session.toggle(action[1])
                             self.movement_error = None
+                        elif action[0] == 'spatial_conduit':
+                            self.movement.use_spatial_conduit()
                         elif action[0] == 'confirm':
                             self.movement.confirm()
                             self.movement_error = None
@@ -1385,6 +1623,8 @@ class BoardWindow(arcade.Window):
                             self.movement.adjust_production(action[1], action[2])
                         elif action[0] == 'production_trade_goods':
                             self.movement.change_production_trade_goods(action[1])
+                        elif action[0] == 'production_technology':
+                            self.movement.toggle_production_technology(action[1])
                         elif action[0] == 'establish':
                             self.movement.establish_control()
                             self.movement_panel.reset()
@@ -1463,6 +1703,11 @@ class BoardWindow(arcade.Window):
             self.toggle_focus()
             return
         if x >= left:
+            if self.system_panel.technology_tab_hit and all((
+                    self.system_panel.technology_tab_hit[0] <= x <= self.system_panel.technology_tab_hit[1],
+                    self.system_panel.technology_tab_hit[2] <= y <= self.system_panel.technology_tab_hit[3])):
+                self.technology_view = True
+                return
             if self.system_panel.strategy_tab_hit and all((
                     self.system_panel.strategy_tab_hit[0] <= x <= self.system_panel.strategy_tab_hit[1],
                     self.system_panel.strategy_tab_hit[2] <= y <= self.system_panel.strategy_tab_hit[3])):
@@ -1516,7 +1761,7 @@ class BoardWindow(arcade.Window):
                         raise MovementError('Finish command allocation before taking an action.')
                     if self.turn_order.active_player and self.turn_order.active_player.pending_commands and not self.smoke:
                         raise MovementError('Allocate all new command tokens before taking an action.')
-                    if self.turn_order.action_used and not self.smoke:
+                    if not self.turn_order.can_take_action and not self.smoke:
                         raise MovementError('Your action is complete. Pass the turn to continue.')
                     self.movement.activate(self.player_panel.player, picked)
                     self.movement_panel.reset()
@@ -1534,7 +1779,8 @@ class BoardWindow(arcade.Window):
             return
         if self.dragging_modal:
             if buttons & arcade.MOUSE_BUTTON_LEFT:
-                panel = self.strategy_panel if self.dragging_modal == 'strategy' else self.combat_panel
+                panel = (self.strategy_panel if self.dragging_modal == 'strategy' else
+                         self.technology_panel if self.dragging_modal == 'technology' else self.combat_panel)
                 panel.move(dx, dy)
                 if self.dragging_modal == 'strategy':
                     self.strategy_panel.update_hover(x, y)
@@ -1542,7 +1788,7 @@ class BoardWindow(arcade.Window):
             else:
                 self.dragging_modal = None
             return
-        if self.strategy_modal or x < self.roster.WIDTH:
+        if self.strategy_modal or self.technology_modal or x < self.roster.WIDTH:
             return
         if not self.focus_view and buttons & (arcade.MOUSE_BUTTON_RIGHT | arcade.MOUSE_BUTTON_MIDDLE) and x < self.width - self.sidebar and y >= self.player_panel.HEIGHT:
             scale = self.fit_scale * self.zoom
@@ -1557,6 +1803,9 @@ class BoardWindow(arcade.Window):
         if self.main_menu_visible:
             return
         if self.transaction_modal:
+            return
+        if self.technology_modal:
+            self.technology_panel.scroll_by(-scroll_y)
             return
         if self.strategy_modal:
             self.strategy_panel.page = max(0, self.strategy_panel.page - int(scroll_y))
@@ -1591,6 +1840,12 @@ class BoardWindow(arcade.Window):
         if self.transaction_modal:
             if symbol == arcade.key.ESCAPE:
                 self.transaction.cancel()
+            return
+        if self.technology_modal:
+            if symbol == arcade.key.ESCAPE and not (self.strategy.session and
+                                                    self.strategy.session.stage == 'technology'):
+                self.technology_actions.cancel_transit()
+                self.technology_view = False
             return
         if symbol == arcade.key.ESCAPE and self.orbital_drop_mode:
             self.orbital_drop_mode = False
@@ -1634,6 +1889,7 @@ def main():
     parser.add_argument('--validate', action='store_true')
     parser.add_argument('--smoke-test', action='store_true')
     parser.add_argument('--menu-smoke-test', action='store_true')
+    parser.add_argument('--technology-smoke-test', action='store_true')
     args = parser.parse_args()
     map_path = args.map or ROOT / 'maps/three_player.json'
     if args.validate:
@@ -1643,8 +1899,10 @@ def main():
         print(f'PASS: {len(board)} tile objects, unique coordinates, all images present')
         return
     BoardWindow(smoke=args.smoke_test or args.menu_smoke_test, map_path=map_path,
-                show_menu=args.menu_smoke_test or (args.map is None and not args.smoke_test),
-                menu_smoke_test=args.menu_smoke_test)
+                show_menu=args.menu_smoke_test or
+                (args.map is None and not args.smoke_test and not args.technology_smoke_test),
+                menu_smoke_test=args.menu_smoke_test,
+                technology_smoke_test=args.technology_smoke_test)
     arcade.run()
 
 

@@ -10,6 +10,7 @@ class TurnOrder:
         self.round_number = 1
         self.turn_serial = 0
         self.action_used = False
+        self.actions_used = 0
         self.passed_indices: set[int] = set()
         self.command_allocation = False
         self.strategy_enabled = strategy_enabled
@@ -24,6 +25,7 @@ class TurnOrder:
         self.strategy_secondary_used = {self._key(p): set() for p in self.players}
         self.strategy_free_secondary = {5: set()}
         self.strategy_initiative = list(range(len(self.players)))
+        self.qdn_pending = False
         if strategy_enabled:
             self.begin_strategy_phase()
 
@@ -49,7 +51,9 @@ class TurnOrder:
         if not self.players:
             return
         self.strategy_selection = True
+        self.qdn_pending = False
         self.action_used = False
+        self.actions_used = 0
         self.passed_indices.clear()
         self.strategy_assignments = {self._key(p): [] for p in self.players}
         self.strategy_used = {self._key(p): set() for p in self.players}
@@ -73,7 +77,35 @@ class TurnOrder:
                 min(self.strategy_assignments[self._key(self.players[i])], default=99),
                 (i - self.speaker_index) % len(self.players)))
             self.active_index = self.strategy_initiative[0]
+            hacan = next((p for p in self.players if getattr(p, 'faction', None) == 'hacan'), None)
+            self.qdn_pending = bool(hacan and 'qdn' in getattr(hacan, 'technologies', ()) and
+                                    getattr(hacan, 'command_pools', {}).get('strategic', 0) > 0 and
+                                    getattr(hacan, 'trade_goods', 0) >= 3)
         return player
+
+    def qdn_exchange(self, target_faction, own_card, target_card):
+        hacan = next((p for p in self.players if getattr(p, 'faction', None) == 'hacan'), None)
+        other = next((p for p in self.players if self._key(p) == target_faction), None)
+        if (not self.qdn_pending or hacan is None or other is None or other is hacan or
+                own_card not in self.strategy_assignments['hacan'] or
+                target_card not in self.strategy_assignments[target_faction] or
+                hacan.command_pools['strategic'] < 1 or hacan.trade_goods < 3):
+            raise ValueError('This strategy-card exchange is unavailable.')
+        hacan.command_pools['strategic'] -= 1
+        hacan.trade_goods -= 3
+        other.trade_goods += 3
+        self.strategy_assignments['hacan'].remove(own_card)
+        self.strategy_assignments['hacan'].append(target_card)
+        self.strategy_assignments[target_faction].remove(target_card)
+        self.strategy_assignments[target_faction].append(own_card)
+        self.strategy_initiative = sorted(range(len(self.players)), key=lambda i: (
+            min(self.strategy_assignments[self._key(self.players[i])], default=99),
+            (i - self.speaker_index) % len(self.players)))
+        self.active_index = self.strategy_initiative[0]
+        self.qdn_pending = False
+
+    def skip_qdn(self):
+        self.qdn_pending = False
 
     def set_speaker(self, player):
         if player not in self.players:
@@ -97,7 +129,7 @@ class TurnOrder:
     def can_use_secondary(self, player, card):
         s = self.strategy_resolution
         return bool(s and s.stage == 'offer' and not s.primary and
-                    s.player is player and s.card == card and card not in (3, 7, 8) and
+                    s.player is player and s.card == card and card not in (3, 8) and
                     card not in self.strategy_secondary_used[self._key(player)])
 
     def mark_secondary_used(self, player, card):
@@ -111,15 +143,22 @@ class TurnOrder:
                 for offset in range(1, len(self.players))]
 
     def mark_action_completed(self):
-        if self.action_used:
+        if not self.can_take_action:
             return False
+        self.actions_used += 1
         self.action_used = True
         return True
+
+    @property
+    def can_take_action(self):
+        player = self.active_player
+        return bool(player and self.actions_used <
+                    (2 if 'fl' in getattr(player, 'technologies', ()) else 1))
 
     def end_turn(self):
         if not self.players:
             return False
-        if self.strategy_resolution or self.strategy_selection:
+        if self.strategy_resolution or self.strategy_selection or self.qdn_pending:
             raise ValueError('Finish resolving the strategy card first.')
         if self.command_allocation:
             raise ValueError('Finish command allocation before taking a turn')
@@ -127,6 +166,7 @@ class TurnOrder:
             raise ValueError('Allocate all new command tokens before ending the turn')
         if self.action_used:
             self.action_used = False
+            self.actions_used = 0
         else:
             if self.strategy_enabled and self.has_unused_strategy(self.active_player):
                 raise ValueError('Use all of your strategy cards before passing')
@@ -165,4 +205,5 @@ class TurnOrder:
         self.command_allocation = False
         self.active_index = 0
         self.action_used = False
+        self.actions_used = 0
         return True

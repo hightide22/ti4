@@ -41,6 +41,8 @@ class PlayerState:
     command_pools: dict[str, int] = field(default_factory=lambda: {
         'tactical': 3, 'fleet': 3, 'strategic': 2})
     technologies: frozenset[str] = frozenset()
+    exhausted_technologies: set[str] = field(default_factory=set)
+    infantry_on_cards: dict[str, int] = field(default_factory=dict)
     action_cards: list[str] = field(default_factory=list)
 
     def change_currency(self, currency, amount):
@@ -61,7 +63,7 @@ class PlayerState:
         return True
 
     def round_command_gain(self):
-        return 3 if self.faction == 'sol' else 2
+        return (3 if 'hm' in self.technologies else 2) + (1 if self.faction == 'sol' else 0)
 
     def receive_round_commands(self, supply=16):
         on_sheet = sum(self.command_pools.values()) + self.pending_commands

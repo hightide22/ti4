@@ -4,6 +4,7 @@ import math
 import arcade
 
 from units import UNIT_TYPES, Region, unit_profile
+from technology import production_allowed
 
 INK = (223, 232, 244)
 MUTED = (132, 154, 180)
@@ -92,7 +93,8 @@ class MovementPanel:
             if passenger:
                 detail = next((p.name for p in source.tile.planets if p.planet_id == unit.location.planet_id), 'Space')
             else:
-                detail = f'Move {unit.move_value} · Capacity {unit.capacity}'
+                boost = ' +1 Gravity Drive' if unit.unit_id in session.gravity_bonus_ids else ''
+                detail = f'Move {unit.move_value}{boost} · Capacity {unit.capacity}'
             window.text(('movement_name', unit.unit_id), name, left + 33, top - 17, 11, INK)
             window.text(('movement_detail', unit.unit_id), detail, left + 33, top - 34, 10, MUTED)
             self.hits.append((('unit', unit.unit_id), left, left + cell, top - 43, top))
@@ -170,6 +172,8 @@ class MovementPanel:
                 notices.append(('SPACE CANNON', session.cannon_log[-1]))
             if session.afb_log:
                 notices.append(('ANTI-FIGHTER BARRAGE', session.afb_log[-1]))
+            if session.assault_log:
+                notices.append(('ASSAULT CANNON', session.assault_log[-1]))
             if session.retreat_log:
                 notices.append(('RETREAT', session.retreat_log))
             if session.bombard_log:
@@ -184,6 +188,14 @@ class MovementPanel:
             if session.stage == 'movement':
                 window.text('move_sources', f'SOURCES FOR THIS ACTIVATION · {len(session.sources)}', x, y, 11, ACCENT)
                 y -= 28
+                if ('scc' in session.player.technologies and
+                        'scc' not in session.player.exhausted_technologies and
+                        any(unit.owner == session.player.faction for unit in session.target.units)):
+                    arcade.draw_lrbt_rectangle_filled(x, x + width, y - 26, y, (31, 78, 83))
+                    window.text('spatial_conduit_button', 'USE SPATIAL CONDUIT CYLINDER',
+                                x + 9, y - 18, 9, INK, width - 18)
+                    self.hits.append((('spatial_conduit',), x, x + width, y - 26, y))
+                    y -= 37
                 if not session.sources:
                     window.text('move_empty', 'No ships can reach this system', x, y - 15, 12, MUTED)
                     y -= 45
@@ -288,9 +300,16 @@ class MovementPanel:
                 selected_cost = window.movement.production_cost(session)
                 paid = window.movement.production_payment(session)
                 produced = window.movement.production_total(session)
-                window.text('production_title', 'PRODUCTION', x, y, 11, ACCENT)
+                window.text('production_title',
+                            'INTEGRATED ECONOMY' if session.integrated_current else
+                            'SLING RELAY' if session.sling_relay else 'PRODUCTION',
+                            x, y, 11, ACCENT)
                 y -= 21
-                window.text('production_capacity', f'Production limit: {produced}/{session.production_limit}',
+                window.text('production_capacity',
+                            f'Cost cap: {amount(selected_cost)}/'
+                            f'{amount(next(planet.resources for planet in session.target.planets if planet.planet_id == session.integrated_current))}'
+                            if session.integrated_current else
+                            f'Production limit: {produced}/{session.production_limit}',
                             x, y, 10, MUTED)
                 y -= 16
                 window.text('production_payment', f'Planets + trade goods: {amount(paid)}/{amount(selected_cost)}',
@@ -306,7 +325,24 @@ class MovementPanel:
                                 left + 7, y - 18, 11, ACCENT)
                     self.hits.append((('production_trade_goods', delta), left, left + 23, y - 21, y - 3))
                 y -= 32
+                for alias, label in (('aida', 'AI Development: reduce cost'),
+                                     ('sar', 'Self-Assembly: place 1 mech')):
+                    if (not session.integrated_current and not session.sling_relay and
+                            alias in session.player.technologies and
+                            alias not in session.player.exhausted_technologies):
+                        selected = getattr(session, f'production_{alias}')
+                        arcade.draw_lrbt_rectangle_filled(x, x + width, y - 25, y,
+                                                           (39, 75, 65) if selected else CARD)
+                        window.text(('production_technology', alias),
+                                    f'{"✓ " if selected else ""}{label}', x + 8, y - 17,
+                                    9, ACCENT if selected else INK, width - 16)
+                        self.hits.append((('production_technology', alias), x, x + width,
+                                          y - 25, y))
+                        y -= 29
                 for kind in PRODUCTION_ORDER:
+                    if not production_allowed(session.player, kind) or \
+                            (session.sling_relay and not UNIT_TYPES[kind]['ship']):
+                        continue
                     top = y
                     count = session.production_choices.get(kind, 0)
                     cost = window.movement.unit_cost(kind, session.player)
@@ -370,6 +406,10 @@ class MovementPanel:
                        ('cancel', 'Cancel', split, x + width, CARD))
         elif session.stage == 'production':
             can_produce = bool(session.production_choices) and window.movement.production_payment(session) >= window.movement.production_cost(session)
+            if session.integrated_current:
+                planet = next(planet for planet in session.target.planets
+                              if planet.planet_id == session.integrated_current)
+                can_produce = can_produce and window.movement.production_cost(session) <= planet.resources
             label = 'Produce units' if can_produce else 'Add payment' if session.production_choices else 'Choose units'
             actions = (('produce', label, x, split - 6, (30, 88, 105)),
                        ('skip_production', 'Skip production', split, x + width, CARD))

@@ -13,7 +13,7 @@ STRATEGY_CARDS = {
     4: ('Construction', 'Place a PDS or Space Dock on a controlled planet.'),
     5: ('Trade', 'Replenish your commodities.'),
     6: ('Warfare', 'Produce at one Space Dock in your home system.'),
-    7: ('Technology', 'Not implemented yet.'),
+    7: ('Technology', 'Spend 1 strategy token and 4 resources to research a technology.'),
     8: ('Imperial', 'Not implemented yet.'),
 }
 
@@ -104,6 +104,11 @@ class StrategyPanel:
             if self.mouse:
                 self.update_hover(*self.mouse)
             return
+        if turn.qdn_pending:
+            self.draw_qdn(w, turn, x, bottom, width, height)
+            if self.mouse:
+                self.update_hover(*self.mouse)
+            return
         if not s:
             self.draw_owned(w, turn, x, bottom, width, height)
             if self.mouse:
@@ -163,8 +168,21 @@ class StrategyPanel:
             w.player_panel.image(strategy_image(card, used=used), cx, bottom + height / 2, size)
             self.button(w, ('start', card), f'{card} · {"USED" if used else "PLAY CARD"}',
                         cx - 85, bottom + 54, 170,
-                        not used and not turn.action_used and not player.pending_commands and not turn.command_allocation)
+                        not used and turn.can_take_action and not player.pending_commands and not turn.command_allocation)
         self.button(w, ('close',), 'CLOSE', x + width - 118, top - 43, 96)
+
+    def draw_qdn(self, w, turn, x, bottom, width, height):
+        top = bottom + height
+        w.text('qdn_title', 'QUANTUM DATAHUB NODE', x + 24, top - 36, 17, ACCENT)
+        w.text('qdn_help', 'Hacan may pay 1 strategy token and give 3 trade goods to exchange a strategy card.',
+               x + 24, top - 62, 11, INK, width - 48)
+        choices = [(('qdn_exchange', other.faction, own, theirs),
+                    f'Give {own} · Take {theirs} from {other.faction.upper()}', False)
+                   for other in turn.players if other.faction != 'hacan'
+                   for own in turn.strategy_assignments['hacan']
+                   for theirs in turn.strategy_assignments[other.faction]]
+        self.options(w, choices, x + 24, top - 108, width - 48, size=7)
+        self.button(w, ('qdn_skip',), 'KEEP CURRENT CARDS', x + 24, bottom + 23, width - 48)
 
     def draw_stage(self, w, s, x, y, width, bottom):
         ctl = w.strategy
@@ -179,6 +197,9 @@ class StrategyPanel:
                 w.text('secondary_reason', reason, x, y - 105, 11, MUTED, width)
             self.button(w, ('accept',), 'USE SECONDARY', x, foot, width / 2 - 5, not reason)
             self.button(w, ('decline',), 'SKIP', x + width / 2 + 5, foot, width / 2 - 5)
+            if s.card == 7 and s.player.faction == 'jolnar':
+                self.button(w, ('accept_brilliant',), 'USE BRILLIANT · PRIMARY EFFECT',
+                            x, foot + 46, width, not reason)
         elif s.stage == 'leadership':
             w.text('leadership_base', f'Free tokens: {s.base_gain} · Extra tokens: {s.purchases}', x, y, 13, INK)
             self.button(w, ('buy', -1), '−', x, y - 46, 38, s.purchases > 0)

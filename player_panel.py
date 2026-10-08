@@ -125,6 +125,8 @@ class PlayerPanel:
         self.draw_reserves(window, reserve_left, 32, reserve_width)
         leadership = window.strategy.session and window.strategy.session.stage == 'leadership'
         help_text = ('ORBITAL DROP · Click a controlled planet' if window.orbital_drop_mode else
+                     'TECHNOLOGY · Click a planet to pay or use its specialty'
+                     if window.strategy.session and window.strategy.session.stage == 'technology' else
                      'PLANETS · Click to pay influence' if leadership else
                      'PLANETS · Click to pay resources' if window.movement.session and window.movement.session.stage == 'production'
                      else 'PLANETS · Hover for details')
@@ -132,7 +134,7 @@ class PlayerPanel:
         active = window.turn_order.active_player
         can_use_orbital_drop = (self.player is active and self.player.faction == 'sol' and
                                 self.player.command_pools['strategic'] > 0 and
-                                not window.turn_order.action_used and not window.turn_order.command_allocation and
+                                window.turn_order.can_take_action and not window.turn_order.command_allocation and
                                 not window.turn_order.strategy_selection and not window.strategy.session and
                                 not window.movement.session)
         can_trade = (self.player is active and not window.turn_order.command_allocation and
