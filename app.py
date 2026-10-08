@@ -715,6 +715,10 @@ class BoardWindow(arcade.Window):
             return
         if round_complete:
             self.clear_round_tokens()
+            for tile in self.board.values():
+                for unit in tile.units:
+                    unit.damaged = False
+            self.movement.history.clear()
             for player in self.turn_order.players:
                 player.trade_goods += player.commodities
                 player.commodities = 0
