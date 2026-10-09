@@ -83,6 +83,28 @@ class SetupTests(unittest.TestCase):
                     self.assertTrue(mobile_ship(dock))
                     self.assertFalse(capital_ship(dock))
 
+    def test_ghost_home_system_routes_to_the_galaxy_through_the_gate(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('ghost', 'sol', 'hacan', 'letnev'))
+        players = create_players(board, config)
+        ghost = next(player for player in players if player.faction == 'ghost')
+        movement = MovementController(board, players)
+        home = next(tile for tile in board.values() if tile.number == 51)
+        gate = next(tile for tile in board.values() if tile.number == 17)
+        empty_system = next(tile for tile in board.values() if tile.number == 48)
+        carrier = next(unit for unit in home.units
+                       if unit.owner == 'ghost' and unit.kind == 'carrier')
+
+        # The only traversable geometric neighbor of tile 51 is the Creuss
+        # Gate; the other touching hex is a supernova. The route to a system
+        # beside the Gate must therefore visibly pass through the Gate.
+        neighbors = board.neighbors(home.position)
+        self.assertIn(gate, neighbors)
+        self.assertEqual({tile.number for tile in neighbors if 'supernova' not in tile.anomalies},
+                         {17})
+        self.assertEqual(movement.route(home, empty_system, carrier, ghost),
+                         (home.position, gate.position, empty_system.position))
+
     def test_arborec_infantry_is_only_producible_from_letani(self):
         config, board = load_board(ROOT / 'maps/four_player.json',
                                    ('arborec', 'sol', 'jolnar', 'hacan'))

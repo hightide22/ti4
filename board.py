@@ -256,9 +256,28 @@ def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
                           if (gate.position[0] + 2 * dq, gate.position[1] + 2 * dr) not in board]
         if not candidates:
             raise ValueError('Could not place the Creuss home system outside the galaxy')
-        # Put the detached home system on the outward-facing side of the gate.
-        home_pos = max(candidates, key=lambda pos: pos[0] * gate.position[0] +
-                       pos[1] * gate.position[1])
+        # Keep the Creuss home system connected to the map only through the
+        # Gate whenever possible. The fixed starter map can have several
+        # otherwise-empty positions around the Gate; choosing the most
+        # outward-looking one alone can accidentally make tile 51 an ordinary
+        # neighbor of a second, passable system.
+        def extra_passable_neighbors(position):
+            count = 0
+            for neighbor in board.neighbors(position):
+                if neighbor is gate:
+                    continue
+                if 'supernova' in neighbor.anomalies or 'gravity_rift' in neighbor.anomalies:
+                    continue
+                count += 1
+            return count
+
+        home_pos = min(
+            candidates,
+            key=lambda pos: (
+                extra_passable_neighbors(pos),
+                -(pos[0] * gate.position[0] + pos[1] * gate.position[1]),
+            ),
+        )
         board.add(TILES.create(51, home_pos, entry.get('ghost_home_label'),
                                entry.get('color', (112, 190, 215))))
         entry['ghost_home_position'] = home_pos
