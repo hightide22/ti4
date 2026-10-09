@@ -666,6 +666,18 @@ class GameAI:
                     self.report(next((p for p in ctl.players if p.faction == faction),
                                      None), f'Announced retreat from {s.target.name}.', .4)
                     return
+        # Assault Cannon belongs to the faction at the head of the queue, not
+        # necessarily to the player whose tactical action opened this session.
+        # Resolve a bot defender's choice during a human attack before the
+        # active-player guard below, or the combat window can wait forever.
+        if s.stage == 'assault_choice' and s.assault_queue:
+            assault_owner = s.assault_queue[0]
+            if assault_owner in self.bot_factions:
+                victims = ctl.assault_victims(s)
+                if victims:
+                    ctl.choose_assault_victim(min(victims, key=lambda u: (
+                        LOSS_ORDER.get(u.kind, 4), u.unit_id)).unit_id)
+                return
         if not ai_turn:
             return
         # Give a human participant the action-card window and hit assignment.
