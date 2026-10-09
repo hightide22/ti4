@@ -7,10 +7,15 @@ from board import RESOURCES
 
 
 FACTIONS = (
+    ('arborec', 'The Arborec', 'mitosis'),
+    ('ghost', 'The Ghosts of Creuss', 'slipstream'),
     ('sol', 'Federation of Sol', 'orbital_drop'),
     ('jolnar', 'Universities of Jol-Nar', 'fragile'),
     ('letnev', 'Barony of Letnev', 'armada'),
     ('hacan', 'Emirates of Hacan', 'guild_ships'),
+    ('l1z1x', 'The L1Z1X Mindnet', 'assimilate'),
+    ('muaat', 'The Embers of Muaat', 'star_forge'),
+    ('saar', 'The Clan of Saar', 'scavenge'),
 )
 FACTION_NAMES = {alias: name for alias, name, _ in FACTIONS}
 FACTION_ICONS = {alias: f'factions/{alias}.png' for alias, _, _ in FACTIONS}

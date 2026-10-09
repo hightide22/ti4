@@ -133,20 +133,33 @@ class PlayerPanel:
                                 window.turn_order.can_take_action and not window.turn_order.command_allocation and
                                 not window.turn_order.strategy_selection and not window.strategy.session and
                                 not window.movement.session)
-        sol_action_window = (interactive and self.player is active and self.player.faction == 'sol' and
-                             not window.turn_order.command_allocation and
-                             not window.turn_order.strategy_selection and not window.strategy.session and
-                             not window.movement.session)
+        # Keep the faction action visible whenever the Sol dashboard is open.
+        # It stays disabled outside Sol's turn, but this makes the ability
+        # discoverable instead of making the button disappear entirely.
+        sol_action_window = interactive and self.player.faction == 'sol'
+        star_forge_action_window = interactive and self.player.faction == 'muaat'
+        war_sun_available = any(unit.owner == self.player.faction and unit.kind == 'warsun' and
+                                unit.location.region.value == 'space'
+                                for tile in window.board.values() for unit in tile.units)
+        can_use_star_forge = (self.player is active and war_sun_available and
+                              self.player.command_pools['strategic'] > 0 and
+                              window.turn_order.can_take_action and not window.turn_order.command_allocation and
+                              not window.turn_order.strategy_selection and not window.strategy.session and
+                              not window.movement.session)
         can_trade = (self.player is active and not window.turn_order.command_allocation and
                      not window.turn_order.strategy_selection and not window.strategy.session and
                      not window.movement.session and not window.orbital_drop_mode)
         if sol_action_window:
             help_text = ('ORBITAL DROP · Click the button, then a controlled planet'
                          if can_use_orbital_drop or window.orbital_drop_mode else
-                         'ORBITAL DROP · No strategy token available'
+                         'ORBITAL DROP · Available after strategy selection and command allocation'
+                         if window.turn_order.strategy_selection or window.turn_order.command_allocation else
+                         'ORBITAL DROP · Available on Sol’s turn' if self.player is not active else
+                         'ORBITAL DROP · No token in the strategy pool'
                          if self.player.command_pools['strategic'] <= 0 else
+                         'ORBITAL DROP · Finish the current action first'
+                         if window.strategy.session or window.movement.session else
                          'ORBITAL DROP · Your action has already been used')
-        window.text('planet_help', help_text, 16, height - 64, 11, MUTED)
         if interactive and can_trade:
             if self.player.faction == 'sol':
                 self.button(window, ('trade',), 'TRADE', width - 592, height - 45, 52, 24)
@@ -160,6 +173,29 @@ class PlayerPanel:
                    selected=window.orbital_drop_mode, enabled=available, size=9)
             if available:
                 self.controls.append(Control(('orbital_drop',), width - 534, height - 45, 108, 24))
+        if star_forge_action_window:
+            available = can_use_star_forge or window.star_forge_mode
+            if window.star_forge_mode:
+                help_text = 'STAR FORGE · Click a system with your War Sun'
+            elif self.player is not active:
+                help_text = 'STAR FORGE · Available on Muaat’s turn'
+            elif not war_sun_available:
+                help_text = 'STAR FORGE · No War Sun on the board'
+            elif self.player.command_pools['strategic'] <= 0:
+                help_text = 'STAR FORGE · No token in the strategy pool'
+            elif not window.turn_order.can_take_action:
+                help_text = 'STAR FORGE · Your action has already been used'
+            else:
+                help_text = 'STAR FORGE · Place 2 fighters or 1 destroyer by your War Sun'
+            button(window, ('player_button', ('star_forge',)),
+                   'CANCEL STAR FORGE' if window.star_forge_mode else 'STAR FORGE',
+                   width - 534, height - 45, 108, 24, selected=window.star_forge_mode,
+                   enabled=available, size=9)
+            if available:
+                self.controls.append(Control(('star_forge',), width - 534, height - 45, 108, 24))
+        if window.mitosis_player is self.player:
+            help_text = 'MITOSIS · Choose one controlled planet for 1 infantry'
+        window.text('planet_help', help_text, 16, height - 64, 11, MUTED)
         card_width, gap = (138 if VARIANT == 'Atlas' else 126), 8
         slots = max(1, int((reserve_left - 28) // (card_width + gap)))
         self.card_offset = min(self.card_offset, max(0, len(self.player.planets) - slots))

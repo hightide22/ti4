@@ -23,12 +23,15 @@ class TechnologyTests(unittest.TestCase):
 
     def test_every_available_card_has_a_bundled_scan(self):
         catalog = technology_catalog()
-        self.assertEqual(len(catalog), 33)
+        self.assertEqual(len(catalog), 43)
         self.assertTrue(all(technology_image(card).is_file() for card in catalog.values()))
         self.assertTrue(all(card['source'] == 'base' for card in catalog.values()))
         self.assertNotIn('aida', catalog)
         self.assertNotIn('bs', catalog)
         self.assertEqual(len(available_technologies(self.by_faction['sol'])), 25)
+        for faction in ('arborec', 'saar', 'muaat', 'l1z1x', 'ghost'):
+            player = type(self.by_faction['sol'])(faction, faction, 'blu', 3)
+            self.assertTrue(available_technologies(player), faction)
         manifest = json.loads((Path(__file__).resolve().parents[1] / 'assets/resources.lock.json')
                               .read_text(encoding='utf-8'))
         pinned = {entry['path'] for entry in manifest['files']}

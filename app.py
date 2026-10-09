@@ -138,6 +138,10 @@ class BoardWindow(arcade.Window):
         self.focus_zoom = 1.0
         self.last_click = (None, 0.0)
         self.orbital_drop_mode = False
+        self.star_forge_mode = False
+        self.star_forge_target = None
+        self.star_forge_hits = []
+        self.mitosis_player = None
         self.selected = (0, 0) if (0, 0) in self.board else next(iter(self.board))
         self.hover = None
         self.zoom = self.target_zoom = 1.0
@@ -443,6 +447,8 @@ class BoardWindow(arcade.Window):
     @property
     def bot_actor(self):
         """Whether the current decision belongs to an automated player."""
+        if self.mitosis_player and not self.ai.is_bot(self.mitosis_player):
+            return False
         if self.smoke or not self.ai.bot_factions:
             return False
         actor = (self.movement.session.player if self.movement.session else
@@ -741,17 +747,37 @@ class BoardWindow(arcade.Window):
             for player in self.turn_order.players:
                 player.trade_goods += player.commodities
                 player.commodities = 0
-                player.receive_round_commands()
                 for card in player.planets:
                     card.exhausted = False
                 player.exhausted_technologies.clear()
                 for _ in range(2 if 'nm' in player.technologies else 1):
                     self.action_cards.draw(player, 1)
-            self.turn_order.begin_command_allocation()
-            self.strategy_view = False
-            if not self.turn_order.command_allocation and self.turn_order.strategy_enabled:
-                self.turn_order.begin_strategy_phase()
-                self.strategy_view = True
+            arborec = next((player for player in self.turn_order.players
+                            if player.faction == 'arborec' and
+                            any(tile.planet_owners.get(planet.planet_id) == 'arborec'
+                                for tile in self.board.values() for planet in tile.planets) and
+                            sum(unit.owner == 'arborec' and unit.kind == 'infantry'
+                                for tile in self.board.values() for unit in tile.units) < 12), None)
+            if arborec:
+                if self.ai.is_bot(arborec):
+                    options = [(tile, planet) for tile in self.board.values() for planet in tile.planets
+                               if tile.planet_owners.get(planet.planet_id) == 'arborec']
+                    if options:
+                        tile, planet = min(options, key=lambda entry: sum(
+                            unit.owner == 'arborec' and unit.kind == 'infantry' and
+                            unit.location.planet_id == entry[1].planet_id
+                            for unit in entry[0].units))
+                        self.movement.mitosis(arborec, planet.planet_id)
+                else:
+                    self.mitosis_player = arborec
+                    self.player_panel.active = self.player_panel.players.index(arborec)
+                    self.player_panel.card_offset = 0
+                    self.frame_player_systems(arborec)
+                    self.movement_error = None
+                    self.system_panel.reset()
+                    self.movement_panel.reset()
+                    return
+            self.finish_status_phase()
         self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
         self.frame_player_systems(self.turn_order.active_player)
         self.player_panel.source_pool = None
@@ -763,6 +789,18 @@ class BoardWindow(arcade.Window):
         self.movement_error = None
         self.system_panel.reset()
         self.movement_panel.reset()
+
+    def finish_status_phase(self):
+        for player in self.turn_order.players:
+            player.receive_round_commands()
+        self.turn_order.begin_command_allocation()
+        self.strategy_view = False
+        if not self.turn_order.command_allocation and self.turn_order.strategy_enabled:
+            self.turn_order.begin_strategy_phase()
+            self.strategy_view = True
+        if self.turn_order.active_player:
+            self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
+            self.frame_player_systems(self.turn_order.active_player)
 
     def clear_round_tokens(self):
         """Remove every faction's command token from every system at round end."""
@@ -982,6 +1020,29 @@ class BoardWindow(arcade.Window):
             self.transaction_panel.draw(self, self.transaction)
         elif self.action_card_panel.open:
             self.action_card_panel.draw(self)
+        if self.star_forge_target is not None:
+            self.draw_star_forge_modal()
+
+    def draw_star_forge_modal(self):
+        left, right = self.width / 2 - 220, self.width / 2 + 220
+        bottom, top = self.height / 2 - 92, self.height / 2 + 92
+        from ui_theme import modal
+        modal(left, right, bottom, top)
+        self.text('star_forge_title', 'STAR FORGE', left + 22, top - 36, 17, ACCENT)
+        target = self.board[self.star_forge_target]
+        self.text('star_forge_target', f'{target.name} · Choose units', left + 22,
+                  top - 62, 10, MUTED)
+        self.star_forge_hits.clear()
+        for index, (kind, label) in enumerate((('fighter', '2 FIGHTERS'),
+                                                ('destroyer', '1 DESTROYER'))):
+            x, y, width, height = left + 22 + index * 202, bottom + 30, 184, 42
+            button(self, ('star_forge_choice', kind), label, x, y, width, height,
+                   primary=True, size=11)
+            self.star_forge_hits.append((kind, x, x + width, y, y + height))
+        x, y, width, height = right - 92, top - 40, 72, 24
+        button(self, ('star_forge_choice', 'cancel'), 'CANCEL', x, y, width, height,
+               size=8)
+        self.star_forge_hits.append(('cancel', x, x + width, y, y + height))
 
     def on_update(self, delta_time):
         if self.main_menu_visible:
@@ -1651,6 +1712,14 @@ class BoardWindow(arcade.Window):
                                 arcade.MOUSE_BUTTON_LEFT, 0)
 
             # Sol's component action is selectable from the dashboard and reversible.
+            previous_active = self.turn_order.active_index
+            self.turn_order.active_index = next(index for index, player in
+                                                enumerate(expected_players) if player is not sol_player)
+            self.player_panel.active = expected_players.index(sol_player)
+            self.on_draw()
+            assert self.labels[('player_button', ('orbital_drop',))].text == 'ORBITAL DROP'
+            assert not any(control.action == ('orbital_drop',) for control in self.player_panel.controls)
+            self.turn_order.active_index = previous_active
             self.on_draw()
             assert self.labels[('player_button', ('orbital_drop',))].text == 'ORBITAL DROP'
             drop_control = next(control for control in self.player_panel.controls
@@ -1686,6 +1755,48 @@ class BoardWindow(arcade.Window):
             assert not any(control.action == ('orbital_drop',) for control in self.player_panel.controls)
             self.turn_order.actions_used = 0
             self.turn_order.action_used = False
+            # Smoke-test the new factions' interactive abilities as well.
+            self.configure_game(ROOT / 'maps/four_player.json',
+                                ('muaat', 'arborec', 'sol', 'jolnar'))
+            muaat = self.turn_order.active_player
+            self.on_draw()
+            forge = next(control for control in self.player_panel.controls
+                         if control.action == ('star_forge',))
+            home = next(tile for tile in self.board.values()
+                        if any(unit.owner == 'muaat' and unit.kind == 'warsun'
+                               and unit.location.region == Region.SPACE for unit in tile.units))
+            fighters_before = sum(unit.owner == 'muaat' and unit.kind == 'fighter'
+                                  for unit in home.units)
+            tokens_before = muaat.command_pools['strategic']
+            self.on_mouse_press(forge.left + forge.width / 2, forge.bottom + forge.height / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            sx, sy = self.screen(home.position)
+            self.on_mouse_press(sx, sy, arcade.MOUSE_BUTTON_LEFT, 0)
+            self.on_draw()
+            choice = next(hit for hit in self.star_forge_hits if hit[0] == 'fighter')
+            self.on_mouse_press((choice[1] + choice[2]) / 2, (choice[3] + choice[4]) / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            assert muaat.command_pools['strategic'] == tokens_before - 1
+            assert sum(unit.owner == 'muaat' and unit.kind == 'fighter'
+                       for unit in home.units) == fighters_before + 2
+
+            arborec = next(player for player in self.turn_order.players if player.faction == 'arborec')
+            self.mitosis_player = arborec
+            self.player_panel.active = self.player_panel.players.index(arborec)
+            planet_id = arborec.planets[0].planet.planet_id
+            infantry_before = sum(unit.owner == 'arborec' and unit.kind == 'infantry' and
+                                  unit.location.planet_id == planet_id
+                                  for tile in self.board.values() for unit in tile.units)
+            self.on_draw()
+            planet_control = next(control for control in self.player_panel.controls
+                                  if control.action == ('planet', 0))
+            self.on_mouse_press(planet_control.left + planet_control.width / 2,
+                                planet_control.bottom + planet_control.height / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            assert self.mitosis_player is None
+            assert sum(unit.owner == 'arborec' and unit.kind == 'infantry' and
+                       unit.location.planet_id == planet_id
+                       for tile in self.board.values() for unit in tile.units) == infantry_before + 1
             print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, refresh, and command allocation checked')
             self.close()
 
@@ -1772,6 +1883,39 @@ class BoardWindow(arcade.Window):
             elif not self.movement.session and not self.strategy.session and self.ai.is_bot(turn.active_player):
                 return
         self.sync_turn_action()
+        left = self.width - self.sidebar
+        if self.mitosis_player:
+            if button == arcade.MOUSE_BUTTON_LEFT and x < left and y < self.player_panel.HEIGHT:
+                control = next((control for control in reversed(self.player_panel.controls)
+                                if control.action[0] == 'planet' and control.contains(x, y)), None)
+                if control:
+                    planet_id = self.mitosis_player.planets[control.action[1]].planet.planet_id
+                    try:
+                        self.movement.mitosis(self.mitosis_player, planet_id)
+                        self.mitosis_player = None
+                        self.finish_status_phase()
+                        self.player_panel.active = self.player_panel.players.index(
+                            self.turn_order.active_player)
+                        self.movement_error = None
+                    except MovementError as error:
+                        self.movement_error = str(error)
+            return
+        if self.star_forge_target is not None:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                choice = next((kind for kind, left_hit, right_hit, bottom_hit, top_hit
+                               in self.star_forge_hits
+                               if left_hit <= x <= right_hit and bottom_hit <= y <= top_hit), None)
+                if choice == 'cancel':
+                    self.star_forge_target = None
+                elif choice in ('fighter', 'destroyer'):
+                    try:
+                        self.movement.star_forge(self.turn_order.active_player,
+                                                 self.star_forge_target, choice)
+                        self.star_forge_target = None
+                        self.movement_error = None
+                    except MovementError as error:
+                        self.movement_error = str(error)
+            return
         if self.transaction_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
                 self.handle_transaction_action(self.transaction_panel.hit_test(x, y))
@@ -2012,6 +2156,12 @@ class BoardWindow(arcade.Window):
                 self.sync_turn_action()
             return
         if x < left and y < self.player_panel.HEIGHT:
+            if self.star_forge_mode:
+                panel_control = next((control for control in reversed(self.player_panel.controls)
+                                      if control.contains(x, y)), None)
+                if panel_control and panel_control.action[0] == 'star_forge':
+                    self.star_forge_mode = False
+                return
             if self.orbital_drop_mode:
                 panel_control = next((control for control in reversed(self.player_panel.controls)
                                       if control.contains(x, y)), None)
@@ -2042,6 +2192,10 @@ class BoardWindow(arcade.Window):
                 return
             if panel_control and panel_control.action[0] == 'orbital_drop':
                 self.orbital_drop_mode = True
+                return
+            if panel_control and panel_control.action[0] == 'star_forge':
+                self.star_forge_mode = True
+                self.star_forge_target = None
                 return
             if panel_control and panel_control.action[0] == 'trade':
                 try:
@@ -2110,6 +2264,19 @@ class BoardWindow(arcade.Window):
                 self.selected_units = tuple(u.unit_id for u in inventory_hit.units)
             return
         if y >= self.height - 80:
+            return
+        if self.star_forge_mode and button == arcade.MOUSE_BUTTON_LEFT:
+            position = self.pick(x, y)
+            if position is not None:
+                tile = self.board[position]
+                if any(unit.owner == self.turn_order.active_player.faction and unit.kind == 'warsun' and
+                       unit.location.region == Region.SPACE for unit in tile.units):
+                    self.selected = position
+                    self.star_forge_target = position
+                    self.star_forge_mode = False
+                    self.movement_error = None
+                else:
+                    self.movement_error = 'Choose a system with one of your War Suns.'
             return
         hit = self.unit_renderer.hit_test(x, y)
         picked = hit.tile_position if hit else self.selected if self.focus_view else self.pick(x, y)
@@ -2233,6 +2400,11 @@ class BoardWindow(arcade.Window):
             return
         if symbol == arcade.key.ESCAPE and self.orbital_drop_mode:
             self.orbital_drop_mode = False
+            self.movement_error = None
+            return
+        if symbol == arcade.key.ESCAPE and (self.star_forge_mode or self.star_forge_target is not None):
+            self.star_forge_mode = False
+            self.star_forge_target = None
             self.movement_error = None
             return
         if self.strategy_modal or self.strategy.session:

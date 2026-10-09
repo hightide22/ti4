@@ -7,7 +7,7 @@ import random
 from uuid import uuid4
 
 from player import PlanetCard
-from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile, unit_profiles
+from units import Region, Unit, UnitLocation, UNIT_TYPES, mobile_ship, unit_profile, unit_profiles
 from technology import production_allowed, upgrade_profile
 
 
@@ -330,11 +330,15 @@ class MovementController:
                 if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == unit.unit_id:
                     self.destroy_unit(tile, cargo, session, source_factions)
 
-    def neighbors(self, tile):
+    def neighbors(self, tile, faction=None):
         neighbors = list(self.board.neighbors(tile.position))
         if tile.wormholes:
             neighbors.extend(other for other in self.board.values()
                              if other is not tile and set(tile.wormholes) & set(other.wormholes)
+                             and other not in neighbors)
+        if faction == 'ghost' and set(tile.wormholes) & {'ALPHA', 'BETA'}:
+            neighbors.extend(other for other in self.board.values()
+                             if other is not tile and set(other.wormholes) & {'ALPHA', 'BETA'}
                              and other not in neighbors)
         return neighbors
 
@@ -346,24 +350,28 @@ class MovementController:
     def route(self, origin, target, unit, player, bonus=0, move_bonus=0, ignore_enemy=False):
         if player.faction in origin.command_tokens or origin is target or unit.move_value <= 0:
             return None
-        budget = (min(unit.move_value, 1) if 'nebula' in origin.anomalies else unit.move_value) + bonus + move_bonus
+        slipstream = int(player.faction == 'ghost' and
+                         (origin.number == 51 or bool(set(origin.wormholes) & {'ALPHA', 'BETA'})))
+        budget = (min(unit.move_value, 1) if 'nebula' in origin.anomalies else unit.move_value) + bonus + move_bonus + slipstream
         queue = deque([(origin, (origin.position,))])
         seen = {origin.position}
         while queue:
             tile, path = queue.popleft()
             if len(path) - 1 >= budget:
                 continue
-            for neighbor in self.neighbors(tile):
+            for neighbor in self.neighbors(tile, player.faction):
                 if neighbor.position in seen:
                     continue
-                if 'supernova' in neighbor.anomalies or 'gravity_rift' in neighbor.anomalies:
+                if ('supernova' in neighbor.anomalies and player.faction != 'muaat') or \
+                        ('supernova' in neighbor.anomalies and neighbor is target) or \
+                        'gravity_rift' in neighbor.anomalies:
                     continue
                 if 'asteroid_field' in neighbor.anomalies and 'amd' not in player.technologies:
                     continue
                 next_path = path + (neighbor.position,)
                 if neighbor is target:
                     return next_path
-                enemy = any(u.owner != player.faction and UNIT_TYPES[u.kind]['ship']
+                enemy = any(u.owner != player.faction and mobile_ship(u)
                             and u.location.region == Region.SPACE for u in neighbor.units)
                 if (enemy and 'lwd' not in player.technologies and not ignore_enemy) or \
                         'nebula' in neighbor.anomalies:
@@ -388,7 +396,7 @@ class MovementController:
             for unit in origin.units:
                 independent_fighter = unit.kind == 'fighter' and 'ff2' in player.technologies and \
                     unit.location.region == Region.SPACE
-                if unit.owner == player.faction and (capital_ship(unit) or independent_fighter):
+                if unit.owner == player.faction and ((mobile_ship(unit) and unit.kind != 'fighter') or independent_fighter):
                     path = (target.position,) if origin is target else self.route(origin, target, unit, player)
                     if not path and 'gd' in player.technologies:
                         path = self.route(origin, target, unit, player, bonus=1)
@@ -430,7 +438,7 @@ class MovementController:
             source = session.sources.get(origin.position)
             for unit in origin.units:
                 if unit.owner != player.faction or unit.location.region != Region.SPACE or \
-                        not UNIT_TYPES[unit.kind]['ship'] or not unit.move_value:
+                        not mobile_ship(unit) or not unit.move_value:
                     continue
                 if unit.kind == 'fighter' and 'ff2' not in player.technologies:
                     continue
@@ -457,7 +465,7 @@ class MovementController:
                 independent_fighter = (unit.kind == 'fighter' and
                                        'ff2' in session.player.technologies and
                                        unit.location.region == Region.SPACE)
-                if unit.owner != session.player.faction or not (capital_ship(unit) or independent_fighter):
+                if unit.owner != session.player.faction or not ((mobile_ship(unit) and unit.kind != 'fighter') or independent_fighter):
                     continue
                 path = ((session.target.position,) if origin is session.target else
                         self.route(origin, session.target, unit, session.player,
@@ -495,7 +503,7 @@ class MovementController:
         for unit in origin.units:
             independent_fighter = (unit.kind == 'fighter' and 'ff2' in player.technologies and
                                    unit.location.region == Region.SPACE)
-            if unit.owner != player.faction or not (capital_ship(unit) or independent_fighter):
+            if unit.owner != player.faction or not ((mobile_ship(unit) and unit.kind != 'fighter') or independent_fighter):
                 continue
             path = self.route(origin, session.target, unit, player, ignore_enemy=True)
             if not path and 'gd' in player.technologies:
@@ -554,6 +562,56 @@ class MovementController:
                                      UnitLocation(Region.PLANET, planet_id=planet_id),
                                      profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
         self.history.append(UndoEntry(snapshot))
+        return target
+
+    def star_forge(self, player, position, kind):
+        if player.faction != 'muaat':
+            raise MovementError('Star Forge is an Embers of Muaat faction ability')
+        if self.session:
+            raise MovementError('Finish the current action first')
+        if kind not in ('fighter', 'destroyer'):
+            raise MovementError('Choose two fighters or one destroyer')
+        if player.command_pools['strategic'] <= 0:
+            raise MovementError('Star Forge requires 1 token in the strategy pool')
+        target = self.board.get(position)
+        if target is None or not any(unit.owner == player.faction and unit.kind == 'warsun' and
+                                     unit.location.region == Region.SPACE for unit in target.units):
+            raise MovementError('Choose a system with one of your War Suns')
+        count = 2 if kind == 'fighter' else 1
+        available = {'fighter': 10, 'destroyer': 8}[kind] - sum(
+            unit.owner == player.faction and unit.kind == kind
+            for tile in self.board.values() for unit in tile.units)
+        if available < count:
+            raise MovementError(f'Not enough {kind} units in reinforcements')
+        snapshot = Snapshot.capture(self.board, player, self.players, self.action_cards)
+        player.command_pools['strategic'] -= 1
+        for _ in range(count):
+            target.units.append(Unit(f'{player.faction}-star-forge-{uuid4().hex}', kind,
+                                     player.faction, player.color_code, UnitLocation(Region.SPACE),
+                                     profile_id=(upgrade_profile(player, kind) or {}).get('id')))
+        session = Session(player, target, {}, snapshot)
+        session.stage = 'complete'
+        self.session = session
+        self._check_capacity_and_fleet(session, [(target.position, player.faction)], 'complete')
+        if session.stage == 'complete':
+            self.finish()
+        return target
+
+    def mitosis(self, player, planet_id):
+        if player.faction != 'arborec':
+            raise MovementError('Mitosis is an Arborec faction ability')
+        infantry_count = sum(unit.owner == player.faction and unit.kind == 'infantry'
+                             for tile in self.board.values() for unit in tile.units)
+        if infantry_count >= 12:
+            raise MovementError('No infantry remain in your reinforcements')
+        target = next((tile for tile in self.board.values()
+                       if tile.planet_owners.get(planet_id) == player.faction and
+                       any(planet.planet_id == planet_id for planet in tile.planets)), None)
+        if target is None:
+            raise MovementError('Choose a planet you control')
+        target.units.append(Unit(f'arborec-mitosis-{uuid4().hex}', 'infantry', player.faction,
+                                 player.color_code, UnitLocation(Region.PLANET, planet_id),
+                                 profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
         return target
 
     @staticmethod
@@ -1493,6 +1551,11 @@ class MovementController:
         own_alive = bool(self.combat_units(session, session.player.faction))
         enemies_alive = any(self.combat_units(session, faction)
                             for faction in session.combat_factions if faction != session.player.faction)
+        if session.combat_type == 'ground':
+            self.resolve_harrow(session)
+            own_alive = bool(self.combat_units(session, session.player.faction))
+            enemies_alive = any(self.combat_units(session, faction)
+                                for faction in session.combat_factions if faction != session.player.faction)
         if session.combat_type == 'ground' and (not own_alive or not enemies_alive):
             self.finish_ground_battle(session, own_alive, enemies_alive)
         elif not own_alive or not enemies_alive:
@@ -1519,6 +1582,36 @@ class MovementController:
             session.combat_modifiers.clear()
             session.fighter_combat_modifiers.clear()
 
+    def resolve_harrow(self, session):
+        if not any(unit.owner == 'l1z1x' and unit.location.region == Region.SPACE and
+                   capital_ship(unit) for unit in session.target.units):
+            return
+        planet_id = session.combat_planet_id
+        defenders = [unit for unit in session.target.units if unit.owner != 'l1z1x' and
+                     unit.kind == 'infantry' and unit.location.region == Region.PLANET and
+                     unit.location.planet_id == planet_id]
+        if not defenders or any(unit.owner != 'l1z1x' and unit.location.region == Region.PLANET and
+                                unit.location.planet_id == planet_id and
+                                unit_profile(unit).get('planetaryShield')
+                                for unit in session.target.units):
+            return
+        ships = [unit for unit in session.target.units if unit.owner == 'l1z1x' and
+                 unit.location.region == Region.SPACE and capital_ship(unit) and
+                 unit_profile(unit).get('bombardHitsOn')]
+        hits = 0
+        for ship in ships:
+            profile = unit_profile(ship)
+            threshold = int(profile['bombardHitsOn'])
+            dice = int(profile.get('bombardDieCount') or 1)
+            hits += sum(self.roll_d10(session) >= threshold for _ in range(dice))
+        for _ in range(hits):
+            remaining = [unit for unit in session.target.units if unit.owner != 'l1z1x' and
+                         unit.kind == 'infantry' and unit.location.region == Region.PLANET and
+                         unit.location.planet_id == planet_id]
+            if not remaining:
+                break
+            self.destroy_unit(session.target, remaining[0], session, ('l1z1x',))
+
     def continue_after_salvage(self, session):
         if not session or session.stage != 'space_combat_won':
             raise MovementError('Space combat has not been won.')
@@ -1530,14 +1623,20 @@ class MovementController:
     def production_sites(self, session):
         sites = []
         for unit in session.target.units:
-            if unit.owner != session.player.faction or unit.location.region != Region.PLANET:
+            if unit.owner != session.player.faction:
+                continue
+            value = unit_profile(unit).get('productionValue')
+            if value is None:
+                continue
+            if (unit.kind == 'spacedock' and unit.owner == 'saar' and
+                    unit.location.region == Region.SPACE):
+                sites.append((None, int(value)))
+                continue
+            if unit.location.region != Region.PLANET:
                 continue
             planet_id = unit.location.planet_id
             planet = next((planet for planet in session.target.planets if planet.planet_id == planet_id), None)
             if not planet or session.target.planet_owners.get(planet_id) != session.player.faction:
-                continue
-            value = unit_profile(unit).get('productionValue')
-            if value is None:
                 continue
             if unit.kind == 'spacedock':
                 value_text = str(value)
@@ -1640,7 +1739,15 @@ class MovementController:
         if delta > 0:
             remaining = session.production_limit - self.production_total(session)
             addition = min(2, remaining) if kind in ('infantry', 'fighter') else 1
+            if session.player.faction == 'arborec' and kind == 'infantry':
+                letani_capacity = sum(unit.owner == 'arborec' and unit.kind == 'infantry' and
+                                      unit.location.region == Region.PLANET and
+                                      unit_profile(unit).get('productionValue')
+                                      for unit in session.target.units)
+                addition = min(addition, max(0, letani_capacity - current))
             if addition > remaining:
+                return
+            if addition <= 0:
                 return
             session.production_choices[kind] = current + addition
         elif current:
@@ -1700,8 +1807,15 @@ class MovementController:
                 unit_id = f'{session.player.faction}-built-{next_id}'
                 used_ids.add(unit_id)
                 next_id += 1
-                if kind in ('infantry', 'pds', 'spacedock'):
-                    planet_id = session.production_sites[0][0]
+                if kind == 'spacedock' and session.player.faction == 'saar':
+                    location = UnitLocation(Region.SPACE)
+                elif kind in ('infantry', 'pds', 'spacedock'):
+                    site_planet = session.production_sites[0][0]
+                    owned_planets = [planet.planet_id for planet in session.target.planets
+                                     if session.target.planet_owners.get(planet.planet_id) == session.player.faction]
+                    planet_id = site_planet if site_planet in owned_planets else next(iter(owned_planets), None)
+                    if planet_id is None:
+                        raise MovementError('Ground units and structures need a controlled planet in this system.')
                     location = UnitLocation(Region.PLANET, planet_id=planet_id)
                 else:
                     location = UnitLocation(Region.SPACE)
@@ -1838,10 +1952,17 @@ class MovementController:
             if unit.owner != player.faction and unit.location.region == Region.PLANET and \
                     unit.location.planet_id == planet_id and unit.kind in ('pds', 'spacedock'):
                 target.units.remove(unit)
+                if player.faction == 'l1z1x':
+                    target.units.append(Unit(f'l1z1x-assimilated-{uuid4().hex}', unit.kind,
+                                             player.faction, player.color_code,
+                                             UnitLocation(Region.PLANET, planet_id),
+                                             profile_id=(upgrade_profile(player, unit.kind) or {}).get('id')))
         for other in self.players:
             other.planets[:] = [card for card in other.planets if card.planet.planet_id != planet_id]
         planet = next(planet for planet in target.planets if planet.planet_id == planet_id)
         player.planets.append(PlanetCard(planet, exhausted=True))
+        if player.faction == 'saar':
+            player.trade_goods += 1
         if planet_id not in session.captured_planets:
             session.captured_planets.append(planet_id)
 

@@ -64,9 +64,11 @@ class Unit:
         ship = UNIT_TYPES[self.kind]["ship"]
         if ship and self.location.region != Region.SPACE and not (self.kind == 'fighter' and self.location.region == Region.TRANSPORT):
             raise ValueError("Ships must be in space")
-        if not ship and self.location.region == Region.SPACE:
+        floating_factory = self.kind == 'spacedock' and self.owner == 'saar' and \
+            self.location.region == Region.SPACE
+        if not ship and self.location.region == Region.SPACE and not floating_factory:
             raise ValueError("Ground units must be on a planet or a transport")
-        if self.kind in {"pds", "spacedock"} and self.location.region != Region.PLANET:
+        if self.kind in {"pds", "spacedock"} and self.location.region != Region.PLANET and not floating_factory:
             raise ValueError("Structures must be on a planet")
         if not self.image_path.is_file():
             raise FileNotFoundError(self.image_path)
@@ -84,7 +86,7 @@ UNIT_TYPES = {
     "pds": {"sprite": "pd", "name": "PDS", "ship": False, "size": 38},
     "spacedock": {"sprite": "sd", "name": "Space dock", "ship": False, "size": 42},
 }
-STARTING_CODES = {"cv": "carrier", "cr": "cruiser", "dd": "destroyer", "dn": "dreadnought", "ff": "fighter", "inf": "infantry", "pds": "pds", "sd": "spacedock"}
+STARTING_CODES = {"cv": "carrier", "cr": "cruiser", "dd": "destroyer", "dn": "dreadnought", "ff": "fighter", "inf": "infantry", "pds": "pds", "sd": "spacedock", "ws": "warsun"}
 
 
 @lru_cache(maxsize=1)
@@ -109,17 +111,41 @@ def unit_profile(unit):
     return definitions[unit.kind]
 
 
+def mobile_ship(unit):
+    """Whether a unit may move as a ship; Saar's dock is mobile but not a fleet ship."""
+    return UNIT_TYPES[unit.kind]['ship'] or (unit.owner == 'saar' and unit.kind == 'spacedock' and
+                                             unit.location.region == Region.SPACE)
+
+
 def starting_units(tile: Tile, faction: dict, color_code: str) -> list[Unit]:
     units = []
+    definitions, _ = unit_profiles()
+    spacedock_profile = next((definitions[profile_id] for profile_id in faction.get('units', ())
+                              if profile_id in definitions and
+                              definitions[profile_id].get('baseType') == 'spacedock'), {})
+    floating_factory = faction['alias'] == 'saar' and 'placed in the space area' in \
+        spacedock_profile.get('ability', '').lower()
+    unlocated_infantry = 0
     for item in faction["startingFleet"].split(","):
         parts = item.strip().split()
         count = int(parts.pop(0)) if parts[0].isdigit() else 1
         kind = STARTING_CODES[parts.pop(0)]
-        if UNIT_TYPES[kind]["ship"]:
+        if UNIT_TYPES[kind]["ship"] or (kind == 'spacedock' and floating_factory):
             location = UnitLocation(Region.SPACE)
+        elif not parts and kind == 'infantry' and len(tile.planets) > 1:
+            # Saar's faction sheet leaves these four infantry unbound to a
+            # particular planet; deploy them evenly across its home planets.
+            for index in range(count):
+                planet = tile.planets[(unlocated_infantry + index) % len(tile.planets)]
+                units.append(Unit(f"{faction['alias']}-{len(units) + 1}", kind,
+                                  faction['alias'], color_code,
+                                  UnitLocation(Region.PLANET, planet.planet_id)))
+            unlocated_infantry += count
+            continue
         else:
-            prefix = parts[0]
-            matches = [p for p in tile.planets if p.name.lower().startswith(prefix)]
+            prefix = parts[0] if parts else ''
+            matches = [p for p in tile.planets if p.name.lower().startswith(prefix) or
+                       p.planet_id.lower().startswith(prefix)]
             if len(matches) != 1:
                 raise ValueError(f"Ambiguous starting planet: {prefix}")
             location = UnitLocation(Region.PLANET, matches[0].planet_id)
@@ -134,9 +160,15 @@ def setup_starting_fleets(board, config: dict):
     factions = {f["alias"]: f for f in json.loads((RESOURCES / "data/factions/base.json").read_text(encoding="utf-8"))}
     for entry in config["tiles"]:
         if entry.get("faction"):
-            tile = board[(entry["q"], entry["r"])]
             faction = factions[entry["faction"]]
-            if int(faction["homeSystem"]) != tile.number:
+            if entry['faction'] == 'ghost':
+                tile = next((candidate for candidate in board.values()
+                             if any(planet.faction_homeworld == 'ghost'
+                                    for planet in candidate.planets)), None)
+            else:
+                tile = board[(entry["q"], entry["r"])]
+            expected_home = 51 if entry['faction'] == 'ghost' else int(faction['homeSystem'])
+            if tile is None or tile.number != expected_home:
                 raise ValueError("Faction does not match its home system")
             tile.units = starting_units(tile, faction, entry["unit_color"])
 

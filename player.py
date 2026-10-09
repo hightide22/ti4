@@ -98,7 +98,10 @@ def create_players(board, config):
         alias = entry.get('faction')
         if alias:
             faction = factions[alias]
-            tile = board[(entry['q'], entry['r'])]
+            tile = next((candidate for candidate in board.values()
+                         if any(planet.faction_homeworld == alias for planet in candidate.planets)), None)
+            if tile is None:
+                tile = board[(entry['q'], entry['r'])]
             tile.planet_owners.update({planet.planet_id: alias for planet in tile.planets})
             players.append(PlayerState(alias, faction['factionName'], entry['unit_color'],
                                        faction['commodities'], [PlanetCard(p) for p in tile.planets],

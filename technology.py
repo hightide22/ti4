@@ -13,7 +13,7 @@ from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles
 
 COLORS = {'B': 'PROPULSION', 'G': 'BIOTIC', 'R': 'WARFARE', 'Y': 'CYBERNETIC'}
 COLOR_CODES = {name: code for code, name in COLORS.items()}
-FACTIONS = {'sol', 'jolnar', 'letnev', 'hacan'}
+FACTIONS = {'sol', 'jolnar', 'letnev', 'hacan', 'arborec', 'saar', 'muaat', 'l1z1x', 'ghost'}
 
 
 @lru_cache(maxsize=1)
@@ -131,7 +131,16 @@ def unit_stats(player, kind):
 
 
 def production_allowed(player, kind):
-    return kind in UNIT_TYPES and (kind != 'warsun' or 'ws' in player.technologies)
+    if kind not in UNIT_TYPES or (kind == 'warsun' and 'ws' not in player.technologies):
+        return False
+    # Their space docks cannot produce infantry; the Letani Warriors'
+    # production value is accounted for separately by the production picker.
+    if player.faction == 'arborec' and kind == 'infantry':
+        definitions, factions = unit_profiles()
+        letani = next((definitions[profile_id] for profile_id in factions['arborec'].get('units', ())
+                       if profile_id in definitions and definitions[profile_id].get('baseType') == 'infantry'), None)
+        return bool(letani and letani.get('productionValue'))
+    return True
 
 
 def restore_infantry_on_cards(player, board):

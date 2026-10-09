@@ -221,6 +221,9 @@ def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
         colors = {
             'sol': (106, 183, 255), 'jolnar': (185, 148, 248),
             'letnev': (219, 111, 132), 'hacan': (244, 183, 87),
+            'arborec': (106, 190, 131), 'ghost': (112, 190, 215),
+            'l1z1x': (178, 116, 132), 'muaat': (231, 121, 75),
+            'saar': (208, 188, 91),
         }
         for entry, alias in zip(slots, factions):
             faction = faction_data.get(alias)
@@ -231,9 +234,35 @@ def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
             entry['player'] = f"Player {slots.index(entry) + 1} · {faction['factionName']}"
             entry['color'] = colors.get(alias, (100, 207, 224))
             entry['unit_color'] = faction_unit_color(faction)
+            if alias == 'ghost':
+                # Tile 17 is the Creuss Gate; their planet-bearing home system
+                # (tile 51) is placed beside it in the play area.
+                entry['ghost_home_label'] = entry.get('player')
+                entry['player'] = None
     board = Board(TILES.from_entry(entry) for entry in config["tiles"])
     if not board:
         raise ValueError("Map must contain at least one tile")
+    for entry in config['tiles']:
+        if entry.get('faction') != 'ghost':
+            continue
+        gate = board[(entry['q'], entry['r'])]
+        candidates = [(gate.position[0] + dq, gate.position[1] + dr)
+                      for dq, dr in DIRECTIONS
+                      if (gate.position[0] + dq, gate.position[1] + dr) not in board]
+        if not candidates:
+            # Expand the map edge if the home position is fully surrounded.
+            candidates = [(gate.position[0] + 2 * dq, gate.position[1] + 2 * dr)
+                          for dq, dr in DIRECTIONS
+                          if (gate.position[0] + 2 * dq, gate.position[1] + 2 * dr) not in board]
+        if not candidates:
+            raise ValueError('Could not place the Creuss home system outside the galaxy')
+        # Put the detached home system on the outward-facing side of the gate.
+        home_pos = max(candidates, key=lambda pos: pos[0] * gate.position[0] +
+                       pos[1] * gate.position[1])
+        board.add(TILES.create(51, home_pos, entry.get('ghost_home_label'),
+                               entry.get('color', (112, 190, 215))))
+        entry['ghost_home_position'] = home_pos
+        entry['player'] = None
     from units import setup_starting_fleets
     setup_starting_fleets(board, config)
     return config, board

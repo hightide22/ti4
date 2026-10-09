@@ -4,13 +4,14 @@ from unittest.mock import patch
 
 from board import ROOT, load_board
 from action_card_deck import ActionCardDeck
-from movement import MovementController, MovementError, Session, Snapshot
+from movement import MovementController, MovementError, Session, Snapshot, capital_ship
 from main_menu import MainMenu
 from player import create_players
 from strategic_action import StrategyController, StrategyResolution
 from transactions import TransactionController, TransactionError
 from turn_order import TurnOrder
-from units import Region, Unit, UnitLocation
+from technology import production_allowed
+from units import Region, Unit, UnitLocation, mobile_ship
 
 
 class SetupTests(unittest.TestCase):
@@ -60,8 +61,111 @@ class SetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exactly 4'):
             load_board(map_path, ('sol', 'jolnar', 'hacan'))
 
+    def test_new_base_factions_setup_with_their_faction_homeworlds(self):
+        for faction in ('arborec', 'saar', 'muaat', 'l1z1x', 'ghost'):
+            with self.subTest(faction=faction):
+                fillers = [alias for alias in ('sol', 'jolnar', 'hacan', 'letnev')]
+                factions = [faction, *fillers[:3]]
+                config, board = load_board(ROOT / 'maps/four_player.json', factions)
+                players = create_players(board, config)
+                player = next(player for player in players if player.faction == faction)
+                self.assertTrue(any(planet.faction_homeworld == faction for tile in board.values()
+                                    for planet in tile.planets))
+                self.assertTrue(any(unit.owner == faction for tile in board.values()
+                                    for unit in tile.units))
+                if faction == 'ghost':
+                    self.assertIn(51, {tile.number for tile in board.values()})
+                    self.assertIn(17, {tile.number for tile in board.values()})
+                if faction == 'saar':
+                    dock = next(unit for tile in board.values() for unit in tile.units
+                                if unit.owner == faction and unit.kind == 'spacedock')
+                    self.assertEqual(dock.location.region, Region.SPACE)
+                    self.assertTrue(mobile_ship(dock))
+                    self.assertFalse(capital_ship(dock))
+
+    def test_arborec_infantry_is_only_producible_from_letani(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('arborec', 'sol', 'jolnar', 'hacan'))
+        arborec = next(player for player in create_players(board, config)
+                       if player.faction == 'arborec')
+        self.assertTrue(production_allowed(arborec, 'infantry'))
+
 
 class FactionAbilityTests(unittest.TestCase):
+    def test_arborec_mitosis_places_infantry_on_a_controlled_planet(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('arborec', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        arborec = next(player for player in players if player.faction == 'arborec')
+        movement = MovementController(board, players)
+        planet = arborec.planets[0].planet
+        before = sum(unit.owner == 'arborec' and unit.kind == 'infantry' and
+                     unit.location.planet_id == planet.planet_id
+                     for tile in board.values() for unit in tile.units)
+
+        movement.mitosis(arborec, planet.planet_id)
+
+        self.assertEqual(sum(unit.owner == 'arborec' and unit.kind == 'infantry' and
+                             unit.location.planet_id == planet.planet_id
+                             for tile in board.values() for unit in tile.units), before + 1)
+
+    def test_l1z1x_harrow_bombards_after_each_ground_combat_round(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('l1z1x', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        l1z1x = next(player for player in players if player.faction == 'l1z1x')
+        sol = next(player for player in players if player.faction == 'sol')
+        target = next(tile for tile in board.values() if tile.planets and not tile.units)
+        planet = target.planets[0]
+        target.units.extend((
+            Unit('harrow-dread', 'dreadnought', 'l1z1x', l1z1x.color_code,
+                 UnitLocation(Region.SPACE)),
+            Unit('harrow-attacker', 'infantry', 'l1z1x', l1z1x.color_code,
+                 UnitLocation(Region.PLANET, planet.planet_id)),
+            Unit('harrow-defender-1', 'infantry', 'sol', sol.color_code,
+                 UnitLocation(Region.PLANET, planet.planet_id)),
+            Unit('harrow-defender-2', 'infantry', 'sol', sol.color_code,
+                 UnitLocation(Region.PLANET, planet.planet_id)),
+        ))
+        movement = MovementController(board, players)
+        session = Session(l1z1x, target, {}, Snapshot.capture(board, l1z1x, players),
+                          combat_type='ground', combat_planet_id=planet.planet_id,
+                          combat_factions=('l1z1x', 'sol'), combat_round=1)
+        movement.session = session
+        before = sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                     unit.location.planet_id == planet.planet_id for unit in target.units)
+
+        with patch('movement.random.randint', return_value=10):
+            movement._finish_combat_round(session)
+
+        self.assertEqual(sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                             unit.location.planet_id == planet.planet_id for unit in target.units), before - 1)
+
+    def test_muaat_star_forge_spends_strategy_token_and_is_reversible(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('muaat', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        muaat = next(player for player in players if player.faction == 'muaat')
+        movement = MovementController(board, players)
+        home = next(tile for tile in board.values()
+                    if any(unit.owner == 'muaat' and unit.kind == 'warsun'
+                           and unit.location.region == Region.SPACE for unit in tile.units))
+        before_tokens = muaat.command_pools['strategic']
+        before_home_fighters = sum(unit.owner == 'muaat' and unit.kind == 'fighter'
+                                   for unit in home.units)
+        before_fighters = sum(unit.owner == 'muaat' and unit.kind == 'fighter'
+                              for tile in board.values() for unit in tile.units)
+
+        movement.star_forge(muaat, home.position, 'fighter')
+
+        self.assertEqual(muaat.command_pools['strategic'], before_tokens - 1)
+        self.assertEqual(sum(unit.owner == 'muaat' and unit.kind == 'fighter'
+                             for unit in home.units), before_home_fighters + 2)
+        self.assertTrue(movement.undo())
+        self.assertEqual(muaat.command_pools['strategic'], before_tokens)
+        self.assertEqual(sum(unit.owner == 'muaat' and unit.kind == 'fighter'
+                             for tile in board.values() for unit in tile.units), before_fighters)
+
     def test_sol_versatile_grants_one_extra_command_each_round(self):
         config, board = load_board()
         players = create_players(board, config)

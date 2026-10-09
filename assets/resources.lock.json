@@ -1426,6 +1426,56 @@
       "path": "hover_images/techs/faction/eres_siphons.jpg",
       "size": 117582,
       "sha": "1e3071c8a46a3fbd37791aa8d276999db5ab0f3e"
+    },
+    {
+      "path": "hover_images/techs/faction/magmus_reactor_omega.jpg",
+      "size": 185759,
+      "sha": "b0ea194cd7e3b2484e04606326e328803822f804"
+    },
+    {
+      "path": "hover_images/techs/faction/inheritance_systems.jpg",
+      "size": 140341,
+      "sha": "c1c2f29f761e6349945a67ce9116b33088401fa4"
+    },
+    {
+      "path": "hover_images/techs/faction/dimensional_splicer.jpg",
+      "size": 135472,
+      "sha": "af43484d753fe2db6ac8e3840a51610d1e2a11c8"
+    },
+    {
+      "path": "hover_images/techs/faction/prototype_war_sun_2.jpg",
+      "size": 164965,
+      "sha": "19df3f1a5c4044bf34528785a477c950358b1b1a"
+    },
+    {
+      "path": "hover_images/techs/faction/chaos_mapping.jpg",
+      "size": 156071,
+      "sha": "ad0dbf13ce66b54bdc58110fadc230961c63b899"
+    },
+    {
+      "path": "hover_images/techs/faction/letani_warrior_2.jpg",
+      "size": 147330,
+      "sha": "0833d7c222eeee373c0aed2981815a3f90c02dc2"
+    },
+    {
+      "path": "hover_images/techs/faction/wormhole_generator_omega.jpg",
+      "size": 206043,
+      "sha": "eddaf7efb2e891a0b4bae0364f89b8984b938c0c"
+    },
+    {
+      "path": "hover_images/techs/faction/bioplasmosis.jpg",
+      "size": 123012,
+      "sha": "b18ea0336fd5b5b8139d787bec152edd840f9f9b"
+    },
+    {
+      "path": "hover_images/techs/faction/superdreadnought_2.jpg",
+      "size": 149791,
+      "sha": "ac81a3bbf1f9c7d95602858cbdd64fe729142527"
+    },
+    {
+      "path": "hover_images/techs/faction/floating_factory_2.jpg",
+      "size": 153164,
+      "sha": "14fc4b8cc95a0392244b8d38d1f9b9338f23f58d"
     }
   ]
 }
