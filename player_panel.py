@@ -127,27 +127,39 @@ class PlayerPanel:
                      'PLANETS · Click to pay influence' if leadership else
                      'PLANETS · Click to pay resources' if window.movement.session and window.movement.session.stage == 'production'
                      else 'PLANETS · Hover for details')
-        window.text('planet_help', help_text, 16, height - 64, 11, MUTED)
         active = window.turn_order.active_player
         can_use_orbital_drop = (self.player is active and self.player.faction == 'sol' and
                                 self.player.command_pools['strategic'] > 0 and
                                 window.turn_order.can_take_action and not window.turn_order.command_allocation and
                                 not window.turn_order.strategy_selection and not window.strategy.session and
                                 not window.movement.session)
+        sol_action_window = (interactive and self.player is active and self.player.faction == 'sol' and
+                             not window.turn_order.command_allocation and
+                             not window.turn_order.strategy_selection and not window.strategy.session and
+                             not window.movement.session)
         can_trade = (self.player is active and not window.turn_order.command_allocation and
                      not window.turn_order.strategy_selection and not window.strategy.session and
                      not window.movement.session and not window.orbital_drop_mode)
+        if sol_action_window:
+            help_text = ('ORBITAL DROP · Click the button, then a controlled planet'
+                         if can_use_orbital_drop or window.orbital_drop_mode else
+                         'ORBITAL DROP · No strategy token available'
+                         if self.player.command_pools['strategic'] <= 0 else
+                         'ORBITAL DROP · Your action has already been used')
+        window.text('planet_help', help_text, 16, height - 64, 11, MUTED)
         if interactive and can_trade:
             if self.player.faction == 'sol':
-                self.button(window, ('trade',), 'TRADE', width - 469, height - 45, 52, 24)
-                if can_use_orbital_drop or window.orbital_drop_mode:
-                    self.button(window, ('orbital_drop',), 'DROP', width - 411,
-                                height - 45, 54, 24, selected=window.orbital_drop_mode)
+                self.button(window, ('trade',), 'TRADE', width - 592, height - 45, 52, 24)
             else:
                 self.button(window, ('trade',), 'TRADE', width - 469, height - 45, 111, 24)
-        elif interactive and (can_use_orbital_drop or window.orbital_drop_mode):
-            self.button(window, ('orbital_drop',), 'CANCEL DROP' if window.orbital_drop_mode else 'ORBITAL DROP',
-                        width - 469, height - 45, 111, 24, selected=window.orbital_drop_mode)
+        if sol_action_window:
+            available = can_use_orbital_drop or window.orbital_drop_mode
+            label = 'CANCEL ORBITAL DROP' if window.orbital_drop_mode else 'ORBITAL DROP'
+            button(window, ('player_button', ('orbital_drop',)), label,
+                   width - 534, height - 45, 108, 24,
+                   selected=window.orbital_drop_mode, enabled=available, size=9)
+            if available:
+                self.controls.append(Control(('orbital_drop',), width - 534, height - 45, 108, 24))
         card_width, gap = (138 if VARIANT == 'Atlas' else 126), 8
         slots = max(1, int((reserve_left - 28) // (card_width + gap)))
         self.card_offset = min(self.card_offset, max(0, len(self.player.planets) - slots))

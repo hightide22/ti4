@@ -1652,6 +1652,7 @@ class BoardWindow(arcade.Window):
 
             # Sol's component action is selectable from the dashboard and reversible.
             self.on_draw()
+            assert self.labels[('player_button', ('orbital_drop',))].text == 'ORBITAL DROP'
             drop_control = next(control for control in self.player_panel.controls
                                 if control.action == ('orbital_drop',))
             planet_control = next(control for control in self.player_panel.controls
@@ -1678,6 +1679,13 @@ class BoardWindow(arcade.Window):
             assert sol_player.command_pools['strategic'] == before_strategy
             assert sum(unit.owner == 'sol' and unit.kind == 'infantry' and
                        unit.location.planet_id == planet_id for unit in target.units) == before_count
+            self.turn_order.actions_used = 1
+            self.turn_order.action_used = True
+            self.on_draw()
+            assert self.labels[('player_button', ('orbital_drop',))].text == 'ORBITAL DROP'
+            assert not any(control.action == ('orbital_drop',) for control in self.player_panel.controls)
+            self.turn_order.actions_used = 0
+            self.turn_order.action_used = False
             print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, refresh, and command allocation checked')
             self.close()
 
