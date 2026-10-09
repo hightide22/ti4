@@ -1019,11 +1019,13 @@ class MovementController:
                 options.append(tile)
         return options
 
-    def announce_retreat(self):
+    def announce_retreat(self, faction=None):
         session = self.session
         if not session or session.stage != 'space_combat' or session.combat_needs_resolution:
             raise MovementError('Retreat can only be announced before combat rolls')
-        faction = session.player.faction
+        faction = session.player.faction if faction is None else faction
+        if faction not in session.combat_factions:
+            raise MovementError('This faction is not participating in space combat')
         if session.retreat_blocked_round == session.combat_round + 1:
             raise MovementError('Your retreat was intercepted for this combat round.')
         if session.retreat_announced:

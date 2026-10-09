@@ -17,14 +17,14 @@ TRIALS = 192
 MAX_ROUNDS = 12
 
 
-def _spec(unit, technologies):
+def _spec(unit, technologies, carries_ground=False):
     profile = unit_profile(unit)
     sustain = bool(profile.get('sustainDamage')) and not unit.damaged
     hp = 1 + (2 if 'nes' in technologies else 1) * sustain
     threshold = int(profile.get('combatHitsOn') or 11) + (unit.owner == 'jolnar')
     return (unit.kind, threshold, int(profile.get('combatDieCount') or 1), hp,
             int(profile.get('afbHitsOn') or 11), int(profile.get('afbDieCount') or 1),
-            unit.capacity)
+            unit.capacity, bool(carries_ground))
 
 
 def _roll_hits(fleet, rng):
@@ -57,8 +57,10 @@ def _barrage(firing, targets, rng):
 
 
 @lru_cache(maxsize=512)
-def _estimate(attacker_specs, defender_specs, space, cannon_specs, require_transport):
-    if require_transport and not any(spec[6] for spec in attacker_specs):
+def _estimate(attacker_specs, defender_specs, space, cannon_specs, require_transport,
+              linked_transport):
+    transport_index = 7 if linked_transport else 6
+    if require_transport and not any(spec[transport_index] for spec in attacker_specs):
         return 0.0
     if not defender_specs and not cannon_specs:
         return 1.0
@@ -90,17 +92,24 @@ def _estimate(attacker_specs, defender_specs, space, cannon_specs, require_trans
             _take_hits(defenders, attack_hits)
             _take_hits(attackers, defense_hits)
         if attackers and not defenders and (not require_transport or
-                                            any(spec[6] for spec in attackers)):
+                                            any(spec[transport_index] for spec in attackers)):
             wins += 1
     return wins / TRIALS
 
 
 def win_probability(attackers, defenders, players, *, space=True, cannons=(),
-                    require_transport=False):
-    """Estimate the chance that the attacking force survives and wins."""
+                    require_transport=False, cargo_carriers=None):
+    """Estimate survival and victory, optionally requiring a loaded carrier to live.
+
+    ``cargo_carriers`` contains IDs of ships carrying the required ground
+    forces.  When omitted, the older capacity-only transport check applies.
+    """
     technologies = {player.faction: player.technologies for player in players}
-    attacker_specs = tuple(sorted(_spec(unit, technologies.get(unit.owner, ()))
-                                  for unit in attackers))
+    carrier_ids = set(cargo_carriers) if cargo_carriers is not None else None
+    attacker_specs = tuple(sorted(
+        (_spec(unit, technologies.get(unit.owner, ()),
+               carrier_ids is not None and unit.unit_id in carrier_ids)
+         for unit in attackers), key=lambda spec: (*spec[:7], -spec[7])))
     defender_specs = tuple(sorted(_spec(unit, technologies.get(unit.owner, ()))
                                   for unit in defenders))
     attacker_tech = technologies.get(attackers[0].owner, ()) if attackers else ()
@@ -116,4 +125,4 @@ def win_probability(attackers, defenders, players, *, space=True, cannons=(),
                              int(profile.get('spaceCannonDieCount') or 1) + plasma,
                              'gls' in cannon_tech))
     return _estimate(attacker_specs, defender_specs, space, tuple(sorted(cannon_specs)),
-                     require_transport)
+                     require_transport, carrier_ids is not None)

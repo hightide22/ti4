@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from game_ai import GameAI, payment_plan
+from game_ai import GameAI, TECH_PRIORITY, payment_plan, resource_opportunity
 from ai_combat import win_probability
 from player import PlayerState
 from turn_order import TurnOrder
@@ -12,6 +12,7 @@ from board import load_board
 from player import create_players
 from movement import MovementController
 from units import Region, Unit, UnitLocation
+from technology import technology_catalog
 
 
 @dataclass
@@ -27,6 +28,26 @@ class Card:
 
 
 class GameAITests(unittest.TestCase):
+    def test_technology_priorities_reference_real_base_cards(self):
+        self.assertFalse(set(TECH_PRIORITY) - set(technology_catalog()))
+        self.assertTrue({'dd2', 'cr2', 'inf2', 'ac2', 'so2'} <= set(TECH_PRIORITY))
+
+    def test_technology_can_use_three_specialty_planets_for_prerequisites(self):
+        player = PlayerState('sol', 'Sol', 'blue', 4)
+        player.planets = [SimpleNamespace(
+            planet=SimpleNamespace(planet_id=f'red-{index}', resources=0,
+                                   influence=0, tech_specialties=('WARFARE',)),
+            exhausted=False) for index in range(3)]
+        player.trade_goods = 4
+        window = SimpleNamespace(board={}, turn_order=SimpleNamespace(round_number=2))
+        ai = GameAI(window, {'sol'})
+        with patch('game_ai.available_technologies',
+                   return_value=[technology_catalog()['asc']]):
+            choice = ai.choose_technology(player, 4)
+        self.assertIsNotNone(choice)
+        self.assertEqual(choice[0], 'asc')
+        self.assertEqual(len(choice[1]), 3)
+
     def test_payment_uses_exact_planets_and_only_needed_goods(self):
         player = SimpleNamespace(planets=[Card(4, 0, 'four'), Card(3, 0, 'three'),
                                           Card(1, 0, 'one')], trade_goods=2)
@@ -38,6 +59,20 @@ class GameAITests(unittest.TestCase):
         player.trade_goods = 0
         self.assertEqual(payment_plan(player, 5, lambda c: c.resources),
                          (('four', 'three'), 0))
+
+    def test_resource_payment_preserves_influence_when_costs_are_equal(self):
+        player = SimpleNamespace(planets=[Card(4, 4, 'cultural'),
+                                          Card(2, 0, 'industrial-a'),
+                                          Card(2, 0, 'industrial-b')], trade_goods=0)
+        planets, goods = payment_plan(player, 4, lambda c: c.planet.resources,
+                                      resource_opportunity)
+        self.assertEqual(set(planets), {'industrial-a', 'industrial-b'})
+        self.assertEqual(goods, 0)
+
+    def test_resource_payment_uses_good_instead_of_exhausting_high_influence_planet(self):
+        player = SimpleNamespace(planets=[Card(1, 6, 'mecatol')], trade_goods=1)
+        self.assertEqual(payment_plan(player, 1, lambda c: c.planet.resources,
+                                      resource_opportunity), ((), 1))
 
     def test_strategy_draft_adapts_to_command_pool_and_faction(self):
         players = [PlayerState('sol', 'Sol', 'blue', 4),
@@ -89,6 +124,26 @@ class GameAITests(unittest.TestCase):
         selected = ai.start_activation.call_args.args[1]
         self.assertNotEqual(selected[1], selected[2])
         self.assertFalse(window.strategy.start.called)
+
+    def test_fleet_logistics_bot_uses_its_second_action(self):
+        player = PlayerState('sol', 'Sol', 'blue', 4)
+        player.technologies = frozenset({'fl'})
+        turn = TurnOrder([player])
+        turn.mark_action_completed()
+        self.assertTrue(turn.can_take_action)
+        window = SimpleNamespace(
+            turn_order=turn, board={}, movement=SimpleNamespace(session=None),
+            strategy=SimpleNamespace(session=None),
+            action_cards=SimpleNamespace(pending=None),
+            transaction=SimpleNamespace(session=None), pass_turn=Mock())
+        ai = GameAI(window, {'sol'})
+        ai.best_activation = Mock(return_value=(18, (0, 0), (0, 0)))
+        ai.start_activation = Mock()
+
+        ai.step()
+
+        ai.start_activation.assert_called_once()
+        window.pass_turn.assert_not_called()
 
     def test_combat_odds_refuse_suicidal_attack_and_allow_superior_fleet(self):
         config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
@@ -142,6 +197,25 @@ class GameAITests(unittest.TestCase):
                                          require_transport=True), 1)
         self.assertLess(win_probability([carrier], [], players, cannons=[pds],
                                         require_transport=True), 1)
+
+    def test_invasion_odds_track_the_carrier_with_ground_forces(self):
+        config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
+        players = create_players(board, config)
+        sol = next(player for player in players if player.faction == 'sol')
+        hacan = next(player for player in players if player.faction == 'hacan')
+        loaded = Unit('loaded-carrier', 'carrier', sol.faction, sol.color_code,
+                      UnitLocation(Region.SPACE))
+        empty = Unit('empty-carrier', 'carrier', sol.faction, sol.color_code,
+                     UnitLocation(Region.SPACE))
+        pds = Unit('cannon', 'pds', hacan.faction, hacan.color_code,
+                   UnitLocation(Region.PLANET, 'test-planet'))
+        self.assertEqual(win_probability([loaded, empty], [], players,
+                                         cannons=[pds], require_transport=True), 1)
+        chance = win_probability([loaded, empty], [], players, cannons=[pds],
+                                 require_transport=True,
+                                 cargo_carriers={loaded.unit_id})
+        self.assertGreater(chance, 0)
+        self.assertLess(chance, 1)
 
     def test_bot_assignment_sustains_ship_before_losing_fighter(self):
         # Combat's existing assigner decides how damage is applied; the bot

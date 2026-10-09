@@ -641,7 +641,8 @@ class MovementTests(unittest.TestCase):
         infantry = next(unit for unit in source.passengers if unit.kind == 'infantry')
         session.toggle(carrier.unit_id)
         session.toggle(infantry.unit_id)
-        self.controller.confirm()
+        with patch('movement.random.randint', return_value=1):
+            self.controller.confirm()
         self.controller.cycle_landing(infantry.unit_id)
         with patch('movement.random.randint', return_value=1):
             self.controller.establish_control()

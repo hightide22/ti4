@@ -18,7 +18,7 @@ def click(window, action):
                           arcade.MOUSE_BUTTON_LEFT, 0)
 
 
-def main(player_count=3):
+def main(player_count=3, rounds=2):
     window = BoardWindow(smoke=False, show_menu=True)
     try:
         window.switch_to()
@@ -122,7 +122,7 @@ def main(player_count=3):
                 window.ai.cycle_speed()
                 window.ai.cycle_speed()
                 assert window.ai.speed == 4.0
-            if window.turn_order.round_number > initial_round + 1:
+            if window.turn_order.round_number >= initial_round + rounds:
                 break
         else:
             raise AssertionError(f'Automated round did not finish: round={window.turn_order.round_number}, '
@@ -137,9 +137,9 @@ def main(player_count=3):
         final_planets = {p.faction: len(p.planets) for p in window.turn_order.players}
         assert final_units >= initial_units
         assert any(final_planets[f] > initial_planets[f] for f in initial_planets)
-        assert conversions == 2
+        assert conversions == rounds
         assert movement_preview
-        print(f'PASS: AI setup, draft, strategy, tactical actions and two rounds complete '
+        print(f'PASS: AI setup, draft, strategy, tactical actions and {rounds} rounds complete '
               f'in {step + 1} scheduler steps; units {initial_units}->{final_units}; '
               f'planets {initial_planets}->{final_planets}')
     finally:
@@ -149,4 +149,6 @@ def main(player_count=3):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--players', type=int, choices=(3, 4), default=3)
-    main(parser.parse_args().players)
+    parser.add_argument('--rounds', type=int, default=2)
+    args = parser.parse_args()
+    main(args.players, args.rounds)
