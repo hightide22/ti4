@@ -360,23 +360,30 @@ class CombatPanel:
 
         if session.stage == 'retreat_selection':
             window.text('retreat_title', 'RETREAT TO AN ADJACENT SYSTEM', left + 24, bottom + 77, 10, ACCENT)
+            retreating_player = next((player for player in window.player_panel.players
+                                      if player.faction == session.retreat_announced), None)
             options = window.movement.retreat_options(session, session.retreat_announced)
             columns = min(6, max(1, len(options)))
             cell_width = (width - 48) / columns
-            for index, tile in enumerate(options if not window.ai.is_bot(session.player) else ()):
+            human_selecting = retreating_player is not None and not window.ai.is_bot(retreating_player)
+            for index, tile in enumerate(options if human_selecting else ()):
                 row, column = divmod(index, 6)
                 bx = left + 24 + column * cell_width
                 by = bottom + 24 - row * 27
                 arcade.draw_lrbt_rectangle_filled(bx, bx + cell_width - 5, by, by + 23, SELECTED)
-                label = f'Tile {tile.system_id}'
+                label = f'Tile {tile.system_id} · {tile.name}'
                 window.text(('retreat_option', tile.position), label, bx + 6, by + 7, 8, INK,
                             cell_width - 14)
                 self.action_hits.append((('retreat_to', tile.position), bx, bx + cell_width - 5, by, by + 23))
             if not options:
                 window.text('retreat_no_options', 'No legal adjacent system remains.', left + 24,
                             bottom + 52, 10, MUTED)
-            window.text('combat_help', 'Select a valid adjacent system for your fleet.',
-                        left + 24, bottom + 99, 11, MUTED, width - 48)
+            elif human_selecting:
+                window.text('combat_help', 'Choose where your fleet will retreat.',
+                            left + 24, bottom + 99, 11, MUTED, width - 48)
+            else:
+                window.text('combat_help', 'AI is choosing a retreat destination…',
+                            left + 24, bottom + 99, 11, MUTED, width - 48)
         elif session.combat_needs_resolution:
             complete = window.movement.combat_assignments_complete(session)
             units_label = 'ground forces' if session.combat_type == 'ground' else 'ships'
@@ -416,26 +423,49 @@ class CombatPanel:
                         INK if enabled else MUTED, bw - 18)
             if enabled:
                 self.action_hits.append((('fire_team_resolve', faction), bx, bx + bw, by, by + bh))
-        if (session.stage == 'space_combat' and not session.retreat_announced and
-                not window.ai.is_bot(session.player)):
-            retreat_options = window.movement.retreat_options(session, session.player.faction)
-            rx, ry, rw, rh = left + 20, bottom + 24, min(220, col_width - 24), 38
-            blocked = session.retreat_blocked_round == session.combat_round + 1
-            enabled = bool(retreat_options) and not session.combat_needs_resolution and not blocked
-            arcade.draw_lrbt_rectangle_filled(rx, rx + rw, ry, ry + rh,
-                                               SELECTED if enabled else DISABLED)
-            label = ('Retreat Intercepted' if blocked else 'Announce Retreat'
-                     if retreat_options else 'No Adjacent Retreat')
-            window.text('announce_retreat_button', label, rx + 10, ry + 13, 9,
-                        INK if enabled else MUTED, rw - 18)
-            if enabled:
-                self.action_hits.append((('announce_retreat',), rx, rx + rw, ry, ry + rh))
+        if session.stage == 'space_combat' and not session.retreat_announced:
+            retreat_faction = None
+            human_defender_decision = False
+            if not window.ai.is_bot(session.player):
+                retreat_faction = session.player.faction
             else:
-                reason = ('Cannot retreat this combat round.' if blocked else
-                          'Assign hits before announcing a retreat.' if retreat_options else
-                          'Need your ships in a safe adjacent system.')
-                window.text('retreat_unavailable', reason,
-                            rx, ry + 43, 8, MUTED, rw)
+                retreat_faction = next((faction for faction in session.combat_factions
+                                        if faction != session.player.faction and
+                                        not window.ai.is_bot(next((player for player in combat_players
+                                                                   if player.faction == faction), None))), None)
+                human_defender_decision = retreat_faction is not None
+                if (human_defender_decision and
+                        session.retreat_declined_round == session.combat_round + 1):
+                    retreat_faction = None
+            if retreat_faction:
+                retreat_options = window.movement.retreat_options(session, retreat_faction)
+                rx, ry, rw, rh = left + 20, bottom + 24, min(220, col_width - 24), 38
+                blocked = session.retreat_blocked_round == session.combat_round + 1
+                enabled = bool(retreat_options) and not session.combat_needs_resolution and not blocked
+                arcade.draw_lrbt_rectangle_filled(rx, rx + rw, ry, ry + rh,
+                                                   SELECTED if enabled else DISABLED)
+                label = ('Retreat Intercepted' if blocked else
+                         'Announce Retreat' if retreat_faction == session.player.faction else
+                         f'{retreat_faction.upper()} · Retreat')
+                window.text('announce_retreat_button', label, rx + 10, ry + 13, 9,
+                            INK if enabled else MUTED, rw - 18)
+                if enabled:
+                    self.action_hits.append((('announce_retreat', retreat_faction),
+                                             rx, rx + rw, ry, ry + rh))
+                    if human_defender_decision:
+                        fx, fw = rx + rw + 10, min(176, col_width - rw - 42)
+                        arcade.draw_lrbt_rectangle_filled(fx, fx + fw, ry, ry + rh, CARD)
+                        arcade.draw_lrbt_rectangle_outline(fx, fx + fw, ry, ry + rh, BORDER, 1)
+                        window.text('decline_retreat_button', 'Stay and Fight', fx + 9,
+                                    ry + 13, 9, INK, fw - 18)
+                        self.action_hits.append((('decline_retreat', retreat_faction),
+                                                 fx, fx + fw, ry, ry + rh))
+                else:
+                    reason = ('Cannot retreat this combat round.' if blocked else
+                              'Assign hits before announcing a retreat.' if retreat_options else
+                              'Need your ships in a safe adjacent system.')
+                    window.text('retreat_unavailable', reason,
+                                rx, ry + 43, 8, MUTED, rw)
         elif session.stage == 'space_combat' and session.retreat_announced:
             window.text('retreat_declared', 'Retreat declared; choose destination after this round.',
                         left + 22, bottom + 75, 9, ACCENT, col_width)

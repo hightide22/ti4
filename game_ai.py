@@ -640,15 +640,29 @@ class GameAI:
         w = self.window
         ctl, s = w.movement, w.movement.session
         ai_turn = self.is_bot(s.player)
+        # Destination selection belongs to the faction that announced the
+        # retreat. Never let the tactical-action owner choose for a human
+        # defender just because the bot initiated the combat.
+        if s.stage == 'retreat_selection':
+            if s.retreat_announced in self.bot_factions:
+                self.resolve_bot_retreat(s)
+            return
+        # The human defender gets the first retreat decision before a bot
+        # attacker rolls. They can announce a retreat or explicitly stay.
+        if (s.stage == 'space_combat' and ai_turn and not s.combat_needs_resolution and
+                not s.retreat_announced and s.retreat_declined_round != s.combat_round + 1 and
+                s.retreat_blocked_round != s.combat_round + 1):
+            human_defender = next((faction for faction in s.combat_factions
+                                   if faction != s.player.faction and
+                                   faction not in self.bot_factions), None)
+            if human_defender and ctl.retreat_options(s, human_defender):
+                return
         if self.play_combat_card(s):
             return
         if s.stage in ('space_combat', 'ground_combat') and s.combat_needs_resolution:
             for faction in s.combat_factions:
                 if faction in self.bot_factions and self._bot_hit(faction, s):
                     return
-        if s.stage == 'retreat_selection' and s.retreat_announced in self.bot_factions:
-            self.resolve_bot_retreat(s)
-            return
         if (s.stage == 'space_combat' and not s.combat_needs_resolution and
                 not s.retreat_announced and
                 s.retreat_blocked_round != s.combat_round + 1):
@@ -744,8 +758,6 @@ class GameAI:
                 results = ', '.join(f'{faction.upper()} {sum(bool(roll["hit"]) for roll in rolls)} hits'
                                     for faction, rolls in s.combat_rolls.items())
                 self.report(s.player, f'Combat round {s.combat_round}: {results}.', 2.1)
-        elif s.stage == 'retreat_selection':
-            self.resolve_bot_retreat(s)
         elif s.stage == 'capacity_overflow':
             tile = w.board[s.capacity_position]
             choices = ctl.capacity_overflow_units(tile, s.capacity_faction)

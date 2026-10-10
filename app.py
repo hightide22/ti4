@@ -2023,8 +2023,15 @@ class BoardWindow(arcade.Window):
                     return
                 if combat_stage and not self.action_card_panel.open:
                     response = self.combat_panel.hit_test(x, y)
+                    retreating_player = (next((player for player in self.player_panel.players
+                                               if player.faction == self.movement.session.retreat_announced), None)
+                                         if self.movement.session.stage == 'retreat_selection' else None)
                     allowed = bool(response and (
                         (response[0] in ('action_cards', 'advance') and human_card) or
+                        (response[0] == 'retreat_to' and retreating_player and
+                         not self.ai.is_bot(retreating_player)) or
+                        (response[0] in ('announce_retreat', 'decline_retreat') and
+                         len(response) > 1 and response[1] not in self.ai.bot_factions) or
                         (response[0] in ('assign_hit', 'spend_munitions', 'reroll_die',
                                          'reroll_dice', 'fire_team_die', 'fire_team_resolve') and
                          len(response) > 1 and response[1] not in self.ai.bot_factions)))
@@ -2166,7 +2173,9 @@ class BoardWindow(arcade.Window):
                     elif action[0] == 'advance':
                         self.movement.advance_combat()
                     elif action[0] == 'announce_retreat':
-                        self.movement.announce_retreat()
+                        self.movement.announce_retreat(action[1])
+                    elif action[0] == 'decline_retreat':
+                        self.movement.decline_retreat(action[1])
                     elif action[0] == 'retreat_to':
                         self.movement.resolve_retreat(action[1])
                         self.movement_panel.reset()

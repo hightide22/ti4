@@ -185,6 +185,7 @@ class Session:
     afb_resolved: bool = False
     retreat_announced: str | None = None
     retreat_blocked_round: int | None = None
+    retreat_declined_round: int | None = None
     retreat_log: str = ''
     combat_winner: str | None = None
     pending_direct_hits: dict[str, list[str]] = field(default_factory=dict)
@@ -1256,6 +1257,17 @@ class MovementController:
         if not self.retreat_options(session, faction):
             raise MovementError('No adjacent system with your ships is available for retreat')
         session.retreat_announced = faction
+
+    def decline_retreat(self, faction):
+        session = self.session
+        if (not session or session.stage != 'space_combat' or
+                session.combat_needs_resolution or session.retreat_announced):
+            raise MovementError('There is no retreat decision to decline')
+        if faction not in session.combat_factions:
+            raise MovementError('This faction is not participating in space combat')
+        if not self.retreat_options(session, faction):
+            raise MovementError('No adjacent system with your ships is available for retreat')
+        session.retreat_declined_round = session.combat_round + 1
 
     def resolve_retreat(self, position):
         session = self.session

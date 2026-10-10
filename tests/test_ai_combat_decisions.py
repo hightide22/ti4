@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from ai_combat import win_probability
 from board import load_board
 from game_ai import GameAI
-from movement import MovementController
+from movement import MovementController, Session, Snapshot
 from player import create_players
 from turn_order import TurnOrder
 from units import Region, Unit, UnitLocation
@@ -31,6 +31,69 @@ def setup_game(bot_factions):
 
 
 class BotCombatDecisionTests(unittest.TestCase):
+    def test_ai_leaves_human_retreat_destination_choice_alone(self):
+        ai, sol, hacan = setup_game({'hacan'})
+        movement, board = ai.window.movement, ai.window.board
+        target = board[(-3, 2)]
+        destination = next(tile for tile in movement.neighbors(target)
+                           if not any(unit.owner == 'hacan' and unit.location.region == Region.SPACE
+                                      for unit in tile.units))
+        human_ship = Unit('human-retreating-cruiser', 'cruiser', sol.faction,
+                          sol.color_code, UnitLocation(Region.SPACE))
+        bot_ship = Unit('bot-combat-cruiser', 'cruiser', hacan.faction,
+                        hacan.color_code, UnitLocation(Region.SPACE))
+        friendly_ship = Unit('human-friendly-cruiser', 'cruiser', sol.faction,
+                             sol.color_code, UnitLocation(Region.SPACE))
+        target.units.extend((human_ship, bot_ship))
+        destination.units.append(friendly_ship)
+        session = Session(hacan, target, {}, Snapshot.capture(board, hacan, ai.window.turn_order.players),
+                          stage='retreat_selection', combat_factions=('hacan', 'sol'),
+                          retreat_announced=sol.faction)
+        movement.session = session
+
+        ai.resolve_movement()
+
+        self.assertEqual(session.stage, 'retreat_selection')
+        self.assertIn(human_ship, target.units)
+        self.assertNotIn(human_ship, destination.units)
+        for skilled in (False, True):
+            session.skilled_retreat = skilled
+            ai.resolve_movement()
+            self.assertEqual(session.stage, 'retreat_selection')
+            self.assertIn(human_ship, target.units)
+
+    def test_bot_waits_for_human_defender_to_choose_retreat_or_fight(self):
+        ai, sol, hacan = setup_game({'hacan'})
+        movement, board = ai.window.movement, ai.window.board
+        target = board[(-3, 2)]
+        refuge = next(tile for tile in movement.neighbors(target)
+                      if not any(unit.owner == hacan.faction and
+                                 unit.location.region == Region.SPACE for unit in tile.units))
+        target.units.extend((
+            Unit('prompt-bot-cruiser', 'cruiser', hacan.faction,
+                 hacan.color_code, UnitLocation(Region.SPACE)),
+            Unit('prompt-human-cruiser', 'cruiser', sol.faction,
+                 sol.color_code, UnitLocation(Region.SPACE)),
+        ))
+        refuge.units.append(Unit('prompt-human-refuge', 'cruiser', sol.faction,
+                                 sol.color_code, UnitLocation(Region.SPACE)))
+        session = Session(hacan, target, {}, Snapshot.capture(board, hacan, ai.window.turn_order.players),
+                          stage='space_combat', combat_factions=('hacan', 'sol'))
+        movement.session = session
+
+        ai.resolve_movement()
+
+        self.assertEqual(session.stage, 'space_combat')
+        self.assertFalse(session.combat_needs_resolution)
+        self.assertEqual(session.combat_round, 0)
+        self.assertIn(refuge, movement.retreat_options(session, sol.faction))
+
+        movement.decline_retreat(sol.faction)
+        self.assertEqual(session.retreat_declined_round, 1)
+        ai.resolve_movement()
+        self.assertEqual(session.combat_round, 1)
+        self.assertTrue(session.combat_needs_resolution)
+
     def test_intercept_blocked_retreat_does_not_interrupt_combat(self):
         ai, sol, hacan = setup_game({'hacan'})
         movement, board = ai.window.movement, ai.window.board

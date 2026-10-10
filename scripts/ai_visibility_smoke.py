@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import arcade
 
 from app import BoardWindow
-from units import Region, Unit, UnitLocation
+from units import Region, UNIT_TYPES, Unit, UnitLocation
 
 
 def main():
@@ -39,6 +39,13 @@ def main():
             unit.owner == 'sol' and unit.kind == 'carrier' for unit in tile.units))
         target = next(tile for tile in window.board.neighbors(origin.position)
                       if not tile.anomalies and tile.planets)
+        refuge = next(tile for tile in window.board.neighbors(target.position)
+                      if tile is not origin and not any(
+                          unit.owner != 'hacan' and unit.location.region == Region.SPACE and
+                          UNIT_TYPES[unit.kind]['ship']
+                          for unit in tile.units))
+        refuge.units.append(Unit('visibility-human-refuge', 'cruiser', 'hacan',
+                                 hacan.color_code, UnitLocation(Region.SPACE)))
         target.units.append(Unit('visibility-human-cruiser', 'cruiser', 'hacan',
                                  hacan.color_code, UnitLocation(Region.SPACE)))
         session = window.movement.activate(sol, target.position)
@@ -73,7 +80,71 @@ def main():
                               (human_hit[3] + human_hit[4]) / 2,
                               arcade.MOUSE_BUTTON_LEFT, 0)
         assert session.combat_assignments['hacan']
-        print('PASS: bot controls and cards hidden; human combat cards and hit assignment available')
+
+        session.stage = 'space_combat'
+        session.combat_needs_resolution = False
+        session.combat_round = 0
+        session.combat_hits.clear()
+        session.combat_rolls.clear()
+        session.combat_assignments.clear()
+        session.retreat_announced = None
+        session.retreat_declined_round = None
+        window.ai.resolve_movement()
+        assert session.stage == 'space_combat' and not session.combat_round
+        window.on_draw()
+        announce = next(hit for hit in window.combat_panel.action_hits
+                        if hit[0] == ('announce_retreat', hacan.faction))
+        assert any(hit[0] == ('decline_retreat', hacan.faction)
+                   for hit in window.combat_panel.action_hits)
+        window.on_mouse_press((announce[1] + announce[2]) / 2,
+                              (announce[3] + announce[4]) / 2,
+                              arcade.MOUSE_BUTTON_LEFT, 0)
+        assert session.retreat_announced == hacan.faction
+        with patch('movement.random.randint', return_value=1):
+            window.movement.advance_combat()
+            window.movement.advance_combat()
+        assert session.stage == 'retreat_selection'
+        window.on_draw()
+        retreat_hits = [hit for hit in window.combat_panel.action_hits
+                        if hit[0][0] == 'retreat_to']
+        assert retreat_hits and window.bot_actor
+        chosen = next(hit for hit in retreat_hits if hit[0][1] == refuge.position)
+        window.on_mouse_press((chosen[1] + chosen[2]) / 2,
+                              (chosen[3] + chosen[4]) / 2,
+                              arcade.MOUSE_BUTTON_LEFT, 0)
+        assert session.stage != 'retreat_selection'
+        assert any(unit.owner == hacan.faction and unit.kind == 'cruiser'
+                   for unit in refuge.units)
+
+        human_cruiser = next(unit for unit in refuge.units
+                             if unit.unit_id == 'visibility-human-cruiser')
+        refuge.units.remove(human_cruiser)
+        target.units.append(human_cruiser)
+        session.stage = 'space_combat'
+        session.combat_needs_resolution = False
+        session.combat_round = 0
+        session.combat_hits.clear()
+        session.combat_rolls.clear()
+        session.combat_assignments.clear()
+        session.retreat_announced = None
+        session.retreat_declined_round = None
+        session.space_combat_resolved = False
+        session.skilled_retreat = False
+        hacan.action_cards[:] = ['skilled_retreat']
+        window.action_cards.play(hacan, 0)
+        assert session.stage == 'retreat_selection'
+        window.on_draw()
+        skilled_hits = [hit for hit in window.combat_panel.action_hits
+                        if hit[0][0] == 'retreat_to']
+        assert skilled_hits
+        skilled_choice = skilled_hits[-1]
+        window.on_mouse_press((skilled_choice[1] + skilled_choice[2]) / 2,
+                              (skilled_choice[3] + skilled_choice[4]) / 2,
+                              arcade.MOUSE_BUTTON_LEFT, 0)
+        assert session.stage != 'retreat_selection'
+        assert any(unit.owner == hacan.faction and unit.kind == 'cruiser'
+                   for unit in window.board[skilled_choice[0][1]].units)
+        print('PASS: bot combat waits for a human defender; ordinary and Skilled Retreat destinations are selectable')
     finally:
         window.close()
 
