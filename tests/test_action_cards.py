@@ -81,6 +81,8 @@ class ActionCardTests(unittest.TestCase):
 
         self.movement.continue_after_space_cannon(session)
 
+        self.assertEqual(session.stage, 'space_cannon_assign')
+        self.movement.assign_space_cannon_hit(dreadnought.unit_id)
         self.assertEqual(session.stage, 'space_cannon_direct_hit')
         self.assertTrue(self.cards.can_play(hacan.faction, 'dh1', session))
         self.cards.play(hacan, 0)

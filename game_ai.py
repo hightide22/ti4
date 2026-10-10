@@ -678,6 +678,17 @@ class GameAI:
                     ctl.choose_assault_victim(min(victims, key=lambda u: (
                         LOSS_ORDER.get(u.kind, 4), u.unit_id)).unit_id)
                 return
+        if s.stage == 'space_cannon_assign' and ai_turn:
+            candidates = ctl.space_cannon_assignment_candidates(s)
+            if candidates:
+                target = min(candidates, key=lambda unit: (
+                    LOSS_ORDER.get(unit.kind, 4),
+                    sum(cargo.location.region == Region.TRANSPORT and
+                        cargo.location.carrier_id == unit.unit_id for cargo in s.target.units),
+                    unit.damaged, unit.unit_id))
+                ctl.assign_space_cannon_hit(target.unit_id)
+                self.report(s.player, f'Assigned a Space Cannon hit to a {target.kind}.', .45)
+            return
         if not ai_turn:
             return
         # Give a human participant the action-card window and hit assignment.

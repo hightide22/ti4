@@ -475,7 +475,7 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(session.production_planets, set())
         self.assertFalse(self.player.planets[0].exhausted)
 
-    def test_space_cannon_fires_before_combat_and_damages_entering_fleet(self):
+    def test_space_cannon_hit_waits_for_player_to_choose_a_casualty(self):
         self.target = next(tile for tile in self.controller.neighbors(self.home)
                            if tile.planets and not tile.command_tokens and
                            any(self.controller.route(self.home, tile, unit, self.player)
@@ -492,8 +492,41 @@ class MovementTests(unittest.TestCase):
             self.controller.confirm()
 
         self.assertTrue(session.cannon_checked)
-        self.assertTrue(any('destroyed' in entry for entry in session.cannon_log))
+        self.assertEqual(session.stage, 'space_cannon_assign')
+        self.assertIn(carrier, self.controller.space_cannon_assignment_candidates(session))
+        self.controller.assign_space_cannon_hit(carrier.unit_id)
         self.assertNotIn(carrier, self.target.units)
+        self.assertEqual(session.stage, 'invasion')
+
+    def test_player_can_assign_space_cannon_hit_to_fighter_and_save_loaded_carrier(self):
+        target = next(tile for tile in self.controller.neighbors(self.home)
+                      if tile.planets and not tile.command_tokens and
+                      any(self.controller.route(self.home, tile, unit, self.player)
+                          for unit in self.home.units if unit.owner == 'sol' and unit.kind == 'carrier'))
+        pds = Unit('manual-choice-pds', 'pds', 'hacan', 'ylw',
+                   UnitLocation(Region.PLANET, planet_id=target.planets[0].planet_id))
+        target.units.append(pds)
+        session = self.controller.activate(self.player, target.position)
+        source = session.sources[self.home.position]
+        carrier = next(unit for unit in source.ships if unit.kind == 'carrier')
+        fighter = next(unit for unit in source.passengers if unit.kind == 'fighter')
+        infantry = next(unit for unit in source.passengers if unit.kind == 'infantry')
+        for unit in (carrier, fighter, infantry):
+            session.toggle(unit.unit_id)
+
+        with patch('movement.random.randint', return_value=10):
+            self.controller.confirm()
+
+        self.assertEqual(session.stage, 'space_cannon_assign')
+        self.assertEqual({unit.kind for unit in
+                          self.controller.space_cannon_assignment_candidates(session)},
+                         {'carrier', 'fighter'})
+        self.controller.assign_space_cannon_hit(fighter.unit_id)
+
+        self.assertNotIn(fighter, target.units)
+        self.assertIn(carrier, target.units)
+        self.assertIn(infantry, target.units)
+        self.assertEqual(infantry.location.carrier_id, carrier.unit_id)
         self.assertEqual(session.stage, 'invasion')
 
     def test_space_cannon_miss_keeps_the_entering_ship(self):

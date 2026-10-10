@@ -978,37 +978,61 @@ class MovementController:
 
     def resolve_space_cannon_hits(self, session):
         while session.space_cannon_events:
-            event = session.space_cannon_events.pop(0)
-            candidates = [unit for unit in session.target.units
-                          if unit.unit_id in event['candidates']]
+            event = session.space_cannon_events[0]
+            candidates = self.space_cannon_assignment_candidates(session)
             if not candidates:
+                session.space_cannon_events.pop(0)
                 continue
             if session.space_cannon_nes_cancel:
                 session.space_cannon_nes_cancel -= 1
+                session.space_cannon_events.pop(0)
                 session.cannon_log.append('Non-Euclidean Shielding canceled 1 additional hit.')
                 continue
-            if event.get('graviton'):
-                nonfighters = [unit for unit in candidates if unit.kind != 'fighter']
-                if nonfighters:
-                    candidates = nonfighters
-            target = self.apply_hit(session.target, candidates, session)
-            if target in session.target.units and target.damaged and event['owner'] != target.owner:
-                session.pending_direct_hits.setdefault(event['owner'], []).append(target.unit_id)
-            if target in session.target.units and target.damaged and self.has_tech(target.owner, 'nes'):
-                session.space_cannon_nes_cancel = 1
-            session.cannon_log.append(
-                f'{target.kind.title()} {"damaged" if target.damaged else "destroyed"}')
-            if target in session.target.units and target.damaged and event['owner'] != target.owner:
-                session.space_cannon_direct_hit = (event['owner'], target.unit_id)
-                previous_stage = session.stage
-                session.stage = 'space_cannon_direct_hit'
-                if (self.action_cards and
-                        self.action_cards.can_play(event['owner'], 'direct_hit', session)):
-                    return False
-                session.stage = previous_stage
-                session.space_cannon_direct_hit = None
-                session.pending_direct_hits[event['owner']].remove(target.unit_id)
+            session.stage = 'space_cannon_assign'
+            return False
         return True
+
+    def space_cannon_assignment_candidates(self, session):
+        if not session or not session.space_cannon_events:
+            return []
+        event = session.space_cannon_events[0]
+        candidates = [unit for unit in session.target.units
+                      if unit.unit_id in event['candidates'] and
+                      unit.owner == session.player.faction and
+                      unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+        if event.get('graviton'):
+            nonfighters = [unit for unit in candidates if unit.kind != 'fighter']
+            if nonfighters:
+                candidates = nonfighters
+        return candidates
+
+    def assign_space_cannon_hit(self, unit_id):
+        session = self.session
+        if not session or session.stage != 'space_cannon_assign' or not session.space_cannon_events:
+            raise MovementError('There is no Space Cannon hit waiting for assignment')
+        candidates = self.space_cannon_assignment_candidates(session)
+        target = next((unit for unit in candidates if unit.unit_id == unit_id), None)
+        if target is None:
+            raise MovementError('Choose an eligible ship to take the Space Cannon hit')
+
+        event = session.space_cannon_events.pop(0)
+        self.apply_hit(session.target, [target], session)
+        if target in session.target.units and target.damaged and self.has_tech(target.owner, 'nes'):
+            session.space_cannon_nes_cancel = 1
+        outcome = 'damaged' if target in session.target.units and target.damaged else 'destroyed'
+        session.cannon_log.append(f'{target.owner.upper()} {target.kind.title()} {outcome}')
+        if target in session.target.units and target.damaged and event['owner'] != target.owner:
+            session.pending_direct_hits.setdefault(event['owner'], []).append(target.unit_id)
+            session.space_cannon_direct_hit = (event['owner'], target.unit_id)
+            session.stage = 'space_cannon_direct_hit'
+            if (self.action_cards and
+                    self.action_cards.can_play(event['owner'], 'direct_hit', session)):
+                return
+            session.stage = 'space_cannon_assign'
+            session.pending_direct_hits[event['owner']].remove(target.unit_id)
+            session.space_cannon_direct_hit = None
+
+        self.continue_after_space_cannon(session)
 
     def apply_hit(self, tile, candidates, session=None):
         target = sorted(candidates, key=lambda unit: (

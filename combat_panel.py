@@ -7,7 +7,7 @@ import arcade
 from ui_theme import (CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, DISABLED, PRIMARY_TEXT,
                       DANGER, ROW_HEIGHT, surface, button, modal, meter)
 
-from units import UNIT_TYPES, unit_profile
+from units import Region, UNIT_TYPES, unit_profile
 
 
 class CombatPanel:
@@ -19,6 +19,7 @@ class CombatPanel:
         self.offset = [0.0, 0.0]
         self.bounds = None
         self.assault_page = 0
+        self.space_cannon_page = 0
         self.scroll = [0, 0]
         self.scroll_max = [0, 0]
         self.body_bottom = 0
@@ -171,7 +172,8 @@ class CombatPanel:
         self.bounds = (left, left + width, bottom, bottom + height)
         modal(left, left + width, bottom, bottom + height)
         window.text('combat_drag_hint', 'DRAG HEADER TO MOVE', left + width - 177, bottom + height - 26, 8, MUTED)
-        title = 'GROUND COMBAT' if session.combat_type == 'ground' else 'SPACE COMBAT'
+        title = ('SPACE CANNON DEFENSE' if session.stage == 'space_cannon_assign' else
+                 'GROUND COMBAT' if session.combat_type == 'ground' else 'SPACE COMBAT')
         window.text('combat_modal_title', title, left + 24, bottom + height - 31, 18, ACCENT)
         if session.combat_type == 'ground':
             planet = next(planet for planet in session.target.planets
@@ -180,7 +182,9 @@ class CombatPanel:
             subtitle = f'{planet.name} · {round_label}'
         else:
             subtitle = f'Round {session.combat_round}' if session.combat_round else 'Roll one die per combat die'
-        if session.stage == 'space_combat_won':
+        if session.stage == 'space_cannon_assign':
+            subtitle = 'Assign each hit to one of your ships'
+        elif session.stage == 'space_combat_won':
             subtitle = f'{session.combat_winner.upper()} wins · Choose Salvage or continue'
         elif session.stage == 'combat_end':
             subtitle = f'Round {session.combat_round} · End of combat round'
@@ -196,6 +200,74 @@ class CombatPanel:
                    card_x, card_y, 138, 29, primary=True, size=9)
             self.action_hits.append((('action_cards',), card_x, card_x + 138,
                                      card_y, card_y + 29))
+        if session.stage == 'space_cannon_assign':
+            if window.bot_actor:
+                window.text('space_cannon_ai_wait', 'AI is choosing a ship to take the hit…',
+                            left + 24, bottom + height - 110, 11, MUTED)
+                return
+            candidates = window.movement.space_cannon_assignment_candidates(session)
+            pages = max(1, (len(candidates) + 7) // 8)
+            self.space_cannon_page = min(self.space_cannon_page, pages - 1)
+            window.text('space_cannon_assign_title', 'SPACE CANNON · ASSIGN HIT',
+                        left + 24, bottom + height - 96, 11, ACCENT)
+            window.text('space_cannon_assign_help',
+                        f'{len(session.space_cannon_events)} hit(s) remain. Choose which ship takes the next hit.',
+                        left + 24, bottom + height - 119, 10, INK)
+            page_candidates = candidates[self.space_cannon_page * 8:self.space_cannon_page * 8 + 8]
+            cell_gap = 12
+            cell_width = (width - 60 - cell_gap) / 2
+            for index, unit in enumerate(page_candidates):
+                row, column = divmod(index, 2)
+                card_left = left + 24 + column * (cell_width + cell_gap)
+                card_top = bottom + height - 144 - row * 72
+                card_bottom = card_top - 62
+                arcade.draw_lrbt_rectangle_filled(card_left, card_left + cell_width,
+                                                   card_bottom, card_top, SELECTED)
+                arcade.draw_lrbt_rectangle_outline(card_left, card_left + cell_width,
+                                                    card_bottom, card_top, ACCENT, 1.5)
+                window.player_panel.image(
+                    f'units/{unit.color_code}_{UNIT_TYPES[unit.kind]["sprite"]}.png',
+                    card_left + 22, card_top - 31, 29)
+                label = UNIT_TYPES[unit.kind]['name']
+                if unit.damaged:
+                    detail = 'Damaged · another hit destroys this ship'
+                elif unit_profile(unit).get('sustainDamage'):
+                    detail = 'Can sustain one hit'
+                else:
+                    detail = 'Assign hit to this ship'
+                cargo = [item for item in session.target.units
+                         if item.location.region == Region.TRANSPORT and
+                         item.location.carrier_id == unit.unit_id]
+                if cargo:
+                    cargo_counts = {}
+                    for item in cargo:
+                        cargo_counts[item.kind] = cargo_counts.get(item.kind, 0) + 1
+                    cargo_label = ', '.join(
+                        f'{count} {UNIT_TYPES[kind]["name"]}'
+                        for kind, count in sorted(cargo_counts.items()))
+                    detail = f'Carries {cargo_label}'
+                window.text(('space_cannon_ship', unit.unit_id), label,
+                            card_left + 45, card_top - 22, 11, INK,
+                            max_width=cell_width - 53)
+                window.text(('space_cannon_ship_detail', unit.unit_id), detail,
+                            card_left + 45, card_top - 43, 9, GOLD if cargo else MUTED,
+                            max_width=cell_width - 53)
+                self.action_hits.append((('space_cannon_target', unit.unit_id),
+                                         card_left, card_left + cell_width,
+                                         card_bottom, card_top))
+            if pages > 1:
+                page_y = bottom + 42
+                window.text('space_cannon_page',
+                            f'{self.space_cannon_page + 1} / {pages}',
+                            left + width / 2 - 16, page_y + 8, 9, MUTED)
+                for delta, label, bx in ((-1, 'PREVIOUS', left + 24),
+                                         (1, 'NEXT', left + width - 112)):
+                    if 0 <= self.space_cannon_page + delta < pages:
+                        button(window, ('space_cannon_page_button', delta), label,
+                               bx, page_y, 88, 27, size=8)
+                        self.action_hits.append((('space_cannon_page', delta),
+                                                 bx, bx + 88, page_y, page_y + 27))
+            return
         factions = session.combat_factions
         defenders = factions[1:]
         col_gap = 22

@@ -10,7 +10,7 @@ from player import PlayerState
 from turn_order import TurnOrder
 from board import load_board
 from player import create_players
-from movement import MovementController
+from movement import MovementController, Session, Snapshot
 from units import Region, Unit, UnitLocation
 from technology import technology_catalog
 
@@ -242,6 +242,35 @@ class GameAITests(unittest.TestCase):
                 'sustainDamage': u.kind == 'dreadnought'}):
             self.assertTrue(ai._bot_hit('sol', session))
         self.assertEqual(chosen, ['dreadnought'])
+
+    def test_bot_assigns_space_cannon_hit_to_fighter_before_loaded_carrier(self):
+        config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
+        players = create_players(board, config)
+        sol = next(player for player in players if player.faction == 'sol')
+        target = next(tile for tile in board.values() if tile.planets)
+        carrier = Unit('ai-cannon-loaded-carrier', 'carrier', sol.faction, sol.color_code,
+                       UnitLocation(Region.SPACE))
+        fighter = Unit('ai-cannon-fighter', 'fighter', sol.faction, sol.color_code,
+                       UnitLocation(Region.SPACE))
+        infantry = Unit('ai-cannon-infantry', 'infantry', sol.faction, sol.color_code,
+                        UnitLocation(Region.TRANSPORT, carrier_id=carrier.unit_id))
+        target.units.extend((carrier, fighter, infantry))
+        movement = MovementController(board, players)
+        session = Session(sol, target, {}, Snapshot.capture(board, sol, players),
+                          stage='space_cannon_assign', space_cannon_next_stage='invasion',
+                          space_cannon_events=[{'owner': 'hacan',
+                                                'candidates': [carrier.unit_id, fighter.unit_id],
+                                                'graviton': False}])
+        movement.session = session
+        ai = GameAI(SimpleNamespace(movement=movement), {sol.faction})
+        ai.play_combat_card = Mock(return_value=False)
+        ai.report = Mock()
+
+        ai.resolve_movement()
+
+        self.assertNotIn(fighter, target.units)
+        self.assertIn(carrier, target.units)
+        self.assertIn(infantry, target.units)
 
     def test_two_bots_resolve_space_combat_without_manual_clicks(self):
         from unittest.mock import patch

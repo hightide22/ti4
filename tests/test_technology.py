@@ -147,8 +147,11 @@ class TechnologyTests(unittest.TestCase):
             home.units.append(Unit(f'tech-test-pds-{index}', 'pds', 'hacan', hacan.color_code,
                                    UnitLocation(Region.PLANET, planet_id='jord')))
         session = Session(sol, home, {}, Snapshot.capture(self.board, sol, self.players))
+        self.movement.session = session
         with patch('movement.random.randint', return_value=10):
             self.movement.resolve_space_cannon(session)
+        self.assertEqual(session.stage, 'space_cannon_assign')
+        self.movement.assign_space_cannon_hit(dread.unit_id)
         self.assertIn(dread, home.units)
         self.assertTrue(dread.damaged)
         self.assertTrue(any('Non-Euclidean' in line for line in session.cannon_log))

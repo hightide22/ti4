@@ -1006,7 +1006,7 @@ class BoardWindow(arcade.Window):
             self.roster.draw_details(self)
         if self.player_panel.hovered_planet is not None:
             self.player_panel.draw_details(self)
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won'):
+        if self.movement.session and self.movement.session.stage in ('space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won'):
             self.combat_panel.draw(self, self.movement.session)
         if self.strategy_modal and not self.technology_modal:
             self.strategy_panel.draw(self, self.turn_order)
@@ -1571,6 +1571,47 @@ class BoardWindow(arcade.Window):
                     assert enemy_ship in combat_target.units
                     combat_target.units.remove(enemy_ship)
 
+                    # The Space Cannon assignment modal lets the player save a loaded carrier.
+                    from movement import Session, Snapshot
+                    cannon_target = next(tile for tile in self.board.values()
+                                         if tile.planets and tile is not combat_target)
+                    cannon_carrier = Unit('smoke-cannon-carrier', 'carrier', 'hacan',
+                                           hacan_player.color_code, UnitLocation(Region.SPACE))
+                    cannon_fighter = Unit('smoke-cannon-fighter', 'fighter', 'hacan',
+                                          hacan_player.color_code, UnitLocation(Region.SPACE))
+                    cannon_infantry = Unit(
+                        'smoke-cannon-infantry', 'infantry', 'hacan', hacan_player.color_code,
+                        UnitLocation(Region.TRANSPORT, carrier_id=cannon_carrier.unit_id))
+                    cannon_target.units.extend((cannon_carrier, cannon_fighter, cannon_infantry))
+                    cannon_session = Session(
+                        hacan_player, cannon_target, {},
+                        Snapshot.capture(self.board, hacan_player, self.player_panel.players))
+                    cannon_session.stage = 'space_cannon_assign'
+                    cannon_session.space_cannon_next_stage = 'invasion'
+                    cannon_session.space_cannon_events.append({
+                        'owner': 'sol',
+                        'candidates': [cannon_carrier.unit_id, cannon_fighter.unit_id],
+                        'graviton': False,
+                    })
+                    self.movement.session = cannon_session
+                    self.player_panel.active = self.player_panel.players.index(hacan_player)
+                    self.on_draw()
+                    assert self.labels['combat_modal_title'].text == 'SPACE CANNON DEFENSE'
+                    assert 'Infantry' in self.labels[
+                        ('space_cannon_ship_detail', cannon_carrier.unit_id)].text
+                    arcade.get_image().save(preview_dir / 'space-cannon-assignment-preview.png')
+                    fighter_hit = next(hit for hit in self.combat_panel.action_hits
+                                       if hit[0] == ('space_cannon_target', cannon_fighter.unit_id))
+                    self.on_mouse_press((fighter_hit[1] + fighter_hit[2]) / 2,
+                                        (fighter_hit[3] + fighter_hit[4]) / 2,
+                                        arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert cannon_fighter not in cannon_target.units
+                    assert cannon_carrier in cannon_target.units and cannon_infantry in cannon_target.units
+                    self.movement.cancel()
+                    cannon_target.units.remove(cannon_carrier)
+                    cannon_target.units.remove(cannon_infantry)
+                    self.player_panel.active = self.player_panel.players.index(sol_player)
+
                     # Draw the ground-combat modal after assigning a landed force.
                     sol_home = next(tile for tile in self.board.values()
                                     if any(unit.owner == 'sol' and unit.kind == 'carrier' for unit in tile.units))
@@ -1886,7 +1927,7 @@ class BoardWindow(arcade.Window):
                 return
             if self.movement.session and self.ai.is_bot(self.movement.session.player):
                 combat_stage = self.movement.session.stage in (
-                    'space_combat', 'ground_combat', 'combat_end', 'retreat_selection',
+                    'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection',
                     'assault_choice', 'space_combat_won')
                 human_card = any(not self.ai.is_bot(player) for player in
                                  self.action_cards.participants(self.movement.session))
@@ -2014,7 +2055,7 @@ class BoardWindow(arcade.Window):
                     self.action_card_panel.open = False
                 self.sync_turn_action()
             return
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won'):
+        if self.movement.session and self.movement.session.stage in ('space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won'):
             if button != arcade.MOUSE_BUTTON_LEFT:
                 return
             if self.combat_panel.drag_header(x, y):
@@ -2047,6 +2088,11 @@ class BoardWindow(arcade.Window):
                     elif action[0] == 'assault_victim':
                         self.movement.choose_assault_victim(action[1])
                         self.combat_panel.assault_page = 0
+                    elif action[0] == 'space_cannon_target':
+                        self.movement.assign_space_cannon_hit(action[1])
+                        self.combat_panel.space_cannon_page = 0
+                    elif action[0] == 'space_cannon_page':
+                        self.combat_panel.space_cannon_page += action[1]
                     elif action[0] == 'assault_page':
                         self.combat_panel.assault_page += action[1]
                     elif action[0] == 'action_cards':
@@ -2359,7 +2405,7 @@ class BoardWindow(arcade.Window):
             return
         if (self.strategy_modal or self.technology_modal or
                 (self.movement.session and self.movement.session.stage in
-                 ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won')) or
+                 ('space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won')) or
                 x < self.roster.WIDTH):
             return
 
@@ -2374,6 +2420,12 @@ class BoardWindow(arcade.Window):
             return
         if self.technology_modal:
             self.technology_panel.scroll_by(-scroll_y)
+        if self.movement.session and self.movement.session.stage == 'space_cannon_assign':
+            candidates = self.movement.space_cannon_assignment_candidates(self.movement.session)
+            pages = max(1, (len(candidates) + 7) // 8)
+            self.combat_panel.space_cannon_page = max(
+                0, min(pages - 1, self.combat_panel.space_cannon_page - int(scroll_y)))
+            return
         if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'space_combat_won'):
             self.combat_panel.scroll_by(x, -scroll_y * 42)
             return

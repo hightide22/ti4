@@ -190,7 +190,7 @@ class MovementPanel:
             elif session.stage == 'space_cannon_response':
                 heading = 'SPACE CANNON HITS'
                 detail = f'{len(session.space_cannon_events)} hit(s) are waiting to be assigned.'
-                action, label = 'space_cannon_resolve', 'ASSIGN HITS AND CONTINUE'
+                action, label = 'space_cannon_resolve', 'CONTINUE TO ASSIGN HITS'
             elif session.stage == 'space_cannon_direct_hit':
                 heading = 'DIRECT HIT WINDOW'
                 detail = 'Play Direct Hit against a ship that sustained damage, or continue.'
