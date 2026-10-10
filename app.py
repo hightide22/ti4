@@ -1231,6 +1231,12 @@ class BoardWindow(arcade.Window):
             )
             assert all(abs(before - after) < 1e-9 for before, after in
                        zip(pointer_world_before, pointer_world_after))
+            assert self.zoom == self.target_zoom
+            self.on_mouse_scroll(pointer_x, pointer_y, 0, .5)
+            self.on_mouse_scroll(pointer_x, pointer_y, 0, .5)
+            self.on_mouse_scroll(pointer_x, pointer_y, 0, -1)
+            assert abs(self.target_zoom - 1.2) < 1e-9
+            assert self.zoom == self.target_zoom
             self.on_mouse_scroll(pointer_x, pointer_y, 0, .25)
             assert self.target_zoom > 1.2
             self.focus_view = True
@@ -2452,7 +2458,7 @@ class BoardWindow(arcade.Window):
             self.zoom_map_at(x, y, scroll_y)
 
     def zoom_map_at(self, x, y, scroll_y):
-        """Zoom visibly toward the pointer instead of scaling around map center."""
+        """Apply each wheel event immediately, anchored to the current pointer position."""
         if not scroll_y:
             return
         # Pyglet can report fractional wheel steps for high-resolution wheels
@@ -2463,18 +2469,22 @@ class BoardWindow(arcade.Window):
             return
 
         cx, cy = self.viewport_center
-        current_target_scale = self.fit_scale * self.target_zoom
-        pointer_world = (self.target_map_center[0] + (x - cx) / current_target_scale,
-                         self.target_map_center[1] + (y - cy) / current_target_scale)
-        next_zoom = max(.55, min(3.5, self.target_zoom * factor))
-        if next_zoom == self.target_zoom:
+        current_scale = self.fit_scale * self.zoom
+        pointer_world = (self.map_center[0] + (x - cx) / current_scale,
+                         self.map_center[1] + (y - cy) / current_scale)
+        next_zoom = max(.55, min(3.5, self.zoom * factor))
+        if next_zoom == self.zoom:
             return
         next_scale = self.fit_scale * next_zoom
-        self.target_zoom = next_zoom
-        self.target_map_center = [
+        next_center = [
             pointer_world[0] - (x - cx) / next_scale,
             pointer_world[1] - (y - cy) / next_scale,
         ]
+        # Do not ease scale and camera position at different rates: that makes
+        # the map slide away from the cursor while a wheel zoom is in progress.
+        self.zoom = self.target_zoom = next_zoom
+        self.map_center = next_center
+        self.target_map_center = next_center[:]
 
     def on_key_press(self, symbol, modifiers):
         if self.main_menu_visible:
