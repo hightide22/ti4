@@ -1358,6 +1358,68 @@ class BoardWindow(arcade.Window):
             if sol_player:
                 self.player_panel.active = self.player_panel.players.index(sol_player)
                 home = next(tile for tile in self.board.values() if any(unit.owner == 'sol' for unit in tile.units))
+                transit_target = next(tile for tile in self.board.values() if tile.name == 'Lodor')
+                transit_carrier = next(unit for unit in home.units
+                                       if unit.owner == 'sol' and unit.kind == 'carrier')
+                old_technologies = sol_player.technologies
+                old_carrier_profile = transit_carrier.profile_id
+                sol_player.technologies = frozenset(set(old_technologies) | {'cv2'})
+                transit_carrier.profile_id = 'carrier2'
+                transit_path = self.movement.route(home, transit_target, transit_carrier, sol_player)
+                assert transit_path and len(transit_path) >= 3
+                transit_tile = self.board[transit_path[1]]
+                transit_infantry = Unit('smoke-transit-pickup', 'infantry', 'sol',
+                                        sol_player.color_code,
+                                        UnitLocation(Region.PLANET, planet_id=transit_tile.planets[0].planet_id))
+                transit_tile.units.append(transit_infantry)
+                try:
+                    self.movement.activate(sol_player, transit_target.position)
+                    self.selected = transit_target.position
+                    self.movement_panel.reset()
+                    self.on_draw()
+                    carrier_row = next(hit for hit in self.movement_panel.hits
+                                       if hit[0] == ('unit', transit_carrier.unit_id))
+                    for _ in range(12):
+                        if self.movement_panel.hit_test((carrier_row[1] + carrier_row[2]) / 2,
+                                                        (carrier_row[3] + carrier_row[4]) / 2) == carrier_row[0]:
+                            break
+                        self.movement_panel.scroll_by(80)
+                        self.on_draw()
+                        carrier_row = next(hit for hit in self.movement_panel.hits
+                                           if hit[0] == ('unit', transit_carrier.unit_id))
+                    self.on_mouse_press((carrier_row[1] + carrier_row[2]) / 2,
+                                        (carrier_row[3] + carrier_row[4]) / 2,
+                                        arcade.MOUSE_BUTTON_LEFT, 0)
+                    self.on_draw()
+                    pickup_row = next(hit for hit in self.movement_panel.hits
+                                      if hit[0] == ('unit', transit_infantry.unit_id))
+                    for _ in range(12):
+                        if self.movement_panel.hit_test((pickup_row[1] + pickup_row[2]) / 2,
+                                                        (pickup_row[3] + pickup_row[4]) / 2) == pickup_row[0]:
+                            break
+                        self.movement_panel.scroll_by(80)
+                        self.on_draw()
+                        pickup_row = next(hit for hit in self.movement_panel.hits
+                                          if hit[0] == ('unit', transit_infantry.unit_id))
+                    self.on_mouse_press((pickup_row[1] + pickup_row[2]) / 2,
+                                        (pickup_row[3] + pickup_row[4]) / 2,
+                                        arcade.MOUSE_BUTTON_LEFT, 0)
+                    confirm_row = next(button for button in self.movement_panel.buttons
+                                       if button[0] == ('confirm',))
+                    self.on_mouse_press((confirm_row[1] + confirm_row[2]) / 2,
+                                        (confirm_row[3] + confirm_row[4]) / 2,
+                                        arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert self.movement.session and transit_infantry in transit_target.units
+                    assert transit_infantry.location.region == Region.TRANSPORT
+                    self.movement.cancel()
+                finally:
+                    if self.movement.session:
+                        self.movement.cancel()
+                    if transit_infantry in transit_tile.units:
+                        transit_tile.units.remove(transit_infantry)
+                    transit_carrier.profile_id = old_carrier_profile
+                    sol_player.technologies = old_technologies
+                self.movement_panel.reset()
                 target = next(tile for tile in self.board.neighbors(home.position)
                               if tile.planets and any(self.movement.route(home, tile, unit, sol_player)
                                      for unit in home.units if unit.owner == 'sol'))
@@ -2184,6 +2246,9 @@ class BoardWindow(arcade.Window):
                             self.movement_panel.scroll = 0
                         elif action[0] == 'unit':
                             self.movement.session.toggle(action[1])
+                            self.movement_error = None
+                        elif action[0] == 'cargo':
+                            self.movement.session.toggle_cargo(action[1])
                             self.movement_error = None
                         elif action[0] == 'spatial_conduit':
                             self.movement.use_spatial_conduit()

@@ -122,6 +122,7 @@ class SessionCheckpoint:
         session.capacity_next_stage = None
         session.capacity_affected.clear()
         session.fleet_queue.clear()
+        session.cargo_selected.clear()
         session.overflow_required = 0
         session.overflow_selected.clear()
         session.overflow_position = None
@@ -163,6 +164,8 @@ class Session:
     snapshot: Snapshot
     strategic_production: bool = False
     selected: set[str] = field(default_factory=set)
+    cargo_selected: set[str] = field(default_factory=set)
+    pickup_sources: dict = field(default_factory=dict)
     stage: str = 'movement'
     landings: dict[str, str | None] = field(default_factory=dict)
     cannon_log: list[str] = field(default_factory=list)
@@ -250,13 +253,18 @@ class Session:
 
     @property
     def choices(self):
-        return {u.unit_id: u for source in self.sources.values() for u in source.ships + source.passengers}
+        return {u.unit_id: u for source in (*self.sources.values(), *self.pickup_sources.values())
+                for u in source.ships + source.passengers}
 
     def ships(self, source):
-        return [u for u in source.ships if u.unit_id in self.selected]
+        return [u for u in source.ships if u.unit_id in self.selected and
+                u.unit_id not in self.cargo_selected]
 
     def passengers(self, source):
-        return [u for u in source.passengers if u.unit_id in self.selected]
+        independent_ships = {ship.unit_id for candidate in self.sources.values()
+                             for ship in candidate.ships}
+        return [u for u in source.passengers if u.unit_id in self.cargo_selected or
+                (u.unit_id in self.selected and u.unit_id not in independent_ships)]
 
     def carried(self, source, ships=None):
         ids = {u.unit_id for u in (self.ships(source) if ships is None else ships)}
@@ -266,24 +274,100 @@ class Session:
         cargo = self.passengers(source) + self.carried(source)
         return sum(cargo_cost(unit) for unit in cargo), sum(u.capacity for u in self.ships(source))
 
+    def all_passengers(self):
+        units = {}
+        independent_ships = {unit.unit_id for source in self.sources.values() for unit in source.ships}
+        for source in (*self.sources.values(), *self.pickup_sources.values()):
+            for unit in source.passengers:
+                if ((unit.unit_id in self.selected or unit.unit_id in self.cargo_selected) and
+                        (unit.unit_id not in independent_ships or unit.unit_id in self.cargo_selected)):
+                    units[unit.unit_id] = unit
+        return list(units.values())
+
+    def passenger_origin(self, unit_id):
+        return next((source.tile for source in (*self.sources.values(), *self.pickup_sources.values())
+                     if any(unit.unit_id == unit_id for unit in source.passengers)), None)
+
+    def _validate_cargo(self, ship_ids, passenger_ids):
+        ships = [unit for source in self.sources.values() for unit in source.ships
+                 if unit.unit_id in ship_ids]
+        remaining = {ship.unit_id: ship.capacity for ship in ships}
+        for source in self.sources.values():
+            for cargo in source.tile.units:
+                if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id in remaining:
+                    remaining[cargo.location.carrier_id] -= cargo_cost(cargo)
+        pending = []
+        for unit_id in passenger_ids:
+            unit = self.choices.get(unit_id)
+            origin = self.passenger_origin(unit_id)
+            candidates = [ship.unit_id for source in self.sources.values() for ship in ships
+                          if ship in source.ships and ship.capacity > 0 and
+                          origin is not None and origin.position in source.routes.get(ship.unit_id, ())]
+            if unit is None or origin is None or not candidates:
+                raise MovementError('Select a ship whose route passes through this system before loading cargo')
+            pending.append((len(candidates), unit_id, candidates))
+        for _, unit_id, candidates in sorted(pending):
+            carrier_id = next((ship_id for ship_id in candidates
+                               if remaining[ship_id] >= cargo_cost(self.choices[unit_id])), None)
+            if carrier_id is None:
+                raise MovementError('Not enough capacity across the selected ships for this cargo')
+            remaining[carrier_id] -= cargo_cost(self.choices[unit_id])
+
     def toggle(self, unit_id):
         unit = self.choices.get(unit_id)
         if unit is None:
             raise MovementError('This unit cannot move to the activated system')
-        source = next(s for s in self.sources.values() if unit in s.ships or unit in s.passengers)
+        ship_source = next((source for source in self.sources.values() if unit in source.ships), None)
+        source = ship_source or next((s for s in (*self.sources.values(), *self.pickup_sources.values())
+                                     if unit in s.passengers), None)
+        if source is None:
+            raise MovementError('This unit cannot move to the activated system')
+        if unit_id in self.cargo_selected:
+            trial = self.selected | {unit_id}
+            if sum(candidate in self.gravity_bonus_ids for candidate in trial) > 1:
+                raise MovementError('Gravity Drive can boost only one ship in this action.')
+            self.cargo_selected.remove(unit_id)
+            self.selected = trial
+            return
         trial = self.selected ^ {unit_id}
-        ships = [u for u in source.ships if u.unit_id in trial]
-        cargo = [u for u in source.passengers if u.unit_id in trial]
-        if unit in source.passengers and unit_id not in self.selected and not ships:
-            raise MovementError('Select a ship before loading ground forces or fighters')
-        used = sum(cargo_cost(unit) for unit in cargo + self.carried(source, ships))
-        capacity = sum(u.capacity for u in ships)
-        if used > capacity:
-            raise MovementError('Not enough capacity in this source system. Select a transport or remove passengers first.')
+        if unit in source.passengers and unit not in source.ships and unit_id not in self.selected:
+            selected_ships = [ship for movement_source in self.sources.values() for ship in movement_source.ships
+                              if ship.unit_id in trial and ship.unit_id not in self.cargo_selected]
+            self._validate_cargo({ship.unit_id for ship in selected_ships},
+                                 {candidate.unit_id for candidate in self.all_passengers()} | {unit_id})
+        elif ship_source and unit_id in self.selected:
+            remaining_ships = [ship for movement_source in self.sources.values()
+                               for ship in movement_source.ships
+                               if ship.unit_id in trial and ship.unit_id not in self.cargo_selected]
+            passengers = {candidate.unit_id for candidate in self.all_passengers()}
+            if passengers:
+                self._validate_cargo({ship.unit_id for ship in remaining_ships}, passengers)
         if sum(unit_id in self.gravity_bonus_ids for unit_id in trial) > 1:
             raise MovementError('Gravity Drive can boost only one ship in this action.')
         self.selected = trial
 
+    def toggle_cargo(self, unit_id):
+        unit = self.choices.get(unit_id)
+        if unit is None or not any(unit in source.passengers
+                                   for source in (*self.sources.values(), *self.pickup_sources.values())):
+            raise MovementError('This unit cannot be loaded during this movement')
+        if unit_id in self.cargo_selected:
+            self.cargo_selected.remove(unit_id)
+            return
+        # Fighter II can either move under its own power or be carried. Selecting
+        # the cargo row switches it from the former mode to the latter.
+        trial_selected = set(self.selected)
+        trial_selected.discard(unit_id)
+        trial_cargo = set(self.cargo_selected)
+        trial_cargo.add(unit_id)
+        passengers = {candidate.unit_id for candidate in self.all_passengers()
+                      if candidate.unit_id in trial_selected or candidate.unit_id in trial_cargo}
+        passengers.add(unit_id)
+        ships = {ship.unit_id for source in self.sources.values() for ship in source.ships
+                 if ship.unit_id in trial_selected and ship.unit_id not in trial_cargo}
+        self._validate_cargo(ships, passengers)
+        self.selected = trial_selected
+        self.cargo_selected = trial_cargo
 
 class MovementController:
     PRODUCIBLE_KINDS = {'infantry', 'fighter', 'destroyer', 'cruiser', 'carrier',
@@ -295,6 +379,83 @@ class MovementController:
         self.session = None
         self.history: list[UndoEntry] = []
         self.action_cards = None
+
+    @staticmethod
+    def _independent_fighter(unit, player):
+        return (unit.kind == 'fighter' and unit.location.region == Region.SPACE and
+                'ff2' in player.technologies and unit_profile(unit).get('moveValue', 0) > 0)
+
+    @staticmethod
+    def _movement_passengers(tile, player):
+        return [unit for unit in tile.units if unit.owner == player.faction and
+                ((unit.kind == 'fighter' and unit.location.region == Region.SPACE) or
+                 (unit.kind == 'infantry' and unit.location.region == Region.PLANET))]
+
+    def _refresh_pickup_sources(self, session):
+        """Expose cargo in systems traversed by at least one currently legal route."""
+        pickup_positions = set()
+        for source in session.sources.values():
+            ships = {unit.unit_id: unit for unit in source.ships}
+            for unit_id, route in source.routes.items():
+                if ships[unit_id].capacity > 0:
+                    pickup_positions.update(route[1:])
+        session.pickup_sources = {}
+        for position in sorted(pickup_positions):
+            tile = self.board[position]
+            if tile is not session.target and session.player.faction in tile.command_tokens:
+                continue
+            passengers = self._movement_passengers(tile, session.player)
+            if passengers:
+                session.pickup_sources[position] = Source(tile, [], passengers, {})
+        eligible = {unit.unit_id for source in (*session.sources.values(), *session.pickup_sources.values())
+                    for unit in source.ships + source.passengers}
+        session.selected.intersection_update(eligible)
+        session.cargo_selected.intersection_update(eligible)
+
+    @staticmethod
+    def _selected_passengers(session):
+        units = {}
+        independent_ships = {ship.unit_id for source in session.sources.values() for ship in source.ships}
+        for source in (*session.sources.values(), *session.pickup_sources.values()):
+            for unit in source.passengers:
+                if unit.unit_id in session.selected or unit.unit_id in session.cargo_selected:
+                    # Fighter II is either moving independently or being carried.
+                    if unit.unit_id in independent_ships and unit.unit_id not in session.cargo_selected:
+                        continue
+                    units[unit.unit_id] = unit
+        return list(units.values())
+
+    @staticmethod
+    def _assign_cargo(session, ships, passengers):
+        ship_ids = {ship.unit_id for ship in ships}
+        session._validate_cargo(ship_ids, {unit.unit_id for unit in passengers})
+        # Validation assigns constrained cargo first. Repeat that deterministic
+        # order while recording the chosen carrier for transported infantry.
+        remaining = {ship.unit_id: ship.capacity for ship in ships}
+        for source in session.sources.values():
+            for cargo in source.tile.units:
+                if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id in remaining:
+                    remaining[cargo.location.carrier_id] -= cargo_cost(cargo)
+        ordered = []
+        for unit in passengers:
+            origin = session.passenger_origin(unit.unit_id)
+            candidates = [(source, ship) for source in session.sources.values()
+                          for ship in ships if ship in source.ships and
+                          origin.position in source.routes.get(ship.unit_id, ()) and
+                          ship.capacity > 0]
+            ordered.append((len(candidates), origin, unit, candidates))
+        assignments = []
+        for _, origin, unit, candidates in sorted(ordered, key=lambda item: item[0]):
+            chosen = next(((source, ship) for source, ship in candidates
+                           if remaining[ship.unit_id] >= cargo_cost(unit)), None)
+            if chosen is None:
+                raise MovementError('Not enough capacity on ships whose routes pass through the pickup system')
+            source, carrier = chosen
+            remaining[carrier.unit_id] -= cargo_cost(unit)
+            location = (UnitLocation(Region.SPACE) if unit.kind == 'fighter' else
+                        UnitLocation(Region.TRANSPORT, carrier_id=carrier.unit_id))
+            assignments.append((origin, unit, location))
+        return assignments
 
     def faction_player(self, faction):
         return next((player for player in self.players if player.faction == faction), None)
@@ -394,8 +555,7 @@ class MovementController:
             routes = {}
             ships = []
             for unit in origin.units:
-                independent_fighter = unit.kind == 'fighter' and 'ff2' in player.technologies and \
-                    unit.location.region == Region.SPACE
+                independent_fighter = self._independent_fighter(unit, player)
                 if unit.owner == player.faction and ((mobile_ship(unit) and unit.kind != 'fighter') or independent_fighter):
                     path = (target.position,) if origin is target else self.route(origin, target, unit, player)
                     if not path and 'gd' in player.technologies:
@@ -406,15 +566,14 @@ class MovementController:
                         ships.append(unit)
                         routes[unit.unit_id] = path
             if ships:
-                passengers = [u for u in origin.units if u.owner == player.faction and
-                              ((u.kind == 'fighter' and u.location.region == Region.SPACE and u not in ships) or
-                               (u.kind == 'infantry' and u.location.region == Region.PLANET))]
+                passengers = self._movement_passengers(origin, player)
                 sources[origin.position] = Source(origin, ships, passengers, routes)
         snapshot = Snapshot.capture(self.board, player, self.players or [player], self.action_cards)
         player.command_pools['tactical'] -= 1
         target.command_tokens.add(player.faction)
         self.session = Session(player, target, sources, snapshot)
         self.session.gravity_bonus_ids = gravity_bonus_ids
+        self._refresh_pickup_sources(self.session)
         for opponent in self.players:
             if opponent is not player and 'ers' in opponent.technologies and any(
                     unit.owner == opponent.faction and unit.location.region == Region.SPACE and
@@ -450,9 +609,10 @@ class MovementController:
                     source.routes[unit.unit_id] = (origin.position, target.position)
             if source is not None:
                 source.passengers = [u for u in origin.units if u.owner == player.faction and
-                                     ((u.kind == 'fighter' and u.location.region == Region.SPACE and
-                                       u not in source.ships) or
+                                     ((u.kind == 'fighter' and u.location.region == Region.SPACE) or
                                       (u.kind == 'infantry' and u.location.region == Region.PLANET))]
+
+        self._refresh_pickup_sources(session)
 
     def apply_flank_speed(self, session):
         """Rebuild eligible movement routes after the activation-window bonus."""
@@ -462,9 +622,7 @@ class MovementController:
         for origin in self.board.values():
             routes, ships = {}, []
             for unit in origin.units:
-                independent_fighter = (unit.kind == 'fighter' and
-                                       'ff2' in session.player.technologies and
-                                       unit.location.region == Region.SPACE)
+                independent_fighter = self._independent_fighter(unit, session.player)
                 if unit.owner != session.player.faction or not ((mobile_ship(unit) and unit.kind != 'fighter') or independent_fighter):
                     continue
                 path = ((session.target.position,) if origin is session.target else
@@ -482,14 +640,11 @@ class MovementController:
                     ships.append(unit)
                     routes[unit.unit_id] = path
             if ships:
-                passengers = [unit for unit in origin.units if unit.owner == session.player.faction and
-                              ((unit.kind == 'fighter' and unit.location.region == Region.SPACE and unit not in ships) or
-                               (unit.kind == 'infantry' and unit.location.region == Region.PLANET))]
+                passengers = self._movement_passengers(origin, session.player)
                 sources[origin.position] = Source(origin, ships, passengers, routes)
-        eligible = {unit.unit_id for source in sources.values() for unit in source.ships + source.passengers}
-        session.selected.intersection_update(eligible)
         session.sources = sources
         session.gravity_bonus_ids = gravity_bonus_ids
+        self._refresh_pickup_sources(session)
 
     def apply_silence_space(self, session, position):
         if not session or session.stage != 'movement':
@@ -501,8 +656,7 @@ class MovementController:
         routes, ships = {}, []
         gravity_bonus_ids = set()
         for unit in origin.units:
-            independent_fighter = (unit.kind == 'fighter' and 'ff2' in player.technologies and
-                                   unit.location.region == Region.SPACE)
+            independent_fighter = self._independent_fighter(unit, player)
             if unit.owner != player.faction or not ((mobile_ship(unit) and unit.kind != 'fighter') or independent_fighter):
                 continue
             path = self.route(origin, session.target, unit, player, ignore_enemy=True)
@@ -522,12 +676,10 @@ class MovementController:
             session.sources[origin.position] = source
         source.ships = ships
         source.routes.update(routes)
-        source.passengers = [unit for unit in origin.units if unit.owner == player.faction and
-                             ((unit.kind == 'fighter' and unit.location.region == Region.SPACE and
-                               unit not in source.ships) or
-                              (unit.kind == 'infantry' and unit.location.region == Region.PLANET))]
+        source.passengers = self._movement_passengers(origin, player)
         session.gravity_bonus_ids.update(gravity_bonus_ids)
         session.selected.intersection_update(session.choices)
+        self._refresh_pickup_sources(session)
 
     def add_command_token(self, player, position):
         tile = self.board[position]
@@ -685,25 +837,14 @@ class MovementController:
         if session.stage != 'movement':
             raise MovementError('Ship movement has already been completed')
         transfers = []
+        selected_ships = []
         for source in session.sources.values():
             ships = session.ships(source)
-            passengers = session.passengers(source)
-            carried = session.carried(source)
-            if sum(cargo_cost(unit) for unit in passengers + carried) > sum(u.capacity for u in ships):
-                raise MovementError('Transport capacity exceeded')
-            remaining = {ship.unit_id: ship.capacity - sum(cargo_cost(unit) for unit in carried
-                                                              if unit.location.carrier_id == ship.unit_id)
-                         for ship in ships}
+            selected_ships.extend(ships)
             transfers.extend((source.tile, ship, UnitLocation(Region.SPACE)) for ship in ships)
-            transfers.extend((source.tile, u, u.location) for u in carried)
-            for unit in passengers:
-                required = cargo_cost(unit)
-                carrier_id = next((key for key, slots in remaining.items() if slots >= required), None)
-                if carrier_id is None:
-                    raise MovementError('Transport capacity exceeded')
-                remaining[carrier_id] -= required
-                location = UnitLocation(Region.SPACE) if unit.kind == 'fighter' else UnitLocation(Region.TRANSPORT, carrier_id=carrier_id)
-                transfers.append((source.tile, unit, location))
+            transfers.extend((source.tile, cargo, cargo.location) for cargo in session.carried(source, ships))
+        transfers.extend(self._assign_cargo(session, selected_ships,
+                                            self._selected_passengers(session)))
         # Apply only after the entire selection has passed validation.
         ships_entering_target = {ship.unit_id for source in session.sources.values()
                                  if source.tile is not session.target

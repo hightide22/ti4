@@ -68,10 +68,12 @@ class MovementPanel:
         if not session or session.stage != 'movement' or self.hovered_source_position is None:
             return None
         source = session.sources.get(self.hovered_source_position)
-        if not source or not source.ships:
-            return None
-        unit_id = self.hovered_route_id or source.ships[0].unit_id
-        return source.routes.get(unit_id)
+        if source and source.ships:
+            unit_id = self.hovered_route_id or source.ships[0].unit_id
+            return source.routes.get(unit_id)
+        return next((route for candidate in session.sources.values()
+                     for route in candidate.routes.values()
+                     if self.hovered_source_position in route), None)
 
     def rows(self, window, session, source, units, x, y, width, passenger=False):
         cell = (width - 8) / 2
@@ -79,7 +81,11 @@ class MovementPanel:
         for index, unit in enumerate(units):
             row, col = divmod(index, 2)
             left, top = x + col * (cell + 8), y - row * ROW_HEIGHT
-            selected = unit.unit_id in session.selected
+            independent_fighter = any(unit.unit_id == ship.unit_id
+                                      for candidate in session.sources.values()
+                                      for ship in candidate.ships)
+            selected = (unit.unit_id in session.cargo_selected if passenger and independent_fighter else
+                        unit.unit_id in session.selected and not (passenger and independent_fighter))
             arcade.draw_lrbt_rectangle_filled(left, left + cell, top - (ROW_HEIGHT - 5), top,
                                              SELECTED if unit.unit_id == self.hovered_route_id else
                                              SELECTED if selected else CARD)
@@ -92,13 +98,18 @@ class MovementPanel:
             counts[unit.kind] = counts.get(unit.kind, 0) + 1
             name = f'{UNIT_TYPES[unit.kind]["name"]} {counts[unit.kind]}'
             if passenger:
-                detail = next((p.name for p in source.tile.planets if p.planet_id == unit.location.planet_id), 'Space')
+                if unit.kind == 'fighter':
+                    detail = f'Load · Capacity {unit_profile(unit).get("capacityUsed", 1)}'
+                else:
+                    detail = next((p.name for p in source.tile.planets
+                                   if p.planet_id == unit.location.planet_id), 'Space')
             else:
                 boost = ' +1 Gravity Drive' if unit.unit_id in session.gravity_bonus_ids else ''
                 detail = f'Move {unit.move_value}{boost} · Capacity {unit.capacity}'
             window.text(('movement_name', unit.unit_id), name, left + 33, top - 17, 11, INK)
             window.text(('movement_detail', unit.unit_id), detail, left + 33, top - 34, 10, MUTED)
-            self.hits.append((('unit', unit.unit_id), left, left + cell, top - (ROW_HEIGHT - 5), top))
+            action = ('cargo', unit.unit_id) if passenger and independent_fighter else ('unit', unit.unit_id)
+            self.hits.append((action, left, left + cell, top - (ROW_HEIGHT - 5), top))
             if not passenger and unit.unit_id in source.routes:
                 self.route_hits.append((source.tile.position, unit.unit_id,
                                         left, left + cell, top - (ROW_HEIGHT - 5), top))
@@ -292,6 +303,32 @@ class MovementPanel:
                     self.source_hits.append((source.tile.position, x - 8, x + width + 8,
                                              source_bottom, source_top))
                     y = source_bottom - 22
+                if session.pickup_sources:
+                    window.text('move_pickup_header', 'PICK UP CARGO ALONG THE ROUTE', x, y, 11, ACCENT)
+                    y -= 18
+                    window.text('move_pickup_help',
+                                'Select a transport first · your command-token systems are excluded',
+                                x, y, 9, MUTED, width)
+                    y -= 31
+                    for source in session.pickup_sources.values():
+                        if source.tile.position in session.sources:
+                            continue
+                        title = f'Tile {source.tile.system_id} · {source.tile.name.split(" - ")[0]}'
+                        block_top = y + 18
+                        hovered = self.hovered_source_position == source.tile.position
+                        arcade.draw_lrbt_rectangle_filled(x - 8, x + width + 8, y - 7, y + 14,
+                                                          SELECTED if hovered else CARD)
+                        arcade.draw_lrbt_rectangle_outline(x - 8, x + width + 8, y - 7, y + 14,
+                                                           GOLD if hovered else BORDER,
+                                                           1.5 if hovered else 1)
+                        window.text(('move_pickup_source', source.tile.position), title,
+                                    x + 5, y - 1, 12, INK, max_width=width - 10)
+                        y = self.rows(window, session, source, source.passengers,
+                                      x, y - 13, width, passenger=True) - 6
+                        block_bottom = y - 6
+                        self.source_hits.append((source.tile.position, x - 8, x + width + 8,
+                                                 block_bottom, block_top))
+                        y = block_bottom - 19
             elif session.stage == 'bombardment':
                 window.text('bombardment_title', 'BOMBARDMENT TARGETS', x, y, 11, ACCENT)
                 y -= 23
@@ -464,10 +501,16 @@ class MovementPanel:
             arcade.draw_lrbt_rectangle_filled(window.width - 10, window.width - 6, thumb_top - thumb, thumb_top, ACCENT)
         if session.stage == 'movement':
             self.update_hover(*window.mouse_position)
-        ships = sum(len(session.ships(source)) for source in session.sources.values())
-        cargo = sum(session.cargo_values(source)[0] for source in session.sources.values())
+        selected_ships = [unit for source in session.sources.values() for unit in session.ships(source)]
+        ships = len(selected_ships)
+        selected_cargo = session.all_passengers()
+        carried_cargo = [unit for source in session.sources.values()
+                         for unit in session.carried(source, selected_ships)]
+        cargo = len({unit.unit_id for unit in selected_cargo + carried_cargo})
+        capacity_used = sum(unit_profile(unit).get('capacityUsed', 1) for unit in selected_cargo + carried_cargo)
+        capacity_total = sum(unit.capacity for unit in selected_ships)
         landed = sum(planet_id is not None for planet_id in session.landings.values())
-        summary = (f'{ships} ships · {cargo} passengers selected' if session.stage == 'movement' else
+        summary = (f'{ships} ships · cargo {capacity_used:g}/{capacity_total:g}' if session.stage == 'movement' else
                    f'{window.movement.production_total(session)} units · Cost {amount(window.movement.production_cost(session))}'
                    if session.stage == 'production' else
                    f'{len(session.bombard_targets)} ships assigned to bombard' if session.stage == 'bombardment' else

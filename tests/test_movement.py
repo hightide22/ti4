@@ -127,6 +127,83 @@ class MovementTests(unittest.TestCase):
                          UnitLocation(Region.PLANET, planet_id=source_planet.planet_id))
         self.assertIn(carrier, target.units)
 
+    def test_carrier_can_pick_up_ground_forces_and_fighters_while_crossing_a_system(self):
+        self.player.technologies = frozenset(set(self.player.technologies) | {'cv2'})
+        carrier = next(unit for unit in self.home.units
+                       if unit.owner == self.player.faction and unit.kind == 'carrier')
+        carrier.profile_id = 'carrier2'
+        target = next(tile for tile in self.board.values() if tile.name == 'Lodor')
+        route = self.controller.route(self.home, target, carrier, self.player)
+        self.assertIsNotNone(route)
+        transit = self.board[route[1]]
+        self.assertTrue(transit.planets)
+        fighter = Unit('transit-pickup-fighter', 'fighter', self.player.faction,
+                       self.player.color_code, UnitLocation(Region.SPACE))
+        infantry = Unit('transit-pickup-infantry', 'infantry', self.player.faction,
+                        self.player.color_code,
+                        UnitLocation(Region.PLANET, planet_id=transit.planets[0].planet_id))
+        transit.units.extend((fighter, infantry))
+
+        session = self.controller.activate(self.player, target.position)
+        self.assertIn(transit.position, session.pickup_sources)
+        with self.assertRaisesRegex(MovementError, 'Select a ship'):
+            session.toggle(fighter.unit_id)
+        session.toggle(carrier.unit_id)
+        session.toggle(fighter.unit_id)
+        session.toggle(infantry.unit_id)
+        self.controller.confirm()
+
+        self.assertIn(fighter, target.units)
+        self.assertEqual(fighter.location, UnitLocation(Region.SPACE))
+        self.assertIn(infantry, target.units)
+        self.assertEqual(infantry.location.region, Region.TRANSPORT)
+        self.assertEqual(infantry.location.carrier_id, carrier.unit_id)
+
+    def test_cannot_pick_up_cargo_from_an_intermediate_system_with_own_token(self):
+        self.player.technologies = frozenset(set(self.player.technologies) | {'cv2'})
+        carrier = next(unit for unit in self.home.units
+                       if unit.owner == self.player.faction and unit.kind == 'carrier')
+        carrier.profile_id = 'carrier2'
+        target = next(tile for tile in self.board.values() if tile.name == 'Lodor')
+        route = self.controller.route(self.home, target, carrier, self.player)
+        transit = self.board[route[1]]
+        transit.command_tokens.add(self.player.faction)
+        fighter = Unit('token-blocked-pickup-fighter', 'fighter', self.player.faction,
+                       self.player.color_code, UnitLocation(Region.SPACE))
+        transit.units.append(fighter)
+
+        session = self.controller.activate(self.player, target.position)
+
+        self.assertNotIn(transit.position, session.pickup_sources)
+        self.assertNotIn(fighter.unit_id, session.choices)
+
+    def test_upgraded_fighter_can_be_loaded_instead_of_moving_independently(self):
+        self.player.technologies = frozenset(set(self.player.technologies) | {'cv2', 'ff2'})
+        carrier = next(unit for unit in self.home.units
+                       if unit.owner == self.player.faction and unit.kind == 'carrier')
+        carrier.profile_id = 'carrier2'
+        fighter = Unit('loadable-fighter-ii', 'fighter', self.player.faction,
+                       self.player.color_code, UnitLocation(Region.SPACE), profile_id='fighter2')
+        self.home.units.append(fighter)
+
+        session = self.controller.activate(self.player, self.target.position)
+        source = session.sources[self.home.position]
+        self.assertIn(fighter, source.ships)
+        self.assertIn(fighter, source.passengers)
+        session.toggle(carrier.unit_id)
+        session.toggle_cargo(fighter.unit_id)
+        self.assertNotIn(fighter, session.ships(source))
+        self.assertIn(fighter, session.passengers(source))
+        session.toggle(fighter.unit_id)
+        self.assertIn(fighter, session.ships(source))
+        self.assertNotIn(fighter, session.passengers(source))
+        session.toggle_cargo(fighter.unit_id)
+        self.assertNotIn(fighter, session.ships(source))
+        self.controller.confirm()
+
+        self.assertIn(fighter, self.target.units)
+        self.assertEqual(fighter.location, UnitLocation(Region.SPACE))
+
     def test_cancel_activation_restores_tactical_token(self):
         tactical = self.player.command_pools['tactical']
         self.controller.activate(self.player, self.target.position)
