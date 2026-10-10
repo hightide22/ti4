@@ -1173,29 +1173,35 @@ class BoardWindow(arcade.Window):
             assert not self.turn_order.qdn_pending and hacan.trade_goods == 0
             assert self.turn_order.active_player is hacan
             from movement import Session, Snapshot
-            player.technologies |= {'asc'}
+            player.technologies = player.technologies - {'asc'}
+            hacan.technologies |= {'asc'}
             battle_tile = next(tile for tile in self.board.values() if not tile.units)
-            for index in range(3):
-                battle_tile.units.append(Unit(f'smoke-assault-sol-{index}', 'cruiser',
+            for index, kind in enumerate(('carrier', 'cruiser', 'destroyer')):
+                battle_tile.units.append(Unit(f'smoke-assault-sol-{index}', kind,
                                               player.faction, player.color_code,
                                               UnitLocation(Region.SPACE)))
-            for kind in ('cruiser', 'dreadnought'):
+            for kind in ('carrier', 'cruiser', 'destroyer'):
                 battle_tile.units.append(Unit(f'smoke-assault-hacan-{kind}', kind,
                                               hacan.faction, hacan.color_code,
                                               UnitLocation(Region.SPACE)))
-            battle = Session(player, battle_tile, {}, Snapshot.capture(
-                self.board, player, self.player_panel.players))
+            battle = Session(hacan, battle_tile, {}, Snapshot.capture(
+                self.board, hacan, self.player_panel.players))
             self.movement.session = battle
             self.movement.start_combat(battle)
             assert battle.stage == 'assault_choice'
+            self.ai.bot_factions = {'hacan'}
+            self.ai.resolve_movement()
+            assert battle.stage == 'assault_choice'
+            assert any(unit.unit_id == 'smoke-assault-sol-1' for unit in battle_tile.units)
             self.on_draw()
             arcade.get_image().save(preview_dir / 'technology-assault-choice-preview.png')
             victim = next(hit for hit in self.combat_panel.action_hits
-                          if hit[0] == ('assault_victim', 'smoke-assault-hacan-dreadnought'))
+                          if hit[0] == ('assault_victim', 'smoke-assault-sol-1'))
             self.on_mouse_press((victim[1] + victim[2]) / 2,
                                 (victim[3] + victim[4]) / 2, arcade.MOUSE_BUTTON_LEFT, 0)
             assert battle.stage == 'space_combat'
-            print('PASS: base-game research, unit upgrade, QDN and Assault Cannon checked')
+            assert all(unit.unit_id != 'smoke-assault-sol-1' for unit in battle_tile.units)
+            print('PASS: base-game research, unit upgrade, QDN and human Assault Cannon casualty selection checked')
             self.close()
             return
         if self.smoke and self.frames == 5:
@@ -2031,10 +2037,17 @@ class BoardWindow(arcade.Window):
                     cannon_target = next((player for player in self.player_panel.players
                                           if player.faction == cannon_event.get(
                                               'target', self.movement.session.player.faction)), None)
+                    assault_victim_owner = (next((unit.owner for unit in
+                        self.movement.assault_victims(self.movement.session)
+                        if unit.unit_id == response[1]), None)
+                        if response and response[0] == 'assault_victim' and len(response) > 1
+                        else None)
                     allowed = bool(response and (
                         (response[0] in ('action_cards', 'advance') and human_card) or
                         (response[0] == 'space_cannon_target' and cannon_target and
                          not self.ai.is_bot(cannon_target)) or
+                        (response[0] == 'assault_victim' and assault_victim_owner is not None and
+                         assault_victim_owner not in self.ai.bot_factions) or
                         (response[0] == 'retreat_to' and retreating_player and
                          not self.ai.is_bot(retreating_player)) or
                         (response[0] in ('announce_retreat', 'decline_retreat') and

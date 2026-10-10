@@ -334,7 +334,7 @@ class GameAITests(unittest.TestCase):
                 self.fail('Bot combat remained unresolved')
         self.assertFalse(any(unit.unit_id == 'ai-test-enemy-cruiser' for unit in target.units))
 
-    def test_bot_defender_resolves_assault_cannon_during_human_attack(self):
+    def test_human_defender_chooses_assault_cannon_casualty_during_bot_attack(self):
         from movement import Session, Snapshot
         config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
         players = create_players(board, config)
@@ -348,7 +348,7 @@ class GameAITests(unittest.TestCase):
                                  UnitLocation(Region.SPACE))
                             for index, kind in enumerate(('carrier', 'cruiser', 'destroyer')))
         movement = MovementController(board, players)
-        session = Session(sol, target, {}, Snapshot.capture(board, sol, players))
+        session = Session(hacan, target, {}, Snapshot.capture(board, hacan, players))
         movement.session = session
         movement.start_combat(session)
         self.assertEqual(session.stage, 'assault_choice')
@@ -360,7 +360,39 @@ class GameAITests(unittest.TestCase):
         ai = GameAI(window, {'hacan'})
         ai.resolve_movement()
 
+        self.assertIn('assault-test-sol-carrier', {unit.unit_id for unit in target.units})
+        self.assertEqual(session.stage, 'assault_choice')
+        movement.choose_assault_victim('assault-test-sol-carrier')
         self.assertNotIn('assault-test-sol-carrier', {unit.unit_id for unit in target.units})
+        self.assertNotEqual(session.stage, 'assault_choice')
+
+    def test_bot_defender_resolves_assault_cannon_during_human_attack(self):
+        from movement import Session, Snapshot
+        config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
+        players = create_players(board, config)
+        sol = next(player for player in players if player.faction == 'sol')
+        hacan = next(player for player in players if player.faction == 'hacan')
+        sol.technologies |= {'asc'}
+        target = next(tile for tile in board.values() if not tile.units)
+        target.units.append(Unit('assault-test-hacan-carrier', 'carrier', 'hacan', hacan.color_code,
+                                 UnitLocation(Region.SPACE)))
+        target.units.extend(Unit(f'assault-test-sol-{index}', kind, 'sol', sol.color_code,
+                                 UnitLocation(Region.SPACE))
+                            for index, kind in enumerate(('carrier', 'cruiser', 'destroyer')))
+        movement = MovementController(board, players)
+        session = Session(sol, target, {}, Snapshot.capture(board, sol, players))
+        movement.session = session
+        movement.start_combat(session)
+        self.assertEqual(session.stage, 'assault_choice')
+        self.assertEqual(session.assault_queue, ['sol'])
+
+        cards = SimpleNamespace(participants=lambda _session: [], playable=lambda *_args: [])
+        window = SimpleNamespace(movement=movement, board=board, action_cards=cards,
+                                 turn_order=TurnOrder(players))
+        ai = GameAI(window, {'hacan'})
+        ai.resolve_movement()
+
+        self.assertNotIn('assault-test-hacan-carrier', {unit.unit_id for unit in target.units})
         self.assertNotEqual(session.stage, 'assault_choice')
         self.assertTrue(any('Assault Cannon destroyed' in line for line in session.assault_log))
 

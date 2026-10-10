@@ -640,6 +640,15 @@ class GameAI:
         w = self.window
         ctl, s = w.movement, w.movement.session
         ai_turn = self.is_bot(s.player)
+        # Assault Cannon's target chooses which of their own ships is
+        # destroyed. Resolve that choice only when the defending faction is
+        # controlled by the AI; the technology owner does not choose for them.
+        if s.stage == 'assault_choice':
+            victims = ctl.assault_victims(s)
+            if victims and victims[0].owner in self.bot_factions:
+                ctl.choose_assault_victim(min(victims, key=lambda u: (
+                    LOSS_ORDER.get(u.kind, 4), u.unit_id)).unit_id)
+            return
         # Destination selection belongs to the faction that announced the
         # retreat. Never let the tactical-action owner choose for a human
         # defender just because the bot initiated the combat.
@@ -680,18 +689,6 @@ class GameAI:
                     self.report(next((p for p in ctl.players if p.faction == faction),
                                      None), f'Announced retreat from {s.target.name}.', .4)
                     return
-        # Assault Cannon belongs to the faction at the head of the queue, not
-        # necessarily to the player whose tactical action opened this session.
-        # Resolve a bot defender's choice during a human attack before the
-        # active-player guard below, or the combat window can wait forever.
-        if s.stage == 'assault_choice' and s.assault_queue:
-            assault_owner = s.assault_queue[0]
-            if assault_owner in self.bot_factions:
-                victims = ctl.assault_victims(s)
-                if victims:
-                    ctl.choose_assault_victim(min(victims, key=lambda u: (
-                        LOSS_ORDER.get(u.kind, 4), u.unit_id)).unit_id)
-                return
         if s.stage == 'space_cannon_choose_target':
             if ai_turn:
                 options = ctl.space_cannon_target_options(s)
@@ -751,11 +748,6 @@ class GameAI:
                 names = ', '.join(p.name for p in s.target.planets
                                   if p.planet_id in s.landed_planets)
                 self.report(s.player, f'Landed infantry on {names}.', 1.2)
-        elif s.stage == 'assault_choice':
-            victims = ctl.assault_victims(s)
-            if victims:
-                ctl.choose_assault_victim(min(victims, key=lambda u: (
-                    LOSS_ORDER.get(u.kind, 4), u.unit_id)).unit_id)
         elif s.stage in ('space_combat', 'ground_combat', 'combat_end', 'space_combat_won'):
             if s.combat_needs_resolution and not ctl.combat_assignments_complete(s):
                 return
