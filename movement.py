@@ -1671,6 +1671,13 @@ class MovementController:
                 sites.append((planet_id, production))
         return sites
 
+    def ships_blocked_by_opponents(self, session):
+        """TI4 rule 58.6: enemy ships in the system prevent producing ships."""
+        return any(unit.owner != session.player.faction and
+                   unit.location.region == Region.SPACE and
+                   UNIT_TYPES[unit.kind]['ship']
+                   for unit in session.target.units)
+
     def unit_cost(self, kind, player):
         costs = {'infantry': .5, 'fighter': .5, 'destroyer': 1, 'cruiser': 2,
                  'carrier': 3, 'dreadnought': 4, 'pds': 2,
@@ -1759,6 +1766,9 @@ class MovementController:
             raise MovementError('Structures cannot be produced yet')
         if not production_allowed(session.player, kind):
             raise MovementError('Research War Sun before producing it.')
+        if (delta > 0 and UNIT_TYPES[kind]['ship'] and
+                self.ships_blocked_by_opponents(session)):
+            raise MovementError('Cannot produce ships while another player has ships in this system.')
         current = session.production_choices.get(kind, 0)
         if delta > 0:
             remaining = session.production_limit - self.production_total(session)
@@ -1811,6 +1821,10 @@ class MovementController:
             raise MovementError('Choose at least one unit or skip production')
         if self.production_total(session) > session.production_limit:
             raise MovementError('Production limit exceeded')
+        if (self.ships_blocked_by_opponents(session) and
+                any(count and UNIT_TYPES[kind]['ship']
+                    for kind, count in session.production_choices.items())):
+            raise MovementError('Cannot produce ships while another player has ships in this system.')
         if session.integrated_current:
             planet = next(planet for planet in session.target.planets
                           if planet.planet_id == session.integrated_current)

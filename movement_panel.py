@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import arcade
 from ui_theme import (PANEL, CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, ROW_HEIGHT,
-                      surface, button, meter)
+                      DANGER, surface, button, meter)
 
 from units import UNIT_TYPES, Region, unit_profile
 from technology import production_allowed
@@ -394,6 +394,12 @@ class MovementPanel:
                             'PRODUCTION',
                             x, y, 11, ACCENT)
                 y -= 21
+                ships_blocked = window.movement.ships_blocked_by_opponents(session)
+                if ships_blocked:
+                    window.text('production_blockade',
+                                'Enemy ships present · ship production blocked; ground forces allowed',
+                                x, y, 9, DANGER, width)
+                    y -= 18
                 window.text('production_capacity',
                             f'Cost cap: {amount(selected_cost)}/'
                             f'{amount(next(planet.resources for planet in session.target.planets if planet.planet_id == session.integrated_current))}'
@@ -435,9 +441,13 @@ class MovementPanel:
                                 x + 46, top - 32, 9, MUTED)
                     window.text(('production_count', kind), str(count), x + width - 70, top - 26, 14, ACCENT)
                     for delta, left in ((-1, x + width - 112), (1, x + width - 36)):
+                        enabled = (count > 0 if delta < 0 else
+                                   not (ships_blocked and UNIT_TYPES[kind]['ship']))
                         button(window, ('production_unit_button', kind, delta), '+' if delta > 0 else '−',
-                               left, top - 37, 32, 32, enabled=count > 0 or delta > 0)
-                        self.hits.append((('production_unit', kind, delta), left, left + 32, top - 37, top - 5))
+                               left, top - 37, 32, 32, enabled=enabled)
+                        if enabled:
+                            self.hits.append((('production_unit', kind, delta),
+                                              left, left + 32, top - 37, top - 5))
                     y -= ROW_HEIGHT
                 y -= 14
                 window.text('production_help', 'Yellow planets pay resources; trade goods cover the rest.',

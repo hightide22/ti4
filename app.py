@@ -1438,6 +1438,23 @@ class BoardWindow(arcade.Window):
                 assert step_statuses.count('Current') == 1
                 assert self.movement_panel.timeline_rows[11][0] == 'STEP 5 · PRODUCTION'
                 assert self.movement_panel.timeline_rows[11][1] == 'In progress'
+                hacan_blockader = next(player for player in self.player_panel.players
+                                       if player.faction == 'hacan')
+                blockade_ship = Unit('smoke-production-blockade', 'fighter', 'hacan',
+                                      hacan_blockader.color_code, UnitLocation(Region.SPACE))
+                target.units.append(blockade_ship)
+                self.on_draw()
+                assert 'ship production blocked' in self.labels['production_blockade'].text
+                assert not any(hit[0] == ('production_unit', 'carrier', 1)
+                               for hit in self.movement_panel.hits)
+                try:
+                    self.movement.adjust_production('carrier', 1)
+                except MovementError:
+                    pass
+                else:
+                    raise AssertionError('Ship production should be blocked by an enemy fighter.')
+                target.units.remove(blockade_ship)
+                self.on_draw()
                 arcade.get_image().save(preview_dir / 'production-preview.png')
                 infantry_plus = next(hit for hit in self.movement_panel.hits
                                      if hit[0] == ('production_unit', 'infantry', 1))

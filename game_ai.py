@@ -19,7 +19,7 @@ from action_cards import canonical_action_card
 from player import command_tokens_in_reinforcements
 from technology import (available_technologies, missing_prerequisites,
                         production_allowed)
-from units import Region, unit_profile
+from units import Region, UNIT_TYPES, unit_profile
 
 
 TECH_PRIORITY = {
@@ -786,14 +786,17 @@ class GameAI:
         fleet_used = sum(u.owner == player.faction and capital_ship(u) for u in s.target.units)
         fleet_limit = ctl.fleet_supply(player)
         max_budget = min(budget + discount, 16)
+        ships_blocked = ctl.ships_blocked_by_opponents(s)
         # Establish a transport and an escort before spending all production
         # slots on cheap infantry/fighters.  A dock without a carrier cannot
         # turn its ground army into territorial expansion.
-        if frontier and not local['carrier'] and fleet_used < fleet_limit and max_budget >= 3:
+        if (not ships_blocked and frontier and not local['carrier'] and
+                fleet_used < fleet_limit and max_budget >= 3):
             planned['carrier'] = 1
         opening_cost = ceil(sum(ctl.unit_cost(k, player) * n for k, n in planned.items()))
         combat_ships = local['destroyer'] + local['cruiser'] + local['dreadnought']
-        if (combat_ships == 0 and fleet_used + planned['carrier'] < fleet_limit and
+        if (not ships_blocked and combat_ships == 0 and
+                fleet_used + planned['carrier'] < fleet_limit and
                 sum(planned.values()) < s.production_limit and max_budget - opening_cost >= 1):
             available = max_budget - opening_cost
             if enemy_fighters >= 2:
@@ -811,6 +814,8 @@ class GameAI:
             for kind in ('carrier', 'infantry', 'fighter', 'destroyer', 'cruiser', 'dreadnought',
                          'flagship', 'warsun'):
                 if not production_allowed(player, kind):
+                    continue
+                if ships_blocked and UNIT_TYPES[kind]['ship']:
                     continue
                 cost = ctl.unit_cost(kind, player)
                 new_cost = ceil(sum(ctl.unit_cost(k, player) * n for k, n in planned.items()) + cost)

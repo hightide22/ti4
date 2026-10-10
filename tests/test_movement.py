@@ -214,6 +214,38 @@ class MovementTests(unittest.TestCase):
         self.assertFalse(card.exhausted)
         self.assertEqual(self.player.trade_goods, 0)
 
+    def test_enemy_ships_block_ship_production_but_allow_ground_forces(self):
+        planet = self.home.planets[0]
+        dock = Unit('blockade-test-dock', 'spacedock', self.player.faction,
+                    self.player.color_code,
+                    UnitLocation(Region.PLANET, planet_id=planet.planet_id))
+        friendly_carrier = Unit('blockade-test-carrier', 'carrier', self.player.faction,
+                                self.player.color_code, UnitLocation(Region.SPACE))
+        enemy_fighter = Unit('blockade-test-enemy-fighter', 'fighter', 'hacan',
+                             next(player for player in self.players if player.faction == 'hacan').color_code,
+                             UnitLocation(Region.SPACE))
+        self.home.units[:] = [dock, friendly_carrier, enemy_fighter]
+        session = self.controller.start_strategy_production(self.player, self.home, dock)
+
+        self.assertTrue(self.controller.ships_blocked_by_opponents(session))
+        for kind in ('fighter', 'carrier', 'destroyer'):
+            with self.subTest(kind=kind), self.assertRaisesRegex(MovementError, 'Cannot produce ships'):
+                self.controller.adjust_production(kind, 1)
+
+        session.production_choices['carrier'] = 1
+        with self.assertRaisesRegex(MovementError, 'Cannot produce ships'):
+            self.controller.produce()
+        session.production_choices.clear()
+
+        infantry_before = sum(unit.owner == self.player.faction and unit.kind == 'infantry'
+                              for unit in self.home.units)
+        self.controller.adjust_production('infantry', 1)
+        self.controller.toggle_production_planet(planet.planet_id)
+        self.controller.produce()
+        infantry_after = sum(unit.owner == self.player.faction and unit.kind == 'infantry'
+                             for unit in self.home.units)
+        self.assertEqual(infantry_after, infantry_before + 2)
+
     def test_fleet_limit_after_movement_requires_destroying_exact_excess(self):
         self.player.command_pools['fleet'] = 1
         original_home_units = list(self.home.units)

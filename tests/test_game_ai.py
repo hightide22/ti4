@@ -11,7 +11,7 @@ from turn_order import TurnOrder
 from board import load_board
 from player import create_players
 from movement import MovementController, Session, Snapshot
-from units import Region, Unit, UnitLocation
+from units import Region, UNIT_TYPES, Unit, UnitLocation
 from technology import technology_catalog
 
 
@@ -355,6 +355,30 @@ class GameAITests(unittest.TestCase):
         self.assertTrue(any(kind in produced for kind in ('cruiser', 'destroyer', 'dreadnought')))
         self.assertIn('infantry', produced)
         self.assertLess(sol.trade_goods, 8)
+
+    def test_bot_production_respects_enemy_ship_blockade(self):
+        config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
+        players = create_players(board, config)
+        sol = next(player for player in players if player.faction == 'sol')
+        tile = next(tile for tile in board.values() if any(
+            unit.owner == 'sol' and unit.kind == 'spacedock' for unit in tile.units))
+        dock = next(unit for unit in tile.units if unit.owner == 'sol' and unit.kind == 'spacedock')
+        hacan = next(player for player in players if player.faction == 'hacan')
+        tile.units[:] = [dock, Unit('blockade-ai-enemy', 'cruiser', hacan.faction,
+                                    hacan.color_code, UnitLocation(Region.SPACE))]
+        sol.trade_goods = 8
+        movement = MovementController(board, players)
+        movement.start_strategy_production(sol, tile, dock)
+        window = SimpleNamespace(movement=movement, turn_order=TurnOrder(players))
+        ai = GameAI(window, {'sol'})
+
+        ai.resolve_production()
+
+        produced = [unit.kind for unit in tile.units if unit.unit_id != dock.unit_id and
+                    unit.owner == sol.faction]
+        self.assertTrue(produced)
+        self.assertTrue(all(not UNIT_TYPES[kind]['ship'] for kind in produced))
+        self.assertIn('infantry', produced)
 
 
 if __name__ == '__main__':
