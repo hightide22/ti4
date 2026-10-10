@@ -148,6 +148,60 @@ class StrategicActionTests(unittest.TestCase):
         self.assertTrue(any(u.kind == 'pds' and u.location.planet_id == target for u in tile.units))
         self.assertIs(c.player, self.jolnar)
 
+    def test_construction_secondary_places_saar_floating_factory_in_space_and_it_can_move(self):
+        config, board = load_board(factions=('sol', 'saar', 'hacan'))
+        players_by_faction = {player.faction: player for player in create_players(board, config)}
+        players = [players_by_faction[faction] for faction in ('sol', 'saar', 'hacan')]
+        sol, saar, _ = players
+        turn = TurnOrder(players, strategy_enabled=True)
+        for card in (1, 2, 3, 4, 5, 6):
+            turn.choose_strategy_card(card)
+        for cards in turn.strategy_assignments.values():
+            if 4 in cards:
+                cards.remove(4)
+        turn.strategy_assignments['sol'].append(4)
+        turn.active_index = 0
+        movement = MovementController(board, players)
+        controller = StrategyController(board, turn, movement)
+        controller.start(4)
+
+        sol_home = next(tile for tile in board.values()
+                        if any(planet.faction_homeworld == 'sol' for planet in tile.planets))
+        sol_planet = next(planet.planet_id for planet in sol_home.planets
+                          if sol_home.planet_owners.get(planet.planet_id) == 'sol')
+        controller.session.structure = 'pds'
+        controller.select_system(sol_home.position)
+        controller.build(sol_planet)  # First primary PDS.
+        controller.select_system(sol_home.position)
+        controller.build(sol_planet)  # Second primary PDS.
+        self.assertIs(controller.player, saar)
+        controller.accept_secondary()
+        saar_home = next(tile for tile in board.values()
+                         if any(planet.faction_homeworld == 'saar' for planet in tile.planets))
+        starting_factory_ids = {unit.unit_id for unit in saar_home.units
+                                if unit.owner == 'saar' and unit.kind == 'spacedock'}
+        saar_planet = next(planet.planet_id for planet in saar_home.planets
+                           if saar_home.planet_owners.get(planet.planet_id) == 'saar')
+        controller.session.structure = 'spacedock'
+        controller.select_system(saar_home.position)
+        controller.build(saar_planet)
+
+        factory = next(unit for unit in saar_home.units
+                       if unit.owner == 'saar' and unit.kind == 'spacedock' and
+                       unit.unit_id not in starting_factory_ids)
+        self.assertEqual(factory.location.region, Region.SPACE)
+        self.assertEqual(factory.move_value, 1)
+        self.assertIn('saar', saar_home.command_tokens)
+
+        # Construction's secondary activates the chosen system, so the
+        # factory becomes movable after that command token is returned.
+        saar_home.command_tokens.remove('saar')
+        destination = next(tile for tile in movement.neighbors(saar_home)
+                           if 'saar' not in tile.command_tokens and
+                           movement.route(saar_home, tile, factory, saar))
+        activation = movement.activate(saar, destination.position)
+        self.assertIn(factory, activation.sources[saar_home.position].ships)
+
     def test_warfare_secondary_waits_for_one_dock_production_and_does_not_advance_turn(self):
         self.start_card(6)
         c = self.controller

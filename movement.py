@@ -488,7 +488,7 @@ class MovementController:
                 if session:
                     session.rolled_any_dice = True
         tile.units.remove(unit)
-        if UNIT_TYPES[unit.kind]['ship']:
+        if mobile_ship(unit):
             for cargo in list(tile.units):
                 if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == unit.unit_id:
                     self.destroy_unit(tile, cargo, session, source_factions)
@@ -886,7 +886,8 @@ class MovementController:
 
     def _capacity_value(self, tile, faction):
         return sum(unit.capacity for unit in tile.units if unit.owner == faction and
-                   unit.location.region == Region.SPACE and capital_ship(unit))
+                   unit.location.region == Region.SPACE and
+                   (capital_ship(unit) or (faction == 'saar' and unit.kind == 'spacedock')))
 
     def _fighter_ii(self, unit):
         player = self.faction_player(unit.owner)
@@ -2049,9 +2050,21 @@ class MovementController:
                     owned_planets = [planet.planet_id for planet in session.target.planets
                                      if session.target.planet_owners.get(planet.planet_id) == session.player.faction]
                     planet_id = site_planet if site_planet in owned_planets else next(iter(owned_planets), None)
-                    if planet_id is None:
+                    if planet_id is not None:
+                        location = UnitLocation(Region.PLANET, planet_id=planet_id)
+                    elif kind == 'infantry' and session.player.faction == 'saar':
+                        factory = next((unit for unit in session.target.units
+                                        if unit.owner == 'saar' and unit.kind == 'spacedock' and
+                                        unit.location.region == Region.SPACE and
+                                        unit_profile(unit).get('productionValue') is not None), None)
+                        if factory is None:
+                            raise MovementError('Infantry produced in space needs a Saar Floating Factory.')
+                        # Ground forces in a system's space area count against capacity.
+                        # Keep them attached to the mobile factory so movement and
+                        # invasion can carry them through the existing cargo flow.
+                        location = UnitLocation(Region.TRANSPORT, carrier_id=factory.unit_id)
+                    else:
                         raise MovementError('Ground units and structures need a controlled planet in this system.')
-                    location = UnitLocation(Region.PLANET, planet_id=planet_id)
                 else:
                     location = UnitLocation(Region.SPACE)
                 session.target.units.append(Unit(unit_id, kind, session.player.faction,

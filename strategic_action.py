@@ -415,8 +415,13 @@ class StrategyController:
                 raise ValueError('A strategy token is required.')
             s.player.command_pools['strategic'] -= 1
             tile.command_tokens.add(s.player.faction)
+        # Saar's Floating Factory is placed in the system's space area even
+        # though Construction selects one of the Saar player's planets there.
+        location = (UnitLocation(Region.SPACE)
+                    if kind == 'spacedock' and s.player.faction == 'saar' else
+                    UnitLocation(Region.PLANET, planet_id))
         tile.units.append(Unit(f'{s.player.faction}-structure-{uuid4().hex}', kind, s.player.faction,
-                               s.player.color_code, UnitLocation(Region.PLANET, planet_id),
+                               s.player.color_code, location,
                                profile_id=(upgrade_profile(s.player, kind) or {}).get('id')))
         s.builds_left -= 1
         if s.builds_left:

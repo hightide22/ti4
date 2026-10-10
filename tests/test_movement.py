@@ -1039,5 +1039,54 @@ class MovementTests(unittest.TestCase):
         self.assertIsNone(self.controller.session)
 
 
+class SaarFloatingFactoryTests(unittest.TestCase):
+    def setUp(self):
+        config, self.board = load_board(factions=('sol', 'saar', 'hacan'))
+        self.players = create_players(self.board, config)
+        self.saar = next(player for player in self.players if player.faction == 'saar')
+        self.controller = MovementController(self.board, self.players)
+        self.home = next(tile for tile in self.board.values()
+                         if any(planet.faction_homeworld == 'saar' for planet in tile.planets))
+        self.factory = next(unit for unit in self.home.units
+                            if unit.owner == 'saar' and unit.kind == 'spacedock')
+
+    def test_saar_can_produce_infantry_into_space_and_move_it_with_factory(self):
+        # No Saar-controlled planet in the active system: the Floating Factory
+        # can still produce ground forces into space, subject to its capacity.
+        self.home.planet_owners.clear()
+        self.saar.trade_goods = 1
+        session = self.controller.activate(self.saar, self.home.position)
+        self.controller.confirm()
+        self.controller.establish_control()
+        self.assertEqual(session.stage, 'production')
+
+        session.production_choices['infantry'] = 2
+        self.controller.change_production_trade_goods(1)
+        self.controller.produce()
+
+        infantry = [unit for unit in self.home.units if unit.owner == 'saar' and
+                    unit.kind == 'infantry' and unit.location.region == Region.TRANSPORT and
+                    unit.location.carrier_id == self.factory.unit_id]
+        self.assertEqual(len(infantry), 2)
+        self.assertGreaterEqual(self.controller._capacity_value(self.home, 'saar'), self.factory.capacity)
+        self.assertEqual(self.controller.capacity_overflow(self.home, 'saar'), 0)
+
+        # The activation token locks the source system until the round ends.
+        # Clear it here to model the next round, then verify both factory and
+        # cargo are included in the normal movement flow.
+        self.home.command_tokens.discard('saar')
+        destination = next(tile for tile in self.controller.neighbors(self.home)
+                           if 'saar' not in tile.command_tokens and
+                           self.controller.route(self.home, tile, self.factory, self.saar))
+        movement = self.controller.activate(self.saar, destination.position)
+        self.assertIn(self.factory, movement.sources[self.home.position].ships)
+        movement.toggle(self.factory.unit_id)
+        self.controller.confirm()
+
+        self.assertIn(self.factory, destination.units)
+        self.assertTrue(all(unit in destination.units for unit in infantry))
+        self.assertTrue(all(unit in self.controller.landing_forces(movement) for unit in infantry))
+
+
 if __name__ == '__main__':
     unittest.main()
