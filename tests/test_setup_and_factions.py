@@ -28,15 +28,23 @@ class SetupTests(unittest.TestCase):
         menu = MainMenu()
         menu.player_count = 4
         menu.select_faction(0, 1)
-        self.assertEqual(menu.factions[:4], ['jolnar', 'sol', 'hacan', 'letnev'])
+        self.assertEqual(menu.factions[:4], ['l1z1x', 'jolnar', 'hacan', 'letnev'])
         self.assertEqual(len(set(menu.active_factions)), 4)
+
+    def test_menu_skips_selected_factions_without_reordering_other_players(self):
+        menu = MainMenu()
+        menu.player_count = 4
+        menu.select_faction(0, 1)
+        self.assertEqual(menu.active_factions, ('l1z1x', 'jolnar', 'hacan', 'letnev'))
+        menu.select_faction(0, -1)
+        self.assertEqual(menu.active_factions, ('sol', 'jolnar', 'hacan', 'letnev'))
 
     def test_three_player_faction_selection_keeps_fourth_slot_unique(self):
         menu = MainMenu()
         menu.select_faction(2, -1)
         self.assertEqual(menu.active_factions, ('sol', 'jolnar', 'letnev'))
         menu.player_count = 4
-        self.assertEqual(len(set(menu.active_factions)), 4)
+        self.assertEqual(menu.active_factions, ('sol', 'jolnar', 'letnev', 'arborec'))
 
     def test_four_player_map_has_four_distinct_home_systems_and_37_tiles(self):
         config, board = load_board(ROOT / 'maps/four_player.json')

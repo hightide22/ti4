@@ -33,8 +33,8 @@ GOLD = (245, 194, 103)
 
 class MainMenu:
     def __init__(self):
-        self.player_count = 3
         self.factions = ['sol', 'jolnar', 'hacan', 'letnev']
+        self._player_count = 3
         self.vs_ai = False
         self.human_slot = 0
         self.hits = []
@@ -44,20 +44,35 @@ class MainMenu:
     def active_factions(self):
         return tuple(self.factions[:self.player_count])
 
+    @property
+    def player_count(self):
+        return self._player_count
+
+    @player_count.setter
+    def player_count(self, count):
+        self._player_count = count
+        self._ensure_active_factions_are_unique()
+
+    def _ensure_active_factions_are_unique(self):
+        aliases = [alias for alias, _, _ in FACTIONS]
+        selected = set()
+        for slot in range(self._player_count):
+            if self.factions[slot] in selected:
+                self.factions[slot] = next(alias for alias in aliases if alias not in selected)
+            selected.add(self.factions[slot])
+
     def select_faction(self, slot, direction):
         if slot < 0 or slot >= self.player_count:
             return
         aliases = [alias for alias, _, _ in FACTIONS]
         index = aliases.index(self.factions[slot])
-        choice = aliases[(index + direction) % len(aliases)]
-        # Keep the inactive fourth slot unique too, so switching from three to
-        # four players can never leave a duplicated faction behind.
-        occupied = next((other for other in range(len(self.factions))
-                         if other != slot and self.factions[other] == choice), None)
-        if occupied is None:
-            self.factions[slot] = choice
-        else:
-            self.factions[slot], self.factions[occupied] = self.factions[occupied], self.factions[slot]
+        selected_elsewhere = {self.factions[other] for other in range(self.player_count)
+                              if other != slot}
+        for step in range(1, len(aliases) + 1):
+            choice = aliases[(index + direction * step) % len(aliases)]
+            if choice not in selected_elsewhere:
+                self.factions[slot] = choice
+                return
 
     def hit_test(self, x, y):
         return next((action for action, left, right, bottom, top in reversed(self.hits)
