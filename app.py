@@ -1215,6 +1215,30 @@ class BoardWindow(arcade.Window):
             self.on_mouse_scroll(self.roster.WIDTH + 100, 400, 0, -100)
             assert self.target_zoom == .55
             self.fit()
+            center_x, center_y = self.viewport_center
+            pointer_x, pointer_y = center_x + 90, center_y + 45
+            pointer_world_before = (
+                self.target_map_center[0] + (pointer_x - center_x) / self.fit_scale,
+                self.target_map_center[1] + (pointer_y - center_y) / self.fit_scale,
+            )
+            self.on_mouse_scroll(pointer_x, pointer_y, 0, 1)
+            assert abs(self.target_zoom - 1.2) < 1e-9
+            pointer_world_after = (
+                self.target_map_center[0] + (pointer_x - center_x) /
+                (self.fit_scale * self.target_zoom),
+                self.target_map_center[1] + (pointer_y - center_y) /
+                (self.fit_scale * self.target_zoom),
+            )
+            assert all(abs(before - after) < 1e-9 for before, after in
+                       zip(pointer_world_before, pointer_world_after))
+            self.on_mouse_scroll(pointer_x, pointer_y, 0, .25)
+            assert self.target_zoom > 1.2
+            self.focus_view = True
+            self.focus_zoom = 1.0
+            self.on_mouse_scroll(pointer_x, pointer_y, 0, 1)
+            assert abs(self.focus_zoom - 1.2) < 1e-9
+            self.focus_view = False
+            self.fit()
             previous = tuple(self.map_center)
             self.on_mouse_drag(self.roster.WIDTH + 100, 400, 30, 20, arcade.MOUSE_BUTTON_RIGHT, 0)
             assert tuple(self.map_center) != previous
@@ -2372,10 +2396,33 @@ class BoardWindow(arcade.Window):
             else:
                 self.system_panel.scroll -= scroll_y * 40
                 self.system_panel.clamp()
-        elif self.focus_view and x < self.width - self.sidebar:
-            self.focus_zoom = max(.7, min(1.4, self.focus_zoom * 1.1 ** scroll_y))
         elif x < self.width - self.sidebar:
-            self.target_zoom = min(3.5, max(.55, self.target_zoom * 1.15 ** scroll_y))
+            self.zoom_map_at(x, y, scroll_y)
+
+    def zoom_map_at(self, x, y, scroll_y):
+        """Zoom visibly toward the pointer instead of scaling around map center."""
+        if not scroll_y:
+            return
+        # Pyglet can report fractional wheel steps for high-resolution wheels
+        # and touchpads. Exponential scaling preserves those partial steps.
+        factor = 1.2 ** max(-32, min(32, scroll_y))
+        if self.focus_view:
+            self.focus_zoom = max(.7, min(1.4, self.focus_zoom * factor))
+            return
+
+        cx, cy = self.viewport_center
+        current_target_scale = self.fit_scale * self.target_zoom
+        pointer_world = (self.target_map_center[0] + (x - cx) / current_target_scale,
+                         self.target_map_center[1] + (y - cy) / current_target_scale)
+        next_zoom = max(.55, min(3.5, self.target_zoom * factor))
+        if next_zoom == self.target_zoom:
+            return
+        next_scale = self.fit_scale * next_zoom
+        self.target_zoom = next_zoom
+        self.target_map_center = [
+            pointer_world[0] - (x - cx) / next_scale,
+            pointer_world[1] - (y - cy) / next_scale,
+        ]
 
     def on_key_press(self, symbol, modifiers):
         if self.main_menu_visible:
