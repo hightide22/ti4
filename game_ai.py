@@ -692,7 +692,22 @@ class GameAI:
                     ctl.choose_assault_victim(min(victims, key=lambda u: (
                         LOSS_ORDER.get(u.kind, 4), u.unit_id)).unit_id)
                 return
-        if s.stage == 'space_cannon_assign' and ai_turn:
+        if s.stage == 'space_cannon_choose_target':
+            if ai_turn:
+                options = ctl.space_cannon_target_options(s)
+                if options:
+                    target = max(options, key=lambda faction: (
+                        sum(SHIP_VALUE.get(unit.kind, 1) for unit in s.target.units
+                            if unit.owner == faction and unit.location.region == Region.SPACE),
+                        faction))
+                    ctl.choose_space_cannon_target(target)
+                    self.report(s.player, f'Targeted {target.upper()} with Space Cannon.', .4)
+            return
+        if s.stage == 'space_cannon_assign':
+            event = s.space_cannon_events[0] if s.space_cannon_events else {}
+            target_faction = event.get('target', s.player.faction)
+            if target_faction not in self.bot_factions:
+                return
             candidates = ctl.space_cannon_assignment_candidates(s)
             if candidates:
                 target = min(candidates, key=lambda unit: (
@@ -701,7 +716,8 @@ class GameAI:
                         cargo.location.carrier_id == unit.unit_id for cargo in s.target.units),
                     unit.damaged, unit.unit_id))
                 ctl.assign_space_cannon_hit(target.unit_id)
-                self.report(s.player, f'Assigned a Space Cannon hit to a {target.kind}.', .45)
+                target_player = ctl.faction_player(target_faction) or s.player
+                self.report(target_player, f'Assigned a Space Cannon hit to a {target.kind}.', .45)
             return
         if not ai_turn:
             return

@@ -272,6 +272,35 @@ class GameAITests(unittest.TestCase):
         self.assertIn(carrier, target.units)
         self.assertIn(infantry, target.units)
 
+    def test_bot_chooses_enemy_fleet_for_its_pds_ii_offense(self):
+        config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')
+        players = create_players(board, config)
+        sol = next(player for player in players if player.faction == 'sol')
+        hacan = next(player for player in players if player.faction == 'hacan')
+        second_enemy = next(player for player in players
+                            if player.faction not in ('sol', 'hacan'))
+        target = next(tile for tile in board.values() if tile.planets)
+        pds = Unit('ai-offense-pds-ii', 'pds', sol.faction, sol.color_code,
+                   UnitLocation(Region.PLANET, target.planets[0].planet_id), profile_id='pds2')
+        target.units.append(pds)
+        target.units.append(Unit('ai-target-hacan-cruiser', 'cruiser', hacan.faction,
+                                 hacan.color_code, UnitLocation(Region.SPACE)))
+        target.units.append(Unit(f'ai-target-{second_enemy.faction}-dreadnought', 'dreadnought',
+                                 second_enemy.faction, second_enemy.color_code,
+                                 UnitLocation(Region.SPACE)))
+        movement = MovementController(board, players)
+        session = Session(sol, target, {}, Snapshot.capture(board, sol, players),
+                          stage='space_cannon_choose_target', cannon_checked=True)
+        movement.session = session
+        ai = GameAI(SimpleNamespace(movement=movement), {sol.faction})
+        ai.play_combat_card = Mock(return_value=False)
+        ai.report = Mock()
+
+        with patch('movement.random.randint', return_value=1):
+            ai.resolve_movement()
+
+        self.assertEqual(session.space_cannon_target_faction, second_enemy.faction)
+
     def test_two_bots_resolve_space_combat_without_manual_clicks(self):
         from unittest.mock import patch
         config, board = load_board(Path(__file__).resolve().parents[1] / 'maps/three_player.json')

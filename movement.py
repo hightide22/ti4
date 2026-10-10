@@ -171,6 +171,7 @@ class Session:
     cannon_log: list[str] = field(default_factory=list)
     cannon_checked: bool = False
     space_cannon_events: list[dict] = field(default_factory=list)
+    space_cannon_target_faction: str | None = None
     space_cannon_next_stage: str | None = None
     space_cannon_nes_cancel: int = 0
     space_cannon_direct_hit: tuple[str, str] | None = None
@@ -1057,48 +1058,90 @@ class MovementController:
             return True
         session.cannon_checked = True
         active_faction = session.player.faction
-        active_ships = [unit for unit in session.target.units if unit.owner == active_faction and
-                        unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
-        if not active_ships:
-            return True
+        shooters = self._space_cannon_shooters(session)
+        if not shooters:
+            return self._finish_space_cannon_rolls(session)
+
+        active_shooters = [shooter for shooter in shooters if shooter[1].owner == active_faction]
+        targets = self.space_cannon_target_options(session)
+        if active_shooters and len(targets) > 1 and session.space_cannon_target_faction is None:
+            session.stage = 'space_cannon_choose_target'
+            return False
+        target_faction = session.space_cannon_target_faction or (targets[0] if targets else None)
+        return self._roll_space_cannon(session, shooters, target_faction)
+
+    def space_cannon_target_options(self, session):
+        """Players whose ships the active player's Space Cannon may target."""
+        active_faction = session.player.faction
+        return sorted({unit.owner for unit in session.target.units
+                       if unit.owner != active_faction and unit.location.region == Region.SPACE and
+                       UNIT_TYPES[unit.kind]['ship']})
+
+    def choose_space_cannon_target(self, faction):
+        session = self.session
+        if not session or session.stage != 'space_cannon_choose_target':
+            raise MovementError('There is no Space Cannon target to choose')
+        if faction not in self.space_cannon_target_options(session):
+            raise MovementError('Choose a player with ships in the active system')
+        session.space_cannon_target_faction = faction
+        shooters = self._space_cannon_shooters(session)
+
+        resolved = self._roll_space_cannon(session, shooters, faction)
+        if resolved:
+            self.continue_after_space_cannon(session)
+        return resolved
+
+    def _space_cannon_shooters(self, session):
         shooters = []
-        for source in (session.target, *self.neighbors(session.target)):
+        neighbor_cache = {}
+        for source in self.board.values():
             for unit in source.units:
                 profile = unit_profile(unit)
-                if (unit.kind != 'pds' or unit.owner == active_faction or
-                        unit.unit_id in session.disabled_pds or not profile.get('spaceCannonHitsOn')):
+                if (unit.kind != 'pds' or unit.unit_id in session.disabled_pds or
+                        not profile.get('spaceCannonHitsOn')):
                     continue
-                if source is not session.target and not profile.get('deepSpaceCannon'):
-                    continue
+                if source is not session.target:
+                    if not profile.get('deepSpaceCannon'):
+                        continue
+                    adjacent = neighbor_cache.setdefault(
+                        unit.owner, {tile.position for tile in self.neighbors(session.target, unit.owner)})
+                    if source.position not in adjacent:
+                        continue
                 shooters.append((source, unit, profile))
-        if not shooters:
-            return self._finish_space_cannon_rolls(session, active_ships)
+        return shooters
+
+    def _roll_space_cannon(self, session, shooters, active_target):
+        active_faction = session.player.faction
         plasma_used = set()
         for source, cannon, profile in shooters:
+            target_faction = active_target if cannon.owner == active_faction else active_faction
+            if target_faction is None:
+                continue
+            target_ships = [unit for unit in session.target.units if unit.owner == target_faction and
+                            unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+            if not target_ships:
+                continue
             shooter = self.faction_player(cannon.owner)
             extra = int(bool(shooter and 'ps' in shooter.technologies and
                              cannon.owner not in plasma_used))
             if extra:
                 plasma_used.add(cannon.owner)
             dice = [self.roll_d10(session) for _ in range(int(profile.get('spaceCannonDieCount') or 1) + extra)]
-            modifier = -1 if 'amd' in session.player.technologies else 0
-            hits = sum(value + modifier >= int(profile['spaceCannonHitsOn']) for value in dice)
+            hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
             graviton = bool(shooter and 'gls' in shooter.technologies and
                             'gls' not in shooter.exhausted_technologies and
-                            any(unit in session.target.units and unit.kind == 'fighter'
-                                for unit in active_ships) and
-                            any(unit in session.target.units and unit.kind != 'fighter'
-                                for unit in active_ships))
+                            any(unit.kind == 'fighter' for unit in target_ships) and
+                            any(unit.kind != 'fighter' for unit in target_ships))
             if graviton:
                 shooter.exhausted_technologies.add('gls')
             results = ', '.join(format_die_result(
-                value, modifier, value + modifier >= int(profile['spaceCannonHitsOn']))
+                value, 0, value >= int(profile['spaceCannonHitsOn']))
                 for value in dice)
             session.cannon_log.append(
-                f'{cannon.owner.upper()} PDS in tile {source.system_id} '
+                f'{cannon.owner.upper()} PDS in tile {source.system_id} targeting {target_faction.upper()} '
                 f'({profile["spaceCannonHitsOn"]}+): {results} → {hits} hit(s)')
             for _ in range(hits):
-                candidates = [unit for unit in active_ships if unit in session.target.units]
+                candidates = [unit for unit in target_ships if unit in session.target.units]
                 if not candidates:
                     break
                 if graviton:
@@ -1106,11 +1149,12 @@ class MovementController:
                     if nonfighters:
                         candidates = nonfighters
                 session.space_cannon_events.append({'owner': cannon.owner,
+                                                    'target': target_faction,
                                                     'candidates': [unit.unit_id for unit in candidates],
                                                     'graviton': graviton})
-        return self._finish_space_cannon_rolls(session, active_ships)
+        return self._finish_space_cannon_rolls(session)
 
-    def _finish_space_cannon_rolls(self, session, active_ships):
+    def _finish_space_cannon_rolls(self, session):
         if session.space_cannon_events and self.action_cards:
             session.stage = 'space_cannon_response'
             if any(self.action_cards.can_play(player.faction, 'maneuvering_jets', session)
@@ -1140,7 +1184,7 @@ class MovementController:
         event = session.space_cannon_events[0]
         candidates = [unit for unit in session.target.units
                       if unit.unit_id in event['candidates'] and
-                      unit.owner == session.player.faction and
+                      unit.owner == event.get('target', session.player.faction) and
                       unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
         if event.get('graviton'):
             nonfighters = [unit for unit in candidates if unit.kind != 'fighter']

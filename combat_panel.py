@@ -172,7 +172,12 @@ class CombatPanel:
         self.bounds = (left, left + width, bottom, bottom + height)
         modal(left, left + width, bottom, bottom + height)
         window.text('combat_drag_hint', 'DRAG HEADER TO MOVE', left + width - 177, bottom + height - 26, 8, MUTED)
-        title = ('SPACE CANNON DEFENSE' if session.stage == 'space_cannon_assign' else
+        cannon_target = (session.space_cannon_events[0].get('target', session.player.faction)
+                         if session.space_cannon_events else session.player.faction)
+        title = ('SPACE CANNON OFFENSE' if session.stage == 'space_cannon_choose_target' or
+                 (session.stage == 'space_cannon_assign' and
+                  cannon_target != session.player.faction) else
+                 'SPACE CANNON DEFENSE' if session.stage == 'space_cannon_assign' else
                  'GROUND COMBAT' if session.combat_type == 'ground' else 'SPACE COMBAT')
         window.text('combat_modal_title', title, left + 24, bottom + height - 31, 18, ACCENT)
         if session.combat_type == 'ground':
@@ -182,8 +187,12 @@ class CombatPanel:
             subtitle = f'{planet.name} · {round_label}'
         else:
             subtitle = f'Round {session.combat_round}' if session.combat_round else 'Roll one die per combat die'
-        if session.stage == 'space_cannon_assign':
-            subtitle = 'Assign each hit to one of your ships'
+        if session.stage == 'space_cannon_choose_target':
+            subtitle = 'Choose one opposing player in the active system'
+        elif session.stage == 'space_cannon_assign':
+            target_faction = (session.space_cannon_events[0].get('target', session.player.faction)
+                              if session.space_cannon_events else session.player.faction)
+            subtitle = f'{target_faction.upper()} · choose a ship to take the hit'
         elif session.stage == 'space_combat_won':
             subtitle = f'{session.combat_winner.upper()} wins · Choose Salvage or continue'
         elif session.stage == 'combat_end':
@@ -200,8 +209,38 @@ class CombatPanel:
                    card_x, card_y, 138, 29, primary=True, size=9)
             self.action_hits.append((('action_cards',), card_x, card_x + 138,
                                      card_y, card_y + 29))
+        if session.stage == 'space_cannon_choose_target':
+            if window.ai.is_bot(session.player):
+                window.text('space_cannon_ai_target', 'AI is choosing a target…',
+                            left + 24, bottom + height - 110, 11, MUTED)
+                return
+            options = window.movement.space_cannon_target_options(session)
+            window.text('space_cannon_target_title', 'SPACE CANNON · CHOOSE TARGET',
+                        left + 24, bottom + height - 96, 11, ACCENT)
+            window.text('space_cannon_target_help',
+                        'Choose which enemy fleet in the active system to target with your Space Cannon.',
+                        left + 24, bottom + height - 119, 10, INK)
+            for index, faction in enumerate(options):
+                row_top = bottom + height - 145 - index * 64
+                row_bottom = row_top - 52
+                ships = [unit for unit in session.target.units if unit.owner == faction and
+                         unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+                arcade.draw_lrbt_rectangle_filled(left + 24, left + width - 24,
+                                                   row_bottom, row_top, SELECTED)
+                arcade.draw_lrbt_rectangle_outline(left + 24, left + width - 24,
+                                                    row_bottom, row_top, ACCENT, 1.5)
+                window.text(('space_cannon_target_faction', faction),
+                            f'{faction.upper()} · {len(ships)} ship(s)',
+                            left + 39, row_top - 31, 12, INK)
+                self.action_hits.append((('space_cannon_choose', faction),
+                                         left + 24, left + width - 24, row_bottom, row_top))
+            return
         if session.stage == 'space_cannon_assign':
-            if window.bot_actor:
+            event = session.space_cannon_events[0] if session.space_cannon_events else {}
+            target_faction = event.get('target', session.player.faction)
+            target_player = next((player for player in window.player_panel.players
+                                  if player.faction == target_faction), None)
+            if window.ai.is_bot(target_player):
                 window.text('space_cannon_ai_wait', 'AI is choosing a ship to take the hit…',
                             left + 24, bottom + height - 110, 11, MUTED)
                 return
@@ -211,7 +250,7 @@ class CombatPanel:
             window.text('space_cannon_assign_title', 'SPACE CANNON · ASSIGN HIT',
                         left + 24, bottom + height - 96, 11, ACCENT)
             window.text('space_cannon_assign_help',
-                        f'{len(session.space_cannon_events)} hit(s) remain. Choose which ship takes the next hit.',
+                        f'{target_faction.upper()} · {len(session.space_cannon_events)} hit(s) remain. Choose which ship takes the next hit.',
                         left + 24, bottom + height - 119, 10, INK)
             page_candidates = candidates[self.space_cannon_page * 8:self.space_cannon_page * 8 + 8]
             cell_gap = 12

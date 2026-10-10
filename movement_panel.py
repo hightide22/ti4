@@ -130,6 +130,9 @@ class MovementPanel:
         production_current = stage == 'production'
         has_production = bool(window.movement.production_sites(session))
         combat_current = stage in ('space_combat', 'retreat_selection')
+        cannon_current = stage in ('space_cannon_action', 'space_cannon_choose_target',
+                                   'space_cannon_response', 'space_cannon_assign',
+                                   'space_cannon_direct_hit')
         combat_resolved = session.space_combat_resolved
         invasion_reached = stage in ('bombardment', 'invasion', 'ground_combat', 'production', 'complete') or overflow_after_production
         production_reached = production_current or stage == 'complete' or overflow_after_production
@@ -137,7 +140,8 @@ class MovementPanel:
             ('STEP 1 · ACTIVATION', 'Done'),
             ('STEP 2 · MOVEMENT', 'In progress' if stage == 'movement' or overflow_after_move else 'Done' if movement_done else 'Waiting'),
             ('  Move Ships', ('Done' if ships_selected else 'Skipped') if movement_done else 'Current'),
-            ('  Space Cannon Offense', 'Done' if session.cannon_log else 'Skipped' if session.cannon_checked else 'Wait'),
+            ('  Space Cannon Offense', 'Current' if cannon_current else
+             'Done' if session.cannon_log else 'Skipped' if session.cannon_checked else 'Wait'),
             ('STEP 3 · SPACE COMBAT', 'In progress' if combat_current else 'Done' if combat_resolved else 'Skipped' if movement_done else 'Wait'),
             ('STEP 4 · INVASION', 'Done' if production_reached else 'In progress' if stage in ('bombardment', 'ground_combat') or (invasion_current and has_forces) else 'Current' if invasion_current else 'Wait'),
             ('  Bombardment', 'Current' if stage == 'bombardment' else 'Done' if session.bombardment_resolved and session.bombard_log and not session.bombardment_cancelled else 'Skipped' if invasion_reached else 'Wait'),

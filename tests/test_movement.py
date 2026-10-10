@@ -4,6 +4,7 @@ from unittest.mock import patch
 from board import load_board
 from movement import MovementController, MovementError
 from player import PlanetCard, create_players
+from technology import research_technology
 from units import Region, Unit, UnitLocation
 
 
@@ -654,8 +655,81 @@ class MovementTests(unittest.TestCase):
             self.controller.confirm()
         roll.assert_called_once_with(1, 10)
         self.assertIn(carrier, target.units)
-        self.assertTrue(any('1-1=0 miss' in entry and '0 hit(s)' in entry
+        self.assertTrue(any('1 miss' in entry and '0 hit(s)' in entry
                             for entry in session.cannon_log), session.cannon_log)
+
+    def test_researched_pds_ii_fires_into_adjacent_active_system_at_enemy_ships(self):
+        pds_planet = self.home.planets[0]
+        pds = Unit('upgraded-sol-pds', 'pds', 'sol', self.player.color_code,
+                   UnitLocation(Region.PLANET, planet_id=pds_planet.planet_id))
+        self.home.units.append(pds)
+        research_technology(self.player, 'pds2', self.board)
+        self.assertEqual(pds.profile_id, 'pds2')
+        enemy = next(player for player in self.players if player.faction != 'sol')
+        target = next(tile for tile in self.board.neighbors(self.home.position)
+                      if not tile.command_tokens)
+        enemy_ship = Unit('enemy-in-pds-range', 'cruiser', enemy.faction,
+                          enemy.color_code, UnitLocation(Region.SPACE))
+        target.units.append(enemy_ship)
+        session = self.controller.activate(self.player, target.position)
+
+        with patch('movement.random.randint', return_value=10) as roll:
+            self.controller.confirm()
+
+        roll.assert_called_once_with(1, 10)
+        self.assertEqual(session.stage, 'space_cannon_assign')
+        self.assertEqual(session.space_cannon_events[0]['target'], enemy.faction)
+        self.assertIn(enemy_ship, self.controller.space_cannon_assignment_candidates(session))
+        self.controller.assign_space_cannon_hit(enemy_ship.unit_id)
+        self.assertNotIn(enemy_ship, target.units)
+        self.assertTrue(any(f'targeting {enemy.faction.upper()}' in line
+                            for line in session.cannon_log))
+
+    def test_pds_i_cannot_fire_into_an_adjacent_system(self):
+        enemy = next(player for player in self.players if player.faction != 'sol')
+        target = next(tile for tile in self.board.neighbors(self.home.position)
+                      if not tile.command_tokens)
+        enemy_ship = Unit('enemy-outside-pds-i-range', 'cruiser', enemy.faction,
+                          enemy.color_code, UnitLocation(Region.SPACE))
+        target.units.append(enemy_ship)
+        self.home.units.append(Unit('base-sol-pds', 'pds', 'sol', self.player.color_code,
+                                    UnitLocation(Region.PLANET, self.home.planets[0].planet_id)))
+        session = self.controller.activate(self.player, target.position)
+        with patch('movement.random.randint') as roll:
+            self.controller.confirm()
+        roll.assert_not_called()
+        self.assertFalse(session.cannon_log)
+        self.assertIn(enemy_ship, target.units)
+
+    def test_active_player_must_choose_between_enemy_space_cannon_targets(self):
+        pds_planet = self.home.planets[0]
+        pds = Unit('target-choice-sol-pds', 'pds', 'sol', self.player.color_code,
+                   UnitLocation(Region.PLANET, planet_id=pds_planet.planet_id), profile_id='pds2')
+        self.home.units.append(pds)
+        first = next(player for player in self.players if player.faction != 'sol')
+        second = next(player for player in self.players
+                      if player.faction not in ('sol', first.faction))
+        target = next(tile for tile in self.board.neighbors(self.home.position)
+                      if not tile.command_tokens)
+        target.units.extend((
+            Unit('first-enemy-ship', 'cruiser', first.faction, first.color_code,
+                 UnitLocation(Region.SPACE)),
+            Unit('second-enemy-ship', 'carrier', second.faction, second.color_code,
+                 UnitLocation(Region.SPACE)),
+        ))
+        session = self.controller.activate(self.player, target.position)
+        with patch('movement.random.randint', return_value=10) as roll:
+            self.controller.confirm()
+        roll.assert_not_called()
+        self.assertEqual(session.stage, 'space_cannon_choose_target')
+        self.assertEqual(set(self.controller.space_cannon_target_options(session)),
+                         {first.faction, second.faction})
+
+        with patch('movement.random.randint', return_value=10) as roll:
+            self.controller.choose_space_cannon_target(second.faction)
+        roll.assert_called_once_with(1, 10)
+        self.assertEqual(session.stage, 'space_cannon_assign')
+        self.assertEqual(session.space_cannon_events[0]['target'], second.faction)
 
     def test_bombardment_miss_does_not_destroy_ground_force(self):
         planet = self.target.planets[0]
