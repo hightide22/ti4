@@ -1216,6 +1216,9 @@ class BoardWindow(arcade.Window):
                 self.on_mouse_press(x, y, arcade.MOUSE_BUTTON_LEFT, 0)
                 assert self.selected == p
             assert self.pick(self.width - 10, 100) is None
+            smoke_mouse_scale = getattr(self, '_mouse_scale', None)
+            smoke_had_mouse_scale = hasattr(self, '_mouse_scale')
+            self._mouse_scale = 1.0
             self.on_mouse_scroll(self.roster.WIDTH + 100, 400, 0, 100)
             assert self.target_zoom == 3.5
             self.on_mouse_scroll(self.roster.WIDTH + 100, 400, 0, -100)
@@ -1252,6 +1255,29 @@ class BoardWindow(arcade.Window):
             assert self.zoom == self.target_zoom
             self.on_mouse_scroll(pointer_x, pointer_y, 0, .25)
             assert self.target_zoom > 1.2
+            if smoke_had_mouse_scale:
+                self._mouse_scale = smoke_mouse_scale
+            else:
+                del self._mouse_scale
+            # Regression: Win32 Pyglet reports wheel coordinates in the
+            # unscaled space on high-DPI stretch displays. Check the right side
+            # of the map, where those coordinates used to be mistaken for the
+            # inspector and zoom stopped working.
+            self.fit()
+            map_right = self.width - self.sidebar
+            right_map_x = self.roster.WIDTH + (map_right - self.roster.WIDTH) * .82
+            right_map_y = self.player_panel.HEIGHT + (
+                self.height - 80 - self.player_panel.HEIGHT) * .55
+            assert right_map_x < map_right
+            old_mouse_scale = getattr(self, '_mouse_scale', None)
+            had_mouse_scale = hasattr(self, '_mouse_scale')
+            self._mouse_scale = 2.0
+            self.on_mouse_scroll(right_map_x * 2, right_map_y * 2, 0, 1)
+            assert abs(self.target_zoom - 1.2) < 1e-9
+            if had_mouse_scale:
+                self._mouse_scale = old_mouse_scale
+            else:
+                del self._mouse_scale
             self.focus_view = True
             self.focus_zoom = 1.0
             self.on_mouse_scroll(pointer_x, pointer_y, 0, 1)
@@ -2541,6 +2567,13 @@ class BoardWindow(arcade.Window):
             self.dragging_modal = None
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
+        # On Windows, Pyglet's WM_MOUSEWHEEL path reports the cached pointer
+        # position before applying _mouse_scale, while motion and button events
+        # are already in window coordinates. Normalize it before hit testing.
+        mouse_scale = float(getattr(self, '_mouse_scale', 1.0) or 1.0)
+        if mouse_scale != 1.0:
+            x /= mouse_scale
+            y /= mouse_scale
         if self.main_menu_visible:
             return
         if self.transaction_modal:
