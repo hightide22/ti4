@@ -48,6 +48,11 @@
       "sha": "adc4d26d207d62c6b94b1e53cca25dcc484838cb"
     },
     {
+      "path": "data/action_cards/action_cards.json",
+      "size": 90902,
+      "sha": "c34de78711a69209ca65aa5e1dc18a455e584ebf"
+    },
+    {
       "path": "data/factions/base.json",
       "size": 27781,
       "sha": "881892a384cce08d7a17360657d26662aa9d2243"
@@ -1476,6 +1481,296 @@
       "path": "hover_images/techs/faction/floating_factory_2.jpg",
       "size": 153164,
       "sha": "14fc4b8cc95a0392244b8d38d1f9b9338f23f58d"
+    },
+    {
+      "path": "factions/arborec.png",
+      "size": 244998,
+      "sha": "467d254ab0292293eaa5fdc1d43b388c8b9acea8"
+    },
+    {
+      "path": "factions/ghost.png",
+      "size": 321585,
+      "sha": "750d60709724a9abbac1273b4e870acec4bf211f"
+    },
+    {
+      "path": "factions/letnev.png",
+      "size": 314382,
+      "sha": "cdbe01f20d38aabcab94c5adf91cceee162d95a6"
+    },
+    {
+      "path": "factions/l1z1x.png",
+      "size": 263259,
+      "sha": "71d0495dd900a65dccbfaeebac806c3bbea2c3b3"
+    },
+    {
+      "path": "factions/muaat.png",
+      "size": 211586,
+      "sha": "e2a25e0d3991852c9db6cc36ce3e46bf25100b7c"
+    },
+    {
+      "path": "factions/saar.png",
+      "size": 307098,
+      "sha": "73111298ecbaa6ee0f8f9b674b10439cd9e511a3"
+    },
+    {
+      "path": "units/grn_ca.png",
+      "size": 9383,
+      "sha": "e012adabaf77c37b3cd365d151f14e9d0da54825"
+    },
+    {
+      "path": "units/grn_cv.png",
+      "size": 10566,
+      "sha": "0aead2cfab92afe215b40bc8a5edd1f23810b024"
+    },
+    {
+      "path": "units/grn_dd.png",
+      "size": 8153,
+      "sha": "c0e8e0066f125c837471b66f6e751f204e307e46"
+    },
+    {
+      "path": "units/grn_dn.png",
+      "size": 11994,
+      "sha": "246ce0bc4726b12d9e356cb13fa3c017ddb7dcec"
+    },
+    {
+      "path": "units/grn_ff.png",
+      "size": 5166,
+      "sha": "0300dace8e056744b7e6aa89973ea2df04dcc39b"
+    },
+    {
+      "path": "units/grn_fs.png",
+      "size": 13058,
+      "sha": "24245a2ae6e67f89be49ca23bb5cffef71d1a835"
+    },
+    {
+      "path": "units/grn_gf.png",
+      "size": 5878,
+      "sha": "0bcb8ebb26a36d32c4899b0e03604bc7b2215000"
+    },
+    {
+      "path": "units/grn_pd.png",
+      "size": 5206,
+      "sha": "9e8f2d24bd3fcae3271de01f3b9343264cda311e"
+    },
+    {
+      "path": "units/grn_sd.png",
+      "size": 6785,
+      "sha": "9d00b04e6d66ff2dfed29ef3a1449900b62afe17"
+    },
+    {
+      "path": "units/grn_ws.png",
+      "size": 9827,
+      "sha": "6e491b1815fd0a539e76a79e00bfabfd710485a0"
+    },
+    {
+      "path": "units/blk_ca.png",
+      "size": 9504,
+      "sha": "37bfe2cfad7285b5be4ff3fc664bb4bde6b37eb9"
+    },
+    {
+      "path": "units/blk_cv.png",
+      "size": 10632,
+      "sha": "2e52fa4a5d721a0893c47562283f36f9d78885bf"
+    },
+    {
+      "path": "units/blk_dd.png",
+      "size": 8283,
+      "sha": "517719584d58e5f6b58f3358ccd14bb1475ba801"
+    },
+    {
+      "path": "units/blk_dn.png",
+      "size": 12270,
+      "sha": "8ecae8dabb3ac42550b641c2c50c1bf8be0b14fb"
+    },
+    {
+      "path": "units/blk_ff.png",
+      "size": 5195,
+      "sha": "77f93a3657393b48b0ac3fdb5483db9b6a678994"
+    },
+    {
+      "path": "units/blk_fs.png",
+      "size": 13286,
+      "sha": "3efb82ee32087c8d8444f587035d35bc4c9861c5"
+    },
+    {
+      "path": "units/blk_gf.png",
+      "size": 5975,
+      "sha": "7e0d0377b241bfbca588e0a1c95b2d9a8833ace3"
+    },
+    {
+      "path": "units/blk_pd.png",
+      "size": 5218,
+      "sha": "81909edb67139217bdc69dec91fac637d9d21ccb"
+    },
+    {
+      "path": "units/blk_sd.png",
+      "size": 6718,
+      "sha": "9fe573fbfcface1bdd2158b078999ebadd2c72ee"
+    },
+    {
+      "path": "units/blk_ws.png",
+      "size": 9641,
+      "sha": "cc803bad0dc3e0483ee17833e121b828013f4389"
+    },
+    {
+      "path": "units/gld_ca.png",
+      "size": 8082,
+      "sha": "ec4be8d1991f9707db09436bbc520a97e59fc904"
+    },
+    {
+      "path": "units/gld_cv.png",
+      "size": 9023,
+      "sha": "fcd8d3f1e389a32a11c0b5086495e47ae7129f63"
+    },
+    {
+      "path": "units/gld_dd.png",
+      "size": 6743,
+      "sha": "450557f9c6e4631884783bd3664e70b93866d604"
+    },
+    {
+      "path": "units/gld_dn.png",
+      "size": 10722,
+      "sha": "115c22c24782df3edd13f4ac1b0fc77e7ea32811"
+    },
+    {
+      "path": "units/gld_ff.png",
+      "size": 3826,
+      "sha": "6cf2278b193a7575f2792dc5afe704bed11b3921"
+    },
+    {
+      "path": "units/gld_fs.png",
+      "size": 11655,
+      "sha": "04f9aafd2c283ff7f62014f0d6981581b016e87a"
+    },
+    {
+      "path": "units/gld_gf.png",
+      "size": 4526,
+      "sha": "c3480046ad9268716aa6cde557a14f634abe9862"
+    },
+    {
+      "path": "units/gld_pd.png",
+      "size": 3767,
+      "sha": "407bcffdc020c5f2c69cd7bfe22871b553b73df4"
+    },
+    {
+      "path": "units/gld_sd.png",
+      "size": 5175,
+      "sha": "4149c9b28902ab14e8f729a4c1b9c44bb618f7d7"
+    },
+    {
+      "path": "units/gld_ws.png",
+      "size": 8318,
+      "sha": "9c32c847bce42a454a4938e8f6c18dbc2b8dd62a"
+    },
+    {
+      "path": "units/mgm_ca.png",
+      "size": 11238,
+      "sha": "2eb0de59f2c337820f3d9422fa28f37f64bd21e1"
+    },
+    {
+      "path": "units/mgm_cv.png",
+      "size": 12421,
+      "sha": "0e16545f66437438eb9b9a96e7b362dc40445696"
+    },
+    {
+      "path": "units/mgm_dd.png",
+      "size": 9932,
+      "sha": "918b6e0601b90762290df17325d701ebd252014c"
+    },
+    {
+      "path": "units/mgm_dn.png",
+      "size": 13854,
+      "sha": "1559fdfa3c3b02bfdb8283d46e1df96a9eb12d7f"
+    },
+    {
+      "path": "units/mgm_ff.png",
+      "size": 6957,
+      "sha": "c65f1b0ae7179630f14d3eae08d2f828cdb66207"
+    },
+    {
+      "path": "units/mgm_fs.png",
+      "size": 15188,
+      "sha": "4ce09668c287ad70f8bafb2ffbf857bed3d856d6"
+    },
+    {
+      "path": "units/mgm_gf.png",
+      "size": 7603,
+      "sha": "4c79a65cb17e02ee9c290052b13175a7f0903a25"
+    },
+    {
+      "path": "units/mgm_pd.png",
+      "size": 6956,
+      "sha": "b6420f885b6677ad44b13f612a3097f7c34efda4"
+    },
+    {
+      "path": "units/mgm_sd.png",
+      "size": 8638,
+      "sha": "dc58af8c8a561b973f05ad5007df34b3ce534566"
+    },
+    {
+      "path": "units/mgm_ws.png",
+      "size": 11851,
+      "sha": "6e75c15d571204e2eb36d564e46f8443eca06a50"
+    },
+    {
+      "path": "command_token/control_grn.png",
+      "size": 2965,
+      "sha": "101d72c9249e4846bbfe2aca68b0c4e9087b14e8"
+    },
+    {
+      "path": "command_token/command_grn.png",
+      "size": 6433,
+      "sha": "e561f1851069b1fea4cd92f232c6ddd0010570e3"
+    },
+    {
+      "path": "command_token/fleet_grn.png",
+      "size": 8553,
+      "sha": "10dc1fd3ef179407189de411042001f92d0a5237"
+    },
+    {
+      "path": "command_token/control_blk.png",
+      "size": 2701,
+      "sha": "cf449e43fdc7d6946283be13ccd88a541769ecc1"
+    },
+    {
+      "path": "command_token/command_blk.png",
+      "size": 5856,
+      "sha": "27dc3783db39dd5301e8292ffa3519cb915e68ee"
+    },
+    {
+      "path": "command_token/fleet_blk.png",
+      "size": 7825,
+      "sha": "423a24b45df4f1c55530331c5f4f10f9357ac93b"
+    },
+    {
+      "path": "command_token/control_gld.png",
+      "size": 3875,
+      "sha": "6fbc06a3ba339396a67cf2d09cebada0fdaedec9"
+    },
+    {
+      "path": "command_token/command_gld.png",
+      "size": 6539,
+      "sha": "5a3d3fe440adba2a9adcdcc2b0ac56d492c4cc7b"
+    },
+    {
+      "path": "command_token/fleet_gld.png",
+      "size": 8506,
+      "sha": "e51f54fe198ada7074942c955cd886b52259a2e4"
+    },
+    {
+      "path": "command_token/control_mgm.png",
+      "size": 5792,
+      "sha": "fef9c73a16c5d0abf1db1a062680e9a7c4fe5575"
+    },
+    {
+      "path": "command_token/command_mgm.png",
+      "size": 8486,
+      "sha": "70cddfa741359a310ea7caa63e4efbf73088f338"
+    },
+    {
+      "path": "command_token/fleet_mgm.png",
+      "size": 10541,
+      "sha": "a22f27e14b3c877d3f9c175c795b606333f0d986"
     }
   ]
 }

@@ -1221,6 +1221,13 @@ class BoardWindow(arcade.Window):
             self.on_mouse_scroll(self.roster.WIDTH + 100, 400, 0, -100)
             assert self.target_zoom == .55
             self.fit()
+            tile_position = next(iter(self.board))
+            tile_x, tile_y = self.screen(tile_position)
+            assert self.roster.WIDTH <= tile_x < self.width - self.sidebar
+            assert self.player_panel.HEIGHT <= tile_y < self.height - 80
+            self.on_mouse_scroll(tile_x, tile_y, 0, 1)
+            assert self.target_zoom > 1.0
+            self.fit()
             center_x, center_y = self.viewport_center
             pointer_x, pointer_y = center_x + 90, center_y + 45
             pointer_world_before = (
