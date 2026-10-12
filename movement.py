@@ -1639,7 +1639,7 @@ class MovementController:
             total += 1 + bonus
         return total
 
-    def combat_assignment_target(self, session, faction, kind):
+    def combat_assignment_target(self, session, faction, kind, unit_id=None):
         assigned = session.combat_assignments.setdefault(faction, [])
         counts = {unit_id: assigned.count(unit_id) for unit_id in set(assigned)}
         # Spread the first hit across intact sustain units before assigning a
@@ -1647,7 +1647,7 @@ class MovementController:
         for unit in sorted(self.combat_units(session, faction),
                            key=lambda item: (item.damaged,
                                              counts.get(item.unit_id, 0), item.unit_id)):
-            if unit.kind != kind:
+            if unit.kind != kind or (unit_id is not None and unit.unit_id != unit_id):
                 continue
             bonus = 2 if unit_profile(unit).get('sustainDamage') and not unit.damaged and \
                 self.has_tech(faction, 'nes') else 1 if unit_profile(unit).get('sustainDamage') and \
@@ -1657,7 +1657,7 @@ class MovementController:
                 return unit
         return None
 
-    def assign_combat_hit(self, faction, kind):
+    def assign_combat_hit(self, faction, kind, unit_id=None):
         session = self.session
         if not session or session.stage not in ('space_combat', 'ground_combat') or not session.combat_needs_resolution:
             raise MovementError('Roll combat dice before assigning hits')
@@ -1666,7 +1666,7 @@ class MovementController:
         required = min(hits, self.combat_hit_capacity(session, faction))
         if len(assignments) >= required:
             raise MovementError('All hits against this fleet have been assigned')
-        unit = self.combat_assignment_target(session, faction, kind)
+        unit = self.combat_assignment_target(session, faction, kind, unit_id)
         if unit is None:
             raise MovementError('No eligible unit of this type can take another hit')
         assignments.append(unit.unit_id)

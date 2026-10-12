@@ -6,19 +6,21 @@ Legality (movement, capacity, payment, combat) stays with the game controllers.
 """
 from __future__ import annotations
 
-from collections import Counter
 from collections import deque
 from itertools import combinations
 from math import ceil
 
 from movement import MovementError, capital_ship
 from ai_combat import win_probability
-from ai_planner import (MIN_WIN_CHANCE, SHIP_VALUE,
-                        best_activation as plan_best_activation, planet_value)
+from ai_planner import (SHIP_VALUE,
+                        best_activation as plan_best_activation, plan_landings)
+from ai_economy import build_plan, command_targets, technology_values
+from ai_actions import (loss_value, plan_bombardment, play_useful_card,
+                        resolve_card_choice, war_effort_plan)
+from ai_strategy import construction_choice, diplomacy_value, warfare_value
 from action_cards import canonical_action_card
 from player import command_tokens_in_reinforcements
-from technology import (available_technologies, missing_prerequisites,
-                        production_allowed)
+from technology import available_technologies, missing_prerequisites
 from units import Region, UNIT_TYPES, unit_profile
 
 
@@ -147,7 +149,10 @@ class GameAI:
     def step(self):
         w = self.window
         turn = w.turn_order
-        if w.action_cards.pending or w.transaction.session:
+        if w.action_cards.pending:
+            resolve_card_choice(self)
+            return
+        if w.transaction.session:
             return
         if turn.strategy_selection:
             if self.is_bot(turn.active_player):
@@ -200,8 +205,14 @@ class GameAI:
             return value
 
         best_card = max(cards, key=lambda card: (play_value(card), -card)) if cards else None
+        reinforcement = war_effort_plan(self, player)
         if self.opening_expansion(player, move):
             self.start_activation(player, move)
+        elif reinforcement and reinforcement[0] >= max(
+                move[0] if move else 0, play_value(best_card) if best_card else 0):
+            w.action_cards.play(player, reinforcement[1])
+            resolve_card_choice(self)
+            self.report(player, 'Played War Effort to reinforce the fleet.', .8)
         elif best_card and (not move or play_value(best_card) >= move[0] - 3):
             w.strategy.start(best_card)
             self.report(player, f'Played {STRATEGY_NAMES[best_card]}.')
@@ -219,45 +230,66 @@ class GameAI:
 
     def command_pool(self, player):
         pools = player.command_pools
-        if pools['strategic'] == 0 and pools['tactical'] >= 2:
-            return 'strategic'
-        if pools['tactical'] < 3:
+        if pools['tactical'] < 2:
             return 'tactical'
-        if pools['strategic'] < 1:
+        if pools['strategic'] == 0:
             return 'strategic'
-        if pools['fleet'] < 4 and self.window.turn_order.round_number >= 2:
-            return 'fleet'
-        if pools['strategic'] < 2:
-            return 'strategic'
-        return min(('tactical', 'fleet', 'strategic'), key=lambda name: (pools[name],
-                    {'tactical': 0, 'fleet': 1, 'strategic': 2}[name]))
+        targets = command_targets(player, self.window.board,
+                                  self.window.turn_order.round_number)
+        return max(('tactical', 'fleet', 'strategic'), key=lambda name: (
+            (targets[name] - pools[name]) / max(1, targets[name]),
+            {'tactical': 2, 'fleet': 1, 'strategic': 0}[name]))
 
     def strategy_value(self, player, card):
         pools = player.command_pools
         ready_resources = player.available_values[0] + player.trade_goods
-        docks = sum(unit.owner == player.faction and unit.kind == 'spacedock'
-                    for tile in self.window.board.values() for unit in tile.units)
-        scores = {1: 13 + 5 * (pools['tactical'] <= 1),
-                  2: 7 + 3 * sum(p.exhausted for p in player.planets),
-                  3: 5 + 3 * (self.window.turn_order.speaker is not player),
-                  4: 12 + 5 * (docks <= 1),
-                  5: 11 + 3 * (player.trade_goods < 3),
-                  6: 10 + 2 * any(player.faction in t.command_tokens for t in self.window.board.values()),
-                  7: 15 + 3 * (ready_resources >= 6),
+        board = self.window.board
+        units = [u for t in board.values() for u in t.units if u.owner == player.faction]
+        docks = sum(unit.kind == 'spacedock' for unit in units)
+        targets = command_targets(player, board, self.window.turn_order.round_number)
+        shortage = sum(max(0, targets[key] - pools[key]) for key in pools)
+        ready_value = sum(sorted((max(c.planet.resources, .8 * c.planet.influence)
+                                 for c in player.planets if c.exhausted), reverse=True)[:2])
+        # Warfare is valuable for releasing a fleet, not merely a marker on an
+        # empty system. During the draft it can fund an additional expedition.
+        locked = max((sum(SHIP_VALUE.get(u.kind, 0) for u in t.units
+                          if u.owner == player.faction and u.location.region == Region.SPACE)
+                      for t in board.values() if player.faction in t.command_tokens), default=0)
+        transports = sum(u.capacity >= 3 and u.location.region == Region.SPACE for u in units)
+        drafting = self.window.turn_order.strategy_selection
+        warfare = 5 + min(14, locked * 2) + (min(7, transports * 3) if drafting else 0)
+        tech_values, tech = {}, None
+        if card == 7:
+            tech_values = technology_values(player, board, self.window.turn_order.round_number)
+            tech = self.choose_technology(player, 0, values=tech_values)
+        scores = {1: 10 + min(20, 4 * shortage) + 6 * (pools['tactical'] <= 1),
+                  2: 3 + 1.8 * ready_value,
+                  3: 6 + 2 * (self.window.turn_order.speaker is not player) +
+                     max(0, 4 - len(player.action_cards)),
+                  4: 7 + 6 * (docks == 0) + 3 * (docks == 1 and len(player.planets) >= 4),
+                  5: 11 + .9 * max(0, player.commodity_limit - player.commodities) +
+                     2 * (ready_resources < 4),
+                  6: warfare,
+                  7: 8 + min(16, .35 * tech_values.get(tech[0], 0)) if tech else 1,
                   8: 1}
         if player.faction == 'jolnar' and card == 7:
-            scores[7] += 5
+            scores[7] += 9
         if player.faction == 'hacan' and card == 5:
-            scores[5] += 4
-        if card == 7 and self.choose_technology(player, 0) is None:
-            scores[7] = 1
+            scores[5] += 3
+        if drafting and card == 2:
+            scores[2] += min(7, ready_resources * .5)
         return scores[card]
 
     def choose_strategy_card(self, player):
         turn = self.window.turn_order
         already = set(turn.strategy_assignments[player.faction])
+        # The second card should complement the first: Trade can fund Technology
+        # and Leadership already covers the command shortage of this round.
+        synergy = {7: 2 if 5 in already else 0,
+                   5: 2 if 7 in already else 0,
+                   6: 2 if 1 in already else 0}
         return max(turn.available_strategy_cards, key=lambda card: (
-            self.strategy_value(player, card) - (6 if card in already else 0), -card))
+            self.strategy_value(player, card) + synergy.get(card, 0), -card))
 
     def _tile_threat(self, tile, faction):
         return sum(SHIP_VALUE.get(unit.kind, 0) for unit in tile.units
@@ -315,14 +347,23 @@ class GameAI:
     def _secondary_worthwhile(self, ctl, session):
         player = session.player
         card = session.card
+        targets = command_targets(player, self.window.board,
+                                  self.window.turn_order.round_number)
+        strategic = player.command_pools['strategic']
         if card == 1:
             return (command_tokens_in_reinforcements(player, self.window.board) > 0 and
-                    payment_plan(player, 3, lambda item: item.planet.influence) is not None)
+                    sum(player.command_pools.values()) < sum(targets.values()) and
+                    payment_plan(player, 3, lambda item: item.planet.influence,
+                                 influence_opportunity) is not None)
         if card == 2:
-            return bool(ctl.readyable_planets(player))
+            ready = sorted((max(c.planet.resources, .8 * c.planet.influence)
+                            for c in ctl.readyable_planets(player)), reverse=True)[:2]
+            return sum(ready) >= (4 if strategic <= 1 else 3)
         if card == 3:
-            return True  # secondary_unavailable already checks hand space and deck
+            return len(player.action_cards) <= (2 if strategic <= 1 else 5)
         if card == 4:
+            if strategic <= 1 and len(player.planets) < 4:
+                return False
             owned = [unit for tile in self.window.board.values() for unit in tile.units
                      if unit.owner == player.faction]
             for planet in player.planets:
@@ -336,7 +377,9 @@ class GameAI:
                             return True
             return False
         if card == 5:
-            return player.commodities < player.commodity_limit
+            return (player.commodity_limit - player.commodities >=
+                    (3 if strategic <= 1 else 2) or
+                    player.faction in session.free_trade or player.faction == 'hacan')
         if card == 6:
             return (bool(ctl.home_docks()) and
                     player.available_values[0] + player.trade_goods +
@@ -360,8 +403,8 @@ class GameAI:
             reserve = command_tokens_in_reinforcements(player, w.board) - s.base_gain
             budget = sum(c.planet.influence for c in player.planets if not c.exhausted) + player.trade_goods
             pools = player.command_pools
-            fleet_goal = 4 if w.turn_order.round_number >= 2 else 3
-            desired_total = 4 + fleet_goal + 2  # tactical, fleet, strategic
+            desired_total = sum(command_targets(player, w.board,
+                                                w.turn_order.round_number).values())
             current_total = sum(pools.values()) + player.pending_commands + s.base_gain
             count = min(max(0, reserve), budget // 3,
                         max(0, desired_total - current_total))
@@ -384,7 +427,7 @@ class GameAI:
             options = ctl.selectable_systems()
             if options:
                 position = max(options, key=lambda pos: (
-                    sum(p.resources + p.influence for p in w.board[pos].planets), pos))
+                    diplomacy_value(self, w.board[pos], player)))
                 ctl.select_system(position)
                 self.report(player, f'Diplomacy protected {w.board[position].name}.', .8)
             else:
@@ -412,7 +455,7 @@ class GameAI:
                 ctl.continue_stage()
             else:
                 position = max(options, key=lambda pos: (
-                    sum(p.resources for p in w.board[pos].planets), pos))
+                    warfare_value(self, w.board[pos], player)))
                 ctl.select_system(position)
                 ctl.select_warfare_token(position, player.faction)
                 ctl.confirm_warfare_removal()
@@ -423,29 +466,24 @@ class GameAI:
             else:
                 ctl.continue_stage()
         elif s.stage == 'construction':
-            if s.builds_left == 1:
-                s.structure = 'pds'
-            else:
-                s.structure = 'spacedock' if sum(u.owner == player.faction and u.kind == 'spacedock'
-                                                 for t in w.board.values() for u in t.units) < 2 else 'pds'
-            planets = ctl.buildable_planets(selected_only=False)
-            if not planets:
+            choice = construction_choice(self, ctl, s)
+            if choice is None:
                 ctl.continue_stage()
             else:
-                card = max(planets, key=lambda c: (c.planet.resources,
-                            self._tile_threat(ctl.planet_system(c.planet.planet_id), player.faction),
-                            c.planet.planet_id))
-                tile = ctl.planet_system(card.planet.planet_id)
-                kind = s.structure
-                ctl.select_system(tile.position)
-                ctl.build(card.planet.planet_id)
-                self.report(player, f'Built {kind} on {card.planet.name}.', 1.0)
+                _, kind, planet_id, position = choice
+                s.structure = kind
+                ctl.select_system(position)
+                planet = next(p for p in w.board[position].planets if p.planet_id == planet_id)
+                ctl.build(planet_id)
+                self.report(player, f'Built {kind} on {planet.name}.', 1.0)
         elif s.stage == 'production_site':
             docks = ctl.home_docks()
             if docks:
                 ctl.produce_at(max(docks, key=lambda item: (
-                    next(p.resources for p in item[0].planets
-                         if p.planet_id == item[1].location.planet_id), item[1].unit_id))[1].unit_id)
+                    sum(p.resources for p in item[0].planets
+                        if p.planet_id == item[1].location.planet_id) +
+                    int(unit_profile(item[1]).get('productionValue') or 0),
+                    item[1].unit_id))[1].unit_id)
             else:
                 ctl._participant_done()
         elif s.stage == 'technology':
@@ -467,23 +505,12 @@ class GameAI:
         elif s.stage == 'production':
             ctl.poll()
 
-    def choose_technology(self, player, cost):
+    def choose_technology(self, player, cost, *, values=None):
         cards = [c for c in player.planets if not c.exhausted]
         specialties = [c for c in cards if c.planet.tech_specialties]
-        fleet = Counter(unit.kind for tile in self.window.board.values()
-                        for unit in tile.units if unit.owner == player.faction)
-        upgrade_benefit = {
-            'cv2': min(24, 6 * fleet['carrier'] + 1.5 * fleet['infantry']),
-            'ac2': min(24, 6 * fleet['carrier'] + 1.5 * fleet['infantry']),
-            'ff2': min(20, 2.5 * fleet['fighter']),
-            'dn2': min(24, 7 * fleet['dreadnought']),
-            'cr2': min(18, 5 * fleet['cruiser']),
-            'inf2': min(20, 1.5 * fleet['infantry']),
-            'so2': min(20, 1.5 * fleet['infantry']),
-            'dd2': min(16, 5 * fleet['destroyer']),
-            'st': min(12, 3 * fleet['spacedock']),
-            'gd': min(10, 2 * fleet['carrier'] + 2 * fleet['dreadnought']),
-        }
+        if values is None:
+            values = technology_values(player, self.window.board,
+                                       self.window.turn_order.round_number)
         best = None
         for tech in available_technologies(player):
             if tech['alias'] in player.technologies:
@@ -501,10 +528,10 @@ class GameAI:
                     if payment is None:
                         continue
                     alias = tech['alias']
-                    score = (TECH_PRIORITY.get(alias, 32) + upgrade_benefit.get(alias, 0) +
-                             (8 if alias in ('cv2', 'ac2') and
-                              self.window.turn_order.round_number <= 2 else 0) -
-                             5 * n - 2 * payment[1])
+                    specialty_cost = sum(max(c.planet.resources, .7 * c.planet.influence)
+                                         for c in selected)
+                    score = (values.get(alias, 3) - 1.25 * specialty_cost -
+                             1.5 * payment[1])
                     candidate = (score, alias, tuple(c.planet.planet_id for c in selected),
                                  payment[0], payment[1])
                     if best is None or candidate > best:
@@ -522,39 +549,23 @@ class GameAI:
         units = ctl.combat_units(session, faction)
         choices = []
         assigned = session.combat_assignments.get(faction, [])
-        for unit in units:
-            if ctl.combat_assignment_target(session, faction, unit.kind) is None:
+        for candidate in units:
+            unit = ctl.combat_assignment_target(session, faction, candidate.kind, candidate.unit_id)
+            if unit is None:
                 continue
             sustain = bool(unit_profile(unit).get('sustainDamage') and not unit.damaged and
                            unit.unit_id not in assigned)
-            choices.append(((-1 if sustain else LOSS_ORDER.get(unit.kind, 4)), unit.kind))
+            value = (loss_value(session.target, unit) if hasattr(session, 'target') else
+                     LOSS_ORDER.get(unit.kind, 4))
+            choices.append((-10 if sustain else value, unit.kind, unit.unit_id))
         if choices:
-            ctl.assign_combat_hit(faction, min(choices)[1])
+            _, kind, unit_id = min(choices)
+            ctl.assign_combat_hit(faction, kind, unit_id)
             return True
         return False
 
     def play_combat_card(self, session):
-        cards = self.window.action_cards
-        for player in cards.participants(session):
-            if not self.is_bot(player):
-                continue
-            for index, alias in cards.playable(player, session):
-                key = canonical_action_card(alias)
-                if key in ('morale_boost', 'fighter_prototype'):
-                    if len(self.window.movement.combat_units(session, player.faction)) < 2:
-                        continue
-                if key == 'flank_speed' and session.sources:
-                    continue
-                if key == 'shields_holding' and session.combat_hits.get(player.faction, 0) < 2:
-                    continue
-                if key not in ('morale_boost', 'fighter_prototype', 'flank_speed',
-                               'shields_holding', 'emergency_repairs', 'maneuvering_jets',
-                               'salvage', 'intercept', 'bunker', 'disable'):
-                    continue
-                cards.play(player, index)
-                self.report(player, f'Played action card {cards.name_for(alias)}.', 1.1)
-                return True
-        return False
+        return play_useful_card(self, session)
 
     def plan_invasion(self, session):
         player = session.player
@@ -562,56 +573,9 @@ class GameAI:
         troops = [unit for unit_id in session.landings
                   if (unit := next((item for item in target.units
                                    if item.unit_id == unit_id), None)) is not None]
-        available = list(troops)
-        planets = [planet for planet in target.planets
-                   if target.planet_owners.get(planet.planet_id) != player.faction]
-        if not planets:
-            return
-
-        def defenders(planet):
-            return [unit for unit in target.units if unit.owner != player.faction and
-                    unit.kind == 'infantry' and unit.location.planet_id == planet.planet_id]
-
-        def cannons(planet):
-            return [unit for unit in target.units if unit.owner != player.faction and
-                    unit.kind == 'pds' and unit.location.planet_id == planet.planet_id]
-
-        human = self.human_faction()
-        def value(planet):
-            owner = target.planet_owners.get(planet.planet_id)
-            return planet_value(planet, owner, human,
-                                self.window.turn_order.round_number)
-
-        for planet in sorted((p for p in planets if not defenders(p)),
-                             key=lambda p: (-value(p), p.planet_id)):
-            if not available:
-                break
-            pds = cannons(planet)
-            required = next((count for count in range(1, len(available) + 1)
-                             if win_probability(available[:count], [],
-                                                self.window.turn_order.players,
-                                                space=False, cannons=pds) >= MIN_WIN_CHANCE),
-                            None)
-            if required is None:
-                continue
-            for unit in available[:required]:
-                session.landings[unit.unit_id] = planet.planet_id
-            del available[:required]
-        if available:
-            choices = []
-            for planet in planets:
-                enemies = defenders(planet)
-                if not enemies:
-                    continue
-                chance = win_probability(available, enemies,
-                                         self.window.turn_order.players,
-                                         space=False, cannons=cannons(planet))
-                if chance >= MIN_WIN_CHANCE:
-                    choices.append((value(planet) * chance, planet.planet_id))
-            if choices:
-                _, planet_id = max(choices)
-                for unit in available:
-                    session.landings[unit.unit_id] = planet_id
+        assignments = plan_landings(self, target, player, troops)
+        for unit_id in session.landings:
+            session.landings[unit_id] = assignments.get(unit_id)
 
     def resolve_bot_retreat(self, session):
         ctl = self.window.movement
@@ -640,6 +604,8 @@ class GameAI:
         w = self.window
         ctl, s = w.movement, w.movement.session
         ai_turn = self.is_bot(s.player)
+        if s.fire_team_pending and s.fire_team_pending not in self.bot_factions:
+            return
         # Assault Cannon's target chooses which of their own ships is
         # destroyed. Resolve that choice only when the defending faction is
         # controlled by the AI; the technology owner does not choose for them.
@@ -647,7 +613,7 @@ class GameAI:
             victims = ctl.assault_victims(s)
             if victims and victims[0].owner in self.bot_factions:
                 ctl.choose_assault_victim(min(victims, key=lambda u: (
-                    LOSS_ORDER.get(u.kind, 4), u.unit_id)).unit_id)
+                    loss_value(s.target, u), u.unit_id)).unit_id)
             return
         # Destination selection belongs to the faction that announced the
         # retreat. Never let the tactical-action owner choose for a human
@@ -708,13 +674,27 @@ class GameAI:
             candidates = ctl.space_cannon_assignment_candidates(s)
             if candidates:
                 target = min(candidates, key=lambda unit: (
-                    LOSS_ORDER.get(unit.kind, 4),
-                    sum(cargo.location.region == Region.TRANSPORT and
-                        cargo.location.carrier_id == unit.unit_id for cargo in s.target.units),
-                    unit.damaged, unit.unit_id))
+                    loss_value(s.target, unit, sustain=True), unit.unit_id))
                 ctl.assign_space_cannon_hit(target.unit_id)
                 target_player = ctl.faction_player(target_faction) or s.player
                 self.report(target_player, f'Assigned a Space Cannon hit to a {target.kind}.', .45)
+            return
+        if s.stage == 'capacity_overflow':
+            if s.capacity_faction in self.bot_factions:
+                tile = w.board[s.capacity_position]
+                choices = ctl.capacity_overflow_units(tile, s.capacity_faction)
+                selected = sorted(choices, key=lambda u: (u.kind != 'fighter', u.unit_id))
+                for unit in selected[:s.capacity_required]:
+                    ctl.toggle_capacity_overflow_unit(unit.unit_id)
+                ctl.resolve_capacity_overflow()
+            return
+        if s.stage == 'fleet_overflow':
+            if (s.overflow_faction or s.player.faction) in self.bot_factions:
+                tile = w.board.get(s.overflow_position, s.target)
+                for unit in sorted(ctl.fleet_ships(s), key=lambda u: (
+                        loss_value(tile, u), u.unit_id))[:s.overflow_required]:
+                    ctl.toggle_overflow_ship(unit.unit_id)
+                ctl.resolve_fleet_overflow()
             return
         if not ai_turn:
             return
@@ -735,10 +715,7 @@ class GameAI:
         elif s.stage == 'invasion_start':
             ctl.continue_invasion_start(s)
         elif s.stage == 'bombardment':
-            hostile = [p.planet_id for p in s.target.planets if
-                       s.target.planet_owners.get(p.planet_id) not in (None, s.player.faction)]
-            for unit_id in s.bombard_targets:
-                s.bombard_targets[unit_id] = hostile[0] if hostile else None
+            plan_bombardment(s)
             ctl.resolve_bombardment()
             self.report(s.player, f'Bombarded {s.target.name}.', 1.2)
         elif s.stage == 'invasion':
@@ -766,118 +743,17 @@ class GameAI:
                 results = ', '.join(f'{faction.upper()} {sum(bool(roll["hit"]) for roll in rolls)} hits'
                                     for faction, rolls in s.combat_rolls.items())
                 self.report(s.player, f'Combat round {s.combat_round}: {results}.', 2.1)
-        elif s.stage == 'capacity_overflow':
-            tile = w.board[s.capacity_position]
-            choices = ctl.capacity_overflow_units(tile, s.capacity_faction)
-            for unit in sorted(choices, key=lambda u: (u.kind != 'fighter', u.unit_id))[:s.capacity_required]:
-                ctl.toggle_capacity_overflow_unit(unit.unit_id)
-            ctl.resolve_capacity_overflow()
-        elif s.stage == 'fleet_overflow':
-            for unit in sorted(ctl.fleet_ships(s), key=lambda u: (
-                    LOSS_ORDER.get(u.kind, 4), u.unit_id))[:s.overflow_required]:
-                ctl.toggle_overflow_ship(unit.unit_id)
-            ctl.resolve_fleet_overflow()
         elif s.stage == 'production':
             self.resolve_production()
 
     def resolve_production(self):
         ctl, s = self.window.movement, self.window.movement.session
         player = s.player
-        budget = player.available_values[0] + player.trade_goods
-        discount = int('st' in player.technologies)
-        if budget + discount <= 0 or s.production_limit <= 0:
-            ctl.skip_production()
-            return
-        local = Counter(u.kind for u in s.target.units if u.owner == player.faction)
-        planned = Counter()
-        neutral = any(s.target.planet_owners.get(p.planet_id) != player.faction for p in s.target.planets)
-        neighbors = ctl.neighbors(s.target)
-        frontier = any(any(n.planet_owners.get(p.planet_id) != player.faction for p in n.planets)
-                       for n in neighbors)
-        enemy_fighters = sum(u.kind == 'fighter' and u.owner != player.faction
-                             for n in neighbors for u in n.units)
-        dock_slots = 3 * local['spacedock']
-        capacity = sum(u.capacity for u in s.target.units if u.owner == player.faction and
-                       u.location.region == Region.SPACE)
-        current_cargo = sum(u.owner == player.faction and
-                            (u.location.region == Region.TRANSPORT or
-                             (u.kind == 'fighter' and u.location.region == Region.SPACE))
-                            for u in s.target.units)
-        fleet_used = sum(u.owner == player.faction and capital_ship(u) for u in s.target.units)
-        fleet_limit = ctl.fleet_supply(player)
-        max_budget = min(budget + discount, 16)
-        ships_blocked = ctl.ships_blocked_by_opponents(s)
-        # Establish a transport and an escort before spending all production
-        # slots on cheap infantry/fighters.  A dock without a carrier cannot
-        # turn its ground army into territorial expansion.
-        if (not ships_blocked and frontier and not local['carrier'] and
-                fleet_used < fleet_limit and max_budget >= 3):
-            planned['carrier'] = 1
-        opening_cost = ceil(sum(ctl.unit_cost(k, player) * n for k, n in planned.items()))
-        combat_ships = local['destroyer'] + local['cruiser'] + local['dreadnought']
-        if (not ships_blocked and combat_ships == 0 and
-                fleet_used + planned['carrier'] < fleet_limit and
-                sum(planned.values()) < s.production_limit and max_budget - opening_cost >= 1):
-            available = max_budget - opening_cost
-            if enemy_fighters >= 2:
-                escort = 'destroyer'
-            elif (self.window.turn_order.round_number >= 4 and available >= 8 and
-                  not local['flagship']):
-                escort = 'flagship'
-            elif self.window.turn_order.round_number >= 2 and available >= 4:
-                escort = 'dreadnought'
-            else:
-                escort = 'cruiser' if available >= 2 else 'destroyer'
-            planned[escort] = 1
-        while sum(planned.values()) < s.production_limit:
-            options = []
-            for kind in ('carrier', 'infantry', 'fighter', 'destroyer', 'cruiser', 'dreadnought',
-                         'flagship', 'warsun'):
-                if not production_allowed(player, kind):
-                    continue
-                if ships_blocked and UNIT_TYPES[kind]['ship']:
-                    continue
-                cost = ctl.unit_cost(kind, player)
-                new_cost = ceil(sum(ctl.unit_cost(k, player) * n for k, n in planned.items()) + cost)
-                if new_cost > max_budget:
-                    continue
-                if kind not in ('infantry', 'fighter') and fleet_used + sum(
-                        planned[k] for k in planned if k not in ('infantry', 'fighter')) >= fleet_limit:
-                    continue
-                available_capacity = capacity + planned['carrier'] * 4 + dock_slots - current_cargo - planned['infantry'] - planned['fighter']
-                if kind == 'fighter' and available_capacity <= 0:
-                    continue
-                total = local[kind] + planned[kind]
-                if kind == 'infantry' and total >= (4 if frontier else 2):
-                    continue
-                if kind == 'fighter' and total >= 4:
-                    continue
-                if kind == 'carrier':
-                    value = 12 if frontier and total == 0 else 7 if total < 2 else 2
-                elif kind == 'infantry':
-                    value = 7 if frontier and total < 3 else 3 if total < 5 else .5
-                elif kind == 'fighter':
-                    value = 5.5 if total < 3 else 2.4 if total < 6 else .4
-                elif kind == 'destroyer':
-                    value = 8 if enemy_fighters >= 2 and total < 2 else 4 if total < 2 else 1
-                elif kind == 'cruiser':
-                    value = 9 if total < 2 else 5 if total < 4 else 1.5
-                elif kind == 'dreadnought':
-                    value = 11 if total < 2 else 7 if total < 4 else 2
-                else:
-                    value = 7 if total == 0 and self.window.turn_order.round_number >= 3 else 1
-                if neutral and kind == 'infantry':
-                    value += 2
-                options.append((value / max(.5, cost), value, kind))
-            if not options:
-                break
-            _, best_value, chosen = max(options)
-            if best_value < 1:
-                break
-            planned[chosen] += 1
+        planned = build_plan(ctl, s, self.window.turn_order.round_number)
         if not planned:
             ctl.skip_production()
             return
+        discount = int('st' in player.technologies and not s.integrated_current)
         total_cost = max(0, ceil(sum(ctl.unit_cost(k, player) * n for k, n in planned.items())) -
                          discount)
         payment = payment_plan(player, total_cost, lambda c: c.planet.resources,

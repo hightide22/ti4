@@ -214,6 +214,13 @@ class GameAITests(unittest.TestCase):
         chance = win_probability([loaded, empty], [], players, cannons=[pds],
                                  require_transport=True,
                                  cargo_carriers={loaded.unit_id})
+        # The bot can explicitly choose the empty carrier for a PDS casualty.
+        self.assertEqual(chance, 1)
+        second_pds = Unit('second-cannon', 'pds', hacan.faction, hacan.color_code,
+                          UnitLocation(Region.PLANET, 'test-planet'))
+        chance = win_probability([loaded, empty], [], players, cannons=[pds, second_pds],
+                                 require_transport=True,
+                                 cargo_carriers={loaded.unit_id})
         self.assertGreater(chance, 0)
         self.assertLess(chance, 1)
 
@@ -230,8 +237,8 @@ class GameAITests(unittest.TestCase):
         movement = SimpleNamespace(
             combat_hit_capacity=lambda s, f: 3,
             combat_units=lambda s, f: [fighter, dreadnought],
-            combat_assignment_target=lambda s, f, k: fighter if k == 'fighter' else dreadnought,
-            assign_combat_hit=lambda f, k: chosen.append(k),
+            combat_assignment_target=lambda s, f, k, unit_id: fighter if k == 'fighter' else dreadnought,
+            assign_combat_hit=lambda f, k, unit_id: chosen.append(k),
         )
         window = SimpleNamespace(movement=movement)
         ai = GameAI(window, {'sol'})
