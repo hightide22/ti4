@@ -32,6 +32,7 @@ class StrategyResolution:
     selected_system: tuple[int, int] | None = None
     pending_system: tuple[int, int] | None = None
     drawn_cards: list[str] = field(default_factory=list)
+    propagation_resume: bool = False
 
 
 class StrategyController:
@@ -70,6 +71,8 @@ class StrategyController:
         s = self.session
         if s.player.pending_commands:
             raise ValueError('Allocate all new command tokens first.')
+        if (s.card == 2 and s.stage != 'offer' and s.player.faction == 'xxcha'):
+            self.movement.peace_accords(s.player)
         if not s.primary:
             self.turn.strategy_secondary_used[s.player.faction].add(s.card)
         if s.remaining:
@@ -99,6 +102,9 @@ class StrategyController:
         s = self.session
         if s.card == 8:
             return 'This secondary ability is not implemented yet.'
+        if (s.card == 7 and s.player.faction == 'nekro' and
+                not command_tokens_in_reinforcements(s.player, self.board)):
+            return 'No command tokens remain in reinforcements for Propagation.'
         if s.player.command_pools['strategic'] < self.secondary_cost():
             return 'No token in the strategy pool.'
         if s.card == 1 and not command_tokens_in_reinforcements(s.player, self.board):
@@ -264,6 +270,20 @@ class StrategyController:
                         for card in available_technologies(s.player)):
             self._participant_done()
 
+    def resolve_propagation(self):
+        s = self.session
+        if not s or s.stage != 'technology' or s.player.faction != 'nekro':
+            raise ValueError('Propagation is not available.')
+        gain = min(3, command_tokens_in_reinforcements(s.player, self.board))
+        if not gain:
+            raise ValueError('No command tokens remain in reinforcements.')
+        s.player.pending_commands += gain
+        s.technology_count += 1
+        s.propagation_resume = bool((s.primary or s.technology_brilliant) and
+                                    s.technology_count < 2)
+        s.stage = 'allocate'
+        return gain
+
     def allocate(self, pool):
         s = self.session
         if s.stage not in ('allocate', 'warfare_allocate'):
@@ -273,7 +293,12 @@ class StrategyController:
 
     def allocation_changed(self):
         if self.session.stage == 'allocate' and not self.player.pending_commands:
-            self._participant_done()
+            s = self.session
+            if s.propagation_resume:
+                s.propagation_resume = False
+                s.stage = 'technology'
+            else:
+                self._participant_done()
 
     def select_system(self, position):
         s = self.session
@@ -401,6 +426,7 @@ class StrategyController:
         s = self.session
         s.player.trade_goods += 3
         s.player.commodities = s.player.commodity_limit
+        self.movement.resolve_pillage(s.player)
         self._participant_done()
 
     def build(self, planet_id):

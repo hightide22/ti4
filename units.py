@@ -87,6 +87,7 @@ UNIT_TYPES = {
     "spacedock": {"sprite": "sd", "name": "Space dock", "ship": False, "size": 42},
 }
 STARTING_CODES = {"cv": "carrier", "cr": "cruiser", "dd": "destroyer", "dn": "dreadnought", "ff": "fighter", "inf": "infantry", "pds": "pds", "sd": "spacedock", "ws": "warsun"}
+STARTING_PLANET_ALIASES = {'at': 'archon tau', 'ar': 'archon ren'}
 
 
 @lru_cache(maxsize=1)
@@ -144,6 +145,7 @@ def starting_units(tile: Tile, faction: dict, color_code: str) -> list[Unit]:
             continue
         else:
             prefix = parts[0] if parts else ''
+            prefix = STARTING_PLANET_ALIASES.get(prefix.lower(), prefix).lower()
             matches = [p for p in tile.planets if p.name.lower().startswith(prefix) or
                        p.planet_id.lower().startswith(prefix)]
             if len(matches) != 1:

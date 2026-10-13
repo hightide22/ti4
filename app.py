@@ -624,6 +624,10 @@ class BoardWindow(arcade.Window):
                 ctl.research_selected()
                 panel.preview_alias = None
                 self.sync_strategy_actor()
+            elif kind == 'propagation' and research:
+                ctl.resolve_propagation()
+                panel.preview_alias = None
+                self.sync_strategy_actor()
             elif kind == 'skip' and research:
                 ctl.continue_stage()
                 panel.preview_alias = None
@@ -747,6 +751,7 @@ class BoardWindow(arcade.Window):
             for player in self.turn_order.players:
                 player.trade_goods += player.commodities
                 player.commodities = 0
+                self.movement.resolve_pillage(player)
                 for card in player.planets:
                     card.exhausted = False
                 player.exhausted_technologies.clear()
@@ -1061,13 +1066,21 @@ class BoardWindow(arcade.Window):
                 self.on_mouse_press((hit[1] + hit[2]) / 2, (hit[3] + hit[4]) / 2,
                                     arcade.MOUSE_BUTTON_LEFT, 0)
                 assert len(set(self.main_menu.active_factions)) == 4
+                # Cycle away and back so the game fixture still includes Sol.
+                hit = next(hit for hit in self.main_menu.hits if hit[0] == ('faction', 0, -1))
+                self.on_mouse_press((hit[1] + hit[2]) / 2, (hit[3] + hit[4]) / 2,
+                                    arcade.MOUSE_BUTTON_LEFT, 0)
+                assert self.main_menu.active_factions[0] == 'sol'
                 self.on_draw()
                 hit = next(hit for hit in self.main_menu.hits if hit[0] == ('start',))
                 self.on_mouse_press((hit[1] + hit[2]) / 2, (hit[3] + hit[4]) / 2,
                                     arcade.MOUSE_BUTTON_LEFT, 0)
                 assert not self.main_menu_visible and len(self.board) == 37
                 assert tuple(player.faction for player in self.player_panel.players) == self.main_menu.active_factions
+                mecatol = next(tile for tile in self.board.values() if tile.number == 18)
+                self.selected = mecatol.position
                 self.on_draw()
+                assert 'CUSTODIANS: 6 INFLUENCE' in self.labels['system_id'].text
                 arcade.get_image().save(preview_dir / 'four-player-menu-start-preview.png')
                 letnev = next(player for player in self.player_panel.players if player.faction == 'letnev')
                 sol = next(player for player in self.player_panel.players if player.faction == 'sol')
@@ -1430,16 +1443,18 @@ class BoardWindow(arcade.Window):
                                         (carrier_row[3] + carrier_row[4]) / 2,
                                         arcade.MOUSE_BUTTON_LEFT, 0)
                     self.on_draw()
-                    pickup_row = next(hit for hit in self.movement_panel.hits
-                                      if hit[0] == ('unit', transit_infantry.unit_id))
+                    pickup_row = next((hit for hit in self.movement_panel.hits
+                                       if hit[0] == ('unit', transit_infantry.unit_id)), None)
                     for _ in range(12):
-                        if self.movement_panel.hit_test((pickup_row[1] + pickup_row[2]) / 2,
-                                                        (pickup_row[3] + pickup_row[4]) / 2) == pickup_row[0]:
+                        if pickup_row and self.movement_panel.hit_test(
+                                (pickup_row[1] + pickup_row[2]) / 2,
+                                (pickup_row[3] + pickup_row[4]) / 2) == pickup_row[0]:
                             break
                         self.movement_panel.scroll_by(80)
                         self.on_draw()
-                        pickup_row = next(hit for hit in self.movement_panel.hits
-                                          if hit[0] == ('unit', transit_infantry.unit_id))
+                        pickup_row = next((hit for hit in self.movement_panel.hits
+                                           if hit[0] == ('unit', transit_infantry.unit_id)), None)
+                    assert pickup_row is not None, 'Route cargo row should be reachable by scrolling.'
                     self.on_mouse_press((pickup_row[1] + pickup_row[2]) / 2,
                                         (pickup_row[3] + pickup_row[4]) / 2,
                                         arcade.MOUSE_BUTTON_LEFT, 0)
@@ -2050,6 +2065,8 @@ class BoardWindow(arcade.Window):
             if self.strategy.session and self.ai.is_bot(self.strategy.player) and not self.movement.session:
                 return
             if self.movement.session and self.ai.is_bot(self.movement.session.player):
+                foresight_human = (self.movement.session.stage == 'foresight' and
+                                   self.movement.session.foresight_faction not in self.ai.bot_factions)
                 combat_stage = self.movement.session.stage in (
                     'space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection',
                     'assault_choice', 'space_combat_won')
@@ -2058,7 +2075,8 @@ class BoardWindow(arcade.Window):
                 card_button = (self.action_card_button_hit and
                                self.action_card_button_hit[0] <= x <= self.action_card_button_hit[1] and
                                self.action_card_button_hit[2] <= y <= self.action_card_button_hit[3])
-                if not combat_stage and not (human_card and (self.action_card_panel.open or card_button)):
+                if not combat_stage and not foresight_human and not (
+                        human_card and (self.action_card_panel.open or card_button)):
                     return
                 if combat_stage and not self.action_card_panel.open:
                     response = self.combat_panel.hit_test(x, y)
@@ -2167,6 +2185,19 @@ class BoardWindow(arcade.Window):
                 action = self.action_card_panel.hit_test(x, y)
                 if action and action[0] == 'player':
                     self.action_card_panel.player_faction = action[1]
+                    self.action_card_panel.stall_mode = False
+                elif action and action[0] == 'stall_mode':
+                    self.action_card_panel.stall_mode = not self.action_card_panel.stall_mode
+                elif action and action[0] == 'stall_discard':
+                    player = next((p for p in self.turn_order.players
+                                   if p.faction == self.action_card_panel.player_faction), None)
+                    try:
+                        self.action_cards.resolve_stall_tactics(player, action[1])
+                        self.action_card_panel.stall_mode = False
+                        self.action_card_panel.open = False
+                        self.movement_error = None
+                    except ValueError as error:
+                        self.movement_error = str(error)
                 elif action and action[0] == 'play':
                     participants = self.action_cards.participants(self.movement.session)
                     if not participants:
@@ -2193,6 +2224,7 @@ class BoardWindow(arcade.Window):
                     self.action_cards.cancel_pending()
                     self.action_card_panel.open = False
                 elif action and action[0] == 'close':
+                    self.action_card_panel.stall_mode = False
                     self.action_card_panel.open = False
                 elif not (self.action_card_panel.bounds and
                           self.action_card_panel.bounds[0] <= x <= self.action_card_panel.bounds[1] and
@@ -2319,6 +2351,10 @@ class BoardWindow(arcade.Window):
                             self.movement.use_spatial_conduit()
                         elif action[0] == 'action_cards':
                             self.action_card_panel.open = True
+                        elif action[0] == 'foresight':
+                            self.movement.resolve_foresight(action[1])
+                        elif action[0] == 'foresight_decline':
+                            self.movement.resolve_foresight()
                         elif action[0] == 'space_cannon_continue':
                             session = self.movement.session
                             session.experimental_window_closed = True

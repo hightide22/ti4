@@ -47,6 +47,13 @@ class TurnOrder:
     def _key(self, player):
         return getattr(player, 'faction', f'player-{self.players.index(player)}')
 
+    def _initiative_key(self, index):
+        player = self.players[index]
+        telepathic = getattr(player, 'faction', None) == 'naalu'
+        priority = 0 if telepathic else min(
+            self.strategy_assignments[self._key(player)], default=99)
+        return priority, (index - self.speaker_index) % len(self.players)
+
     def begin_strategy_phase(self):
         if not self.players:
             return
@@ -77,9 +84,7 @@ class TurnOrder:
         self.strategy_pick_cursor += 1
         if self.strategy_pick_cursor >= len(self.strategy_pick_order):
             self.strategy_selection = False
-            self.strategy_initiative = sorted(range(len(self.players)), key=lambda i: (
-                min(self.strategy_assignments[self._key(self.players[i])], default=99),
-                (i - self.speaker_index) % len(self.players)))
+            self.strategy_initiative = sorted(range(len(self.players)), key=self._initiative_key)
             self.active_index = self.strategy_initiative[0]
             hacan = next((p for p in self.players if getattr(p, 'faction', None) == 'hacan'), None)
             self.qdn_pending = bool(hacan and 'qdn' in getattr(hacan, 'technologies', ()) and
@@ -102,9 +107,7 @@ class TurnOrder:
         self.strategy_assignments['hacan'].append(target_card)
         self.strategy_assignments[target_faction].remove(target_card)
         self.strategy_assignments[target_faction].append(own_card)
-        self.strategy_initiative = sorted(range(len(self.players)), key=lambda i: (
-            min(self.strategy_assignments[self._key(self.players[i])], default=99),
-            (i - self.speaker_index) % len(self.players)))
+        self.strategy_initiative = sorted(range(len(self.players)), key=self._initiative_key)
         self.active_index = self.strategy_initiative[0]
         self.qdn_pending = False
 

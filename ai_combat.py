@@ -21,7 +21,8 @@ def _spec(unit, technologies, carries_ground=False):
     profile = unit_profile(unit)
     sustain = bool(profile.get('sustainDamage')) and not unit.damaged
     hp = 1 + sustain
-    threshold = int(profile.get('combatHitsOn') or 11) + (unit.owner == 'jolnar')
+    threshold = (int(profile.get('combatHitsOn') or 11) + (unit.owner == 'jolnar') -
+                 (unit.owner == 'sardakk'))
     return (unit.kind, threshold, int(profile.get('combatDieCount') or 1), hp,
             int(profile.get('afbHitsOn') or 11), int(profile.get('afbDieCount') or 1),
             unit.capacity, bool(carries_ground), 'nes' in technologies,

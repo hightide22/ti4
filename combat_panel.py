@@ -179,6 +179,9 @@ class CombatPanel:
                   cannon_target != session.player.faction) else
                  'SPACE CANNON DEFENSE' if session.stage == 'space_cannon_assign' else
                  'GROUND COMBAT' if session.combat_type == 'ground' else 'SPACE COMBAT')
+        if (session.stage == 'space_cannon_assign' and session.space_cannon_events and
+                session.space_cannon_events[0].get('source') == 'mentak_ambush'):
+            title = 'MENTAK AMBUSH'
         window.text('combat_modal_title', title, left + 24, bottom + height - 31, 18, ACCENT)
         if session.combat_type == 'ground':
             planet = next(planet for planet in session.target.planets
@@ -193,6 +196,8 @@ class CombatPanel:
             target_faction = (session.space_cannon_events[0].get('target', session.player.faction)
                               if session.space_cannon_events else session.player.faction)
             subtitle = f'{target_faction.upper()} · choose a ship to take the hit'
+            if session.space_cannon_events[0].get('source') == 'mentak_ambush':
+                subtitle = f'{target_faction.upper()} · assign the Mentak Ambush hit'
         elif session.stage == 'space_combat_won':
             subtitle = f'{session.combat_winner.upper()} wins · Choose Salvage or continue'
         elif session.stage == 'combat_end':
@@ -247,7 +252,9 @@ class CombatPanel:
             candidates = window.movement.space_cannon_assignment_candidates(session)
             pages = max(1, (len(candidates) + 7) // 8)
             self.space_cannon_page = min(self.space_cannon_page, pages - 1)
-            window.text('space_cannon_assign_title', 'SPACE CANNON · ASSIGN HIT',
+            ability = event.get('source') == 'mentak_ambush'
+            heading = 'MENTAK AMBUSH · ASSIGN HIT' if ability else 'SPACE CANNON · ASSIGN HIT'
+            window.text('space_cannon_assign_title', heading,
                         left + 24, bottom + height - 96, 11, ACCENT)
             window.text('space_cannon_assign_help',
                         f'{target_faction.upper()} · {len(session.space_cannon_events)} hit(s) remain. Choose which ship takes the next hit.',
@@ -312,10 +319,23 @@ class CombatPanel:
         col_gap = 22
         col_width = (width - 48 - col_gap) / 2
         afb_rows = 0
-        if session.combat_type == 'space' and any(session.afb_rolls.values()):
+        ambush_x, ambush_y = left + 24, bottom + height - 81
+        for index, roll in enumerate(session.mentak_ambush_rolls):
+            if index == 0:
+                window.text('mentak_ambush_label', 'MENTAK AMBUSH', ambush_x, ambush_y + 2, 8, MUTED)
+                ambush_x += 111
+            window.text(('mentak_ambush_ship', index), roll['kind'].title(),
+                        ambush_x, ambush_y + 2, 8, ACCENT)
+            ambush_x += 48
+            self.draw_die(window, ambush_x, ambush_y - 1, roll['value'], roll['hit'],
+                          size=14, key=('mentak_ambush', index))
+            ambush_x += 24
+        if session.mentak_ambush_rolls:
             afb_rows = 1
+        if session.combat_type == 'space' and any(session.afb_rolls.values()):
+            afb_rows += 1
             afb_x = left + 24
-            afb_y = bottom + height - 81
+            afb_y = bottom + height - 81 - (17 if session.mentak_ambush_rolls else 0)
             window.text('afb_title', 'ANTI-FIGHTER BARRAGE', afb_x, afb_y + 2, 8, MUTED)
             afb_x += 132
             for faction, rolls in session.afb_rolls.items():

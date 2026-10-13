@@ -1513,6 +1513,126 @@
       "sha": "73111298ecbaa6ee0f8f9b674b10439cd9e511a3"
     },
     {
+      "path": "factions/mentak.png",
+      "size": 272788,
+      "sha": "309327082fe03d932dcfc80f2a0f9267ad4c580a"
+    },
+    {
+      "path": "factions/naalu.png",
+      "size": 237335,
+      "sha": "de810a1a0368800d6c1cb313cfd4afd497618472"
+    },
+    {
+      "path": "factions/nekro.png",
+      "size": 203411,
+      "sha": "74e2d48b0155909d28372582f1fc45db6fb2f2bc"
+    },
+    {
+      "path": "factions/sardakk.png",
+      "size": 224068,
+      "sha": "3fc50916bf9e752d216502f48ce59d6850ac4688"
+    },
+    {
+      "path": "factions/winnu.png",
+      "size": 343143,
+      "sha": "8e5f943f605043c3a8f7366b40ecaecd177c0e15"
+    },
+    {
+      "path": "factions/xxcha.png",
+      "size": 264460,
+      "sha": "db659b4f6b6e7281047e15af90145059d64e0251"
+    },
+    {
+      "path": "factions/yin.png",
+      "size": 328040,
+      "sha": "64e0f4781ffc8afdcf7ebc5b27ed231897d27855"
+    },
+    {
+      "path": "factions/yssaril.png",
+      "size": 314872,
+      "sha": "52d784d9a4637bc65e6fceb6edadaed514578382"
+    },
+    {
+      "path": "hover_images/techs/faction/mirror_computing.jpg",
+      "size": 143067,
+      "sha": "4bc05a4231af660535984e1ebb51045c88e534a5"
+    },
+    {
+      "path": "hover_images/techs/faction/hybrid_crystal_fighter_2.jpg",
+      "size": 160510,
+      "sha": "8ac94277111dba58cada9bb2fbe237b57be5f632"
+    },
+    {
+      "path": "hover_images/techs/faction/valefar_assimilator_x.jpg",
+      "size": 159275,
+      "sha": "d40496a964194e1ac0bf6c16d0b6d89e93fad03e"
+    },
+    {
+      "path": "hover_images/techs/faction/exotrireme_2.jpg",
+      "size": 174776,
+      "sha": "99eedea6df3bb55a7623ddf8cc2a3eda4f2dafae"
+    },
+    {
+      "path": "hover_images/techs/faction/lazax_gate_folding.jpg",
+      "size": 153726,
+      "sha": "bf6c347c70624d5476a03916ef032fd1ad287ae1"
+    },
+    {
+      "path": "hover_images/techs/faction/instinct_training.jpg",
+      "size": 127108,
+      "sha": "4fdcb52aba0dae110e4aea4e007d6393db00156d"
+    },
+    {
+      "path": "hover_images/techs/faction/mageon_implants.jpg",
+      "size": 124793,
+      "sha": "52dfce2fe01780702ae416d5745d3e4373a9f36b"
+    },
+    {
+      "path": "hover_images/techs/faction/salvage_operations.jpg",
+      "size": 158157,
+      "sha": "2649e500317832d575844849a04a6ea95be7fcff"
+    },
+    {
+      "path": "hover_images/techs/faction/neuroglaive.jpg",
+      "size": 151287,
+      "sha": "7b1ce6011a808e5f514c7694d4e4720cfb4d0a79"
+    },
+    {
+      "path": "hover_images/techs/faction/valefar_assimilator_y.jpg",
+      "size": 160833,
+      "sha": "da7192652b327b6218ae9b1362f5dfb74aa5c0ff"
+    },
+    {
+      "path": "hover_images/techs/faction/valkyrie_particle_weave.jpg",
+      "size": 138327,
+      "sha": "65f163bb5b37c4bff3d7dafa7bae5ccc1b2c53a9"
+    },
+    {
+      "path": "hover_images/techs/faction/hegemonic_trade_policy.jpg",
+      "size": 138125,
+      "sha": "b2ee5251b5583d2e9730a6d83a41b28aa5473658"
+    },
+    {
+      "path": "hover_images/techs/faction/nullification_field.jpg",
+      "size": 143542,
+      "sha": "8f83ff9cc4e9f04cf44edcee77c9109c3be321a3"
+    },
+    {
+      "path": "hover_images/techs/faction/yin_spinner_omega.jpg",
+      "size": 172878,
+      "sha": "f8df7d9758b9d3ff3025b23c80efe3d77d7b47ed"
+    },
+    {
+      "path": "hover_images/techs/faction/impulse_core.jpg",
+      "size": 147860,
+      "sha": "54455184efc99a605ee4b4c6a202781521c11885"
+    },
+    {
+      "path": "hover_images/techs/faction/transparasteel_plating.jpg",
+      "size": 115547,
+      "sha": "4b042b48d8e585c07bcb4a9550ec11e8bd8554f5"
+    },
+    {
       "path": "units/grn_ca.png",
       "size": 9383,
       "sha": "e012adabaf77c37b3cd365d151f14e9d0da54825"

@@ -147,22 +147,48 @@ class ActionCardController:
     def draw(self, player, count=1):
         drawn = []
         for _ in range(max(0, count)):
-            if len(player.action_cards) >= 7:
+            if player.faction != 'yssaril' and len(player.action_cards) >= 7:
                 break
-            if not self.deck and self.discard:
-                self.deck[:] = self.discard
-                self.discard.clear()
-                self.rng.shuffle(self.deck)
-            if not self.deck:
+            alias = self._draw_one()
+            if alias is None:
                 break
-            alias = self.deck.pop()
             player.action_cards.append(alias)
             drawn.append(alias)
+        if player.faction == 'yssaril' and drawn:
+            extra = self._draw_one()
+            if extra is not None:
+                player.action_cards.append(extra)
+                drawn.append(extra)
+                duplicate = next((alias for alias in player.action_cards
+                                  if player.action_cards.count(alias) > 1), None)
+                discarded = duplicate if duplicate is not None else player.action_cards[0]
+                player.action_cards.remove(discarded)
+                self.discard.append(discarded)
         return drawn
 
+    def _draw_one(self):
+        if not self.deck and self.discard:
+            self.deck[:] = self.discard
+            self.discard.clear()
+            self.rng.shuffle(self.deck)
+        return self.deck.pop() if self.deck else None
+
     def can_draw(self, player, count=1):
-        return min(max(0, 7 - len(player.action_cards)), max(0, count),
-                   len(self.deck) + len(self.discard)) > 0
+        capacity = max(0, count) if player.faction == 'yssaril' else max(0, 7 - len(player.action_cards))
+        return min(capacity, max(0, count), len(self.deck) + len(self.discard)) > 0
+
+    def resolve_stall_tactics(self, player, hand_index):
+        if (player.faction != 'yssaril' or self.turn is None or
+                self.turn.active_player is not player or not self.turn.can_take_action or
+                self.movement.session is not None or self.turn.strategy_resolution is not None or
+                self.turn.strategy_selection or self.turn.command_allocation):
+            raise ValueError('Stall Tactics can only be used as an action during your turn.')
+        if not 0 <= hand_index < len(player.action_cards):
+            raise ValueError('Choose an action card from your hand to discard.')
+        alias = player.action_cards.pop(hand_index)
+        self.discard.append(alias)
+        self.turn.mark_action_completed()
+        return alias
 
     def has_reinforcement(self, player):
         return command_tokens_in_reinforcements(player, self.movement.board) > 0

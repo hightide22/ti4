@@ -133,7 +133,8 @@ class PlayerRoster:
             lines.append((f'{tech.get("name", tech_id)}: {tech.get("text", "")}', INK))
         if not player.technologies:
             lines.append(('None', INK))
-        lines.append((f'ACTION CARDS · {len(player.action_cards)}/7', MUTED))
+        card_limit = 'unlimited' if player.faction == 'yssaril' else '7'
+        lines.append((f'ACTION CARDS · {len(player.action_cards)}/{card_limit}', MUTED))
         if w.ai.is_bot(player):
             lines.append(('Hidden until played', INK))
         else:

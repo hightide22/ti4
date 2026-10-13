@@ -42,6 +42,7 @@ class ActionCardPanel:
         self.player_faction = None
         self._textures = {}
         self.hovered_card_index = None
+        self.stall_mode = False
 
     def hit_test(self, x, y):
         return next((action for action, left, right, bottom, top in reversed(self.hits)
@@ -124,7 +125,7 @@ class ActionCardPanel:
         if not any(p.faction == self.player_faction for p in participants):
             self.player_faction = participants[0].faction
         player = next(p for p in participants if p.faction == self.player_faction)
-        hand = player.action_cards[:7]
+        hand = player.action_cards
         has_tabs = len(participants) > 1
 
         width = min(940, window.width - 40)
@@ -141,11 +142,22 @@ class ActionCardPanel:
         window.text('action_cards_title', f'{player.faction.upper()} · ACTION CARDS',
                     left + 22, top - 31, 16, ACCENT)
         window.text('action_cards_help',
+                    'Choose a card to discard for Stall Tactics.' if self.stall_mode else
                     'Hover a card to lift it forward. Playable cards glow; click one to play it.',
                     left + 22, top - 57, 10, MUTED, width - 44)
         close_x, close_y = left + width - 100, top - 49
         button(window, 'action_cards_close', 'CLOSE', close_x, close_y, 78, 28, size=9)
         self.hits.append((('close',), close_x, close_x + 78, close_y, close_y + 28))
+        stall_available = (player.faction == 'yssaril' and player is window.turn_order.active_player and
+                           window.turn_order.can_take_action and not session and
+                           not window.strategy.session and not window.turn_order.strategy_selection and
+                           not window.turn_order.command_allocation and bool(hand))
+        if stall_available:
+            sx, sy = close_x - 151, close_y
+            button(window, 'yssaril_stall_mode',
+                   'CHOOSE CARD' if self.stall_mode else 'STALL TACTICS',
+                   sx, sy, 141, 28, primary=self.stall_mode, size=8)
+            self.hits.append((('stall_mode',), sx, sx + 141, sy, sy + 28))
 
         if has_tabs:
             tab_width = min(142, (width - 54) / len(participants))
@@ -180,7 +192,8 @@ class ActionCardPanel:
             rect = (index, x, card_y, card_width, card_height)
             rectangles.append(rect)
             self.card_bounds.append((index, x, x + card_width, card_y, card_y + card_height))
-            playable_by_index[index] = bool(window.action_cards.can_play(player.faction, alias, session))
+            playable_by_index[index] = (True if self.stall_mode else
+                                        bool(window.action_cards.can_play(player.faction, alias, session)))
 
         mouse_x, mouse_y = window.mouse_position
         self.hovered_card_index = next((index for index, x0, x1, y0, y1 in reversed(self.card_bounds)
@@ -193,7 +206,8 @@ class ActionCardPanel:
             self._draw_card(window, hand[index], index, x, y,
                             draw_width, draw_height, playable_by_index[index])
             if playable_by_index[index]:
-                self.hits.append((('play', index), x, x + draw_width, y, y + draw_height))
+                action = ('stall_discard', index) if self.stall_mode else ('play', index)
+                self.hits.append((action, x, x + draw_width, y, y + draw_height))
 
         hovered = self.hovered_card_index
         if hovered is not None:
@@ -206,7 +220,8 @@ class ActionCardPanel:
             self._draw_card(window, hand[index], index, lifted_x, lifted_y,
                             lifted_width, lifted_height, playable_by_index[index])
             if playable_by_index[index]:
-                self.hits.append((('play', index), lifted_x, lifted_x + lifted_width,
+                action = ('stall_discard', index) if self.stall_mode else ('play', index)
+                self.hits.append((action, lifted_x, lifted_x + lifted_width,
                                   lifted_y, lifted_y + lifted_height))
 
     def _draw_pending(self, window, session):

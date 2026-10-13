@@ -120,7 +120,7 @@ class MovementPanel:
         overflow_current = stage in ('fleet_overflow', 'capacity_overflow')
         overflow_after_move = overflow_current and session.capacity_next_stage in ('invasion', 'space_combat')
         overflow_after_production = overflow_current and session.capacity_next_stage in ('complete', 'integrated_continue')
-        movement_done = stage != 'movement' and not overflow_after_move
+        movement_done = stage not in ('movement', 'foresight') and not overflow_after_move
         invasion_done = stage == 'complete'
         ships_selected = any(session.ships(source) for source in session.sources.values())
         landing_assigned = any(planet_id is not None for planet_id in session.landings.values())
@@ -138,7 +138,7 @@ class MovementPanel:
         production_reached = production_current or stage == 'complete' or overflow_after_production
         rows = (
             ('STEP 1 · ACTIVATION', 'Done'),
-            ('STEP 2 · MOVEMENT', 'In progress' if stage == 'movement' or overflow_after_move else 'Done' if movement_done else 'Waiting'),
+            ('STEP 2 · MOVEMENT', 'In progress' if stage in ('movement', 'foresight') or overflow_after_move else 'Done' if movement_done else 'Waiting'),
             ('  Move Ships', ('Done' if ships_selected else 'Skipped') if movement_done else 'Current'),
             ('  Space Cannon Offense', 'Current' if cannon_current else
              'Done' if session.cannon_log else 'Skipped' if session.cannon_checked else 'Wait'),
@@ -252,6 +252,8 @@ class MovementPanel:
                 notices.append(('PLANETARY DEFENSE DICE', roll or session.defense_log[-1]))
                 if roll and roll != session.defense_log[-1]:
                     notices.append(('PLANETARY DEFENSE RESULT', session.defense_log[-1]))
+            if session.custodian_payment_log:
+                notices.append(('MECATOL REX', session.custodian_payment_log[-1]))
             for index, (label, detail) in enumerate(notices[-3:]):
                 label_key = ('action_result_label', index)
                 detail_key = ('action_result_detail', index)
@@ -333,6 +335,26 @@ class MovementPanel:
                         self.source_hits.append((source.tile.position, x - 8, x + width + 8,
                                                  block_bottom, block_top))
                         y = block_bottom - 19
+            elif session.stage == 'foresight':
+                window.text('foresight_title', 'NAALU · FORESIGHT', x, y, 12, ACCENT)
+                y -= 25
+                window.text('foresight_help',
+                            'Move your ships out of this system. Choose an adjacent system without enemy ships; a Strategy token will be placed there.',
+                            x, y, 10, INK, width)
+                y -= 52
+                choices = [window.board[position] for position in session.foresight_destinations
+                           if position in window.board]
+                for tile in choices:
+                    label = f'{tile.name} · {len(tile.planets)} planet(s)'
+                    bx, by, bh = x, y - 35, 32
+                    button(window, ('foresight_choice', tile.position), label,
+                           bx, by, width, bh, primary=True, size=9)
+                    self.hits.append((('foresight', tile.position), bx, bx + width,
+                                      by, by + bh))
+                    y -= 42
+                if not choices:
+                    window.text('foresight_none', 'No legal destination remains.', x, y, 10, MUTED, width)
+                    y -= 24
             elif session.stage == 'bombardment':
                 window.text('bombardment_title', 'BOMBARDMENT TARGETS', x, y, 11, ACCENT)
                 y -= 23
@@ -515,6 +537,7 @@ class MovementPanel:
         capacity_total = sum(unit.capacity for unit in selected_ships)
         landed = sum(planet_id is not None for planet_id in session.landings.values())
         summary = (f'{ships} ships · cargo {capacity_used:g}/{capacity_total:g}' if session.stage == 'movement' else
+                   'Naalu Foresight · choose a destination or decline' if session.stage == 'foresight' else
                    f'{window.movement.production_total(session)} units · Cost {amount(window.movement.production_cost(session))}'
                    if session.stage == 'production' else
                    f'{len(session.bombard_targets)} ships assigned to bombard' if session.stage == 'bombardment' else
@@ -558,6 +581,8 @@ class MovementPanel:
             label = 'Produce units' if can_produce else 'Add payment' if session.production_choices else 'Choose units'
             actions = (('produce', label, x, split - 6, SELECTED),
                        ('skip_production', 'Skip production', split, x + width, CARD))
+        elif session.stage == 'foresight':
+            actions = (('foresight_decline', 'Decline Foresight', x, x + width, CARD),)
         else:
             actions = (('continue', 'Continue', x, split - 6, SELECTED),
                        ('cancel', 'Cancel', split, x + width, CARD))

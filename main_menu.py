@@ -16,6 +16,14 @@ FACTIONS = (
     ('l1z1x', 'The L1Z1X Mindnet', 'assimilate'),
     ('muaat', 'The Embers of Muaat', 'star_forge'),
     ('saar', 'The Clan of Saar', 'scavenge'),
+    ('mentak', 'The Mentak Coalition', 'ambush'),
+    ('naalu', 'The Naalu Collective', 'foresight'),
+    ('nekro', 'The Nekro Virus', 'technological_singularity'),
+    ('sardakk', 'Sardakk Norr', 'unrelenting'),
+    ('winnu', 'The Winnu', 'reclamation'),
+    ('xxcha', 'The Xxcha Kingdom', 'peace_accords'),
+    ('yin', 'The Yin Brotherhood', 'indoctrination'),
+    ('yssaril', 'The Yssaril Tribes', 'scheming'),
 )
 FACTION_NAMES = {alias: name for alias, name, _ in FACTIONS}
 FACTION_ICONS = {alias: f'factions/{alias}.png' for alias, _, _ in FACTIONS}

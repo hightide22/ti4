@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from itertools import combinations
 from math import ceil
 import random
 from uuid import uuid4
 
 from player import PlanetCard
 from units import Region, Unit, UnitLocation, UNIT_TYPES, mobile_ship, unit_profile, unit_profiles
-from technology import production_allowed, upgrade_profile
+from technology import (production_allowed, upgrade_profile, copy_technology,
+                        technology_catalog, is_unit_upgrade)
 
 
 class MovementError(ValueError):
@@ -55,12 +57,14 @@ class Snapshot:
         all_players = players or [player]
         cards = [(other, list(other.planets)) for other in all_players]
         return cls(player, dict(player.command_pools),
-                   [(tile, list(tile.units), set(tile.command_tokens), dict(tile.planet_owners)) for tile in board.values()],
+                   [(tile, list(tile.units), set(tile.command_tokens), dict(tile.planet_owners),
+                     tile.custodians_present) for tile in board.values()],
                    [(unit, unit.location, unit.damaged) for tile in board.values() for unit in tile.units],
                    cards,
                    [(card, card.exhausted) for _, player_cards in cards for card in player_cards],
                    [(other, other.trade_goods, other.commodities) for other in all_players],
-                   [(other, set(other.exhausted_technologies), dict(other.infantry_on_cards))
+                   [(other, set(other.exhausted_technologies), dict(other.infantry_on_cards),
+                     frozenset(other.technologies))
                     for other in all_players],
                    [(other, list(other.action_cards)) for other in all_players],
                    (action_controller, action_controller.snapshot()) if action_controller else None)
@@ -68,12 +72,13 @@ class Snapshot:
     def restore(self):
         self.player.command_pools.clear()
         self.player.command_pools.update(self.pools)
-        for tile, units, tokens, owners in self.tiles:
+        for tile, units, tokens, owners, custodians_present in self.tiles:
             tile.units[:] = units
             tile.command_tokens.clear()
             tile.command_tokens.update(tokens)
             tile.planet_owners.clear()
             tile.planet_owners.update(owners)
+            tile.custodians_present = custodians_present
         for unit, location, damaged in self.locations:
             unit.location = location
             unit.damaged = damaged
@@ -84,11 +89,12 @@ class Snapshot:
         for player, trade_goods, commodities in self.currencies:
             player.trade_goods = trade_goods
             player.commodities = commodities
-        for player, exhausted, infantry in self.technology_states:
+        for player, exhausted, infantry, technologies in self.technology_states:
             player.exhausted_technologies.clear()
             player.exhausted_technologies.update(exhausted)
             player.infantry_on_cards.clear()
             player.infantry_on_cards.update(infantry)
+            player.technologies = technologies
         for player, hand in self.action_hands:
             player.action_cards[:] = hand
         if self.action_state:
@@ -252,6 +258,16 @@ class Session:
     fire_team_pending: str | None = None
     fire_team_selected: set[int] = field(default_factory=set)
     moved_ship_ids: set[str] = field(default_factory=set)
+    mentak_ambush_resolved: bool = False
+    mentak_ambush_rolls: list[dict] = field(default_factory=list)
+    nekro_tech_gained: set[str] = field(default_factory=set)
+    yin_devotion_used: set[str] = field(default_factory=set)
+    custodian_payment_log: list[str] = field(default_factory=list)
+    custodian_payment_failed: bool = False
+    foresight_faction: str | None = None
+    foresight_destinations: tuple[tuple[int, int], ...] = ()
+    foresight_affected: list[tuple[tuple[int, int], str]] = field(default_factory=list)
+    foresight_next_stage: str | None = None
 
     @property
     def choices(self):
@@ -462,6 +478,67 @@ class MovementController:
     def faction_player(self, faction):
         return next((player for player in self.players if player.faction == faction), None)
 
+    def resolve_pillage(self, neighbor, currency='trade_goods'):
+        """Resolve Mentak's Pillage after a qualifying neighbor gain or transaction."""
+        if neighbor is None or neighbor.trade_goods < 3:
+            return 0
+        mentak = self.faction_player('mentak')
+        if mentak is None or mentak is neighbor:
+            return 0
+        mentak_systems = [tile for tile in self.board.values()
+                          if mentak.faction in tile.planet_owners.values() or
+                          any(unit.owner == mentak.faction for unit in tile.units)]
+        neighbor_positions = {tile.position for tile in self.board.values()
+                              if neighbor.faction in tile.planet_owners.values() or
+                              any(unit.owner == neighbor.faction for unit in tile.units)}
+        adjacent = any(tile.position in neighbor_positions or any(
+            other.position in neighbor_positions for other in self.neighbors(tile, mentak.faction))
+                       for tile in mentak_systems)
+        if not adjacent:
+            return 0
+        if currency == 'trade_goods':
+            neighbor.trade_goods -= 1
+            mentak.trade_goods += 1
+        elif (currency == 'commodities' and neighbor.commodities > 0 and
+              mentak.commodities < mentak.commodity_limit):
+            neighbor.commodities -= 1
+            mentak.commodities += 1
+        else:
+            return 0
+        return 1
+
+    def peace_accords(self, player):
+        """Resolve Xxcha's Diplomacy follow-up by claiming the best legal empty planet."""
+        if player.faction != 'xxcha':
+            return None
+        controlled_positions = {tile.position for tile in self.board.values()
+                                if player.faction in tile.planet_owners.values()}
+        adjacent_positions = {neighbor.position for tile in self.board.values()
+                              if tile.position in controlled_positions
+                              for neighbor in self.board.neighbors(tile.position)}
+        candidates = []
+        for tile in self.board.values():
+            if tile.number == 18 or tile.position not in adjacent_positions:
+                continue
+            for planet in tile.planets:
+                if tile.planet_owners.get(planet.planet_id) == player.faction:
+                    continue
+                occupied = any(unit.location.region == Region.PLANET and
+                               unit.location.planet_id == planet.planet_id for unit in tile.units)
+                if not occupied:
+                    candidates.append((tile, planet))
+        if not candidates:
+            return None
+        tile, planet = max(candidates, key=lambda item: (
+            item[1].resources + item[1].influence, item[1].resources,
+            item[1].influence, item[1].name))
+        tile.planet_owners[planet.planet_id] = player.faction
+        for other in self.players:
+            other.planets[:] = [card for card in other.planets
+                                if card.planet.planet_id != planet.planet_id]
+        player.planets.append(PlanetCard(planet))
+        return planet
+
     def has_tech(self, faction, alias):
         player = self.faction_player(faction)
         return bool(player and alias in player.technologies)
@@ -469,6 +546,26 @@ class MovementController:
     def destroy_unit(self, tile, unit, session=None, source_factions=()):
         """Destroy a unit and resolve technology reactions to its destruction."""
         player = self.faction_player(unit.owner)
+        in_combat = bool(session and session.combat_type in ('space', 'ground') and
+                         session.stage in ('space_combat', 'ground_combat', 'combat_end',
+                                           'assault_choice'))
+        if (in_combat and unit.owner != 'nekro' and 'nekro' in session.combat_factions and
+                'nekro' not in session.nekro_tech_gained):
+            nekro = self.faction_player('nekro')
+            candidates = sorted((alias for alias in getattr(player, 'technologies', ())
+                                 if alias not in getattr(nekro, 'technologies', ()) and
+                                 alias in technology_catalog() and
+                                 technology_catalog()[alias].get('source') == 'base' and
+                                 technology_catalog()[alias].get('faction') in
+                                 (None, unit.owner)),
+                                key=lambda alias: (not is_unit_upgrade(technology_catalog()[alias]), alias))
+            if nekro and candidates:
+                try:
+                    copy_technology(nekro, candidates[0], self.board,
+                                    allow_faction_technology=True)
+                    session.nekro_tech_gained.add('nekro')
+                except ValueError:
+                    pass
         if (session and session.combat_type == 'space' and session.stage in
                 ('space_combat', 'combat_end', 'assault_choice') and
                 UNIT_TYPES[unit.kind]['ship'] and source_factions):
@@ -581,6 +678,7 @@ class MovementController:
                     unit.owner == opponent.faction and unit.location.region == Region.SPACE and
                     UNIT_TYPES[unit.kind]['ship'] for unit in target.units):
                 opponent.trade_goods += 4
+                self.resolve_pillage(opponent)
         return self.session
 
     def use_spatial_conduit(self):
@@ -774,7 +872,9 @@ class MovementController:
 
     @staticmethod
     def combat_threshold(faction, profile):
-        return int(profile.get('combatHitsOn') or 10) + (1 if faction == 'jolnar' else 0)
+        return (int(profile.get('combatHitsOn') or 10) +
+                (1 if faction == 'jolnar' else 0) -
+                (1 if faction == 'sardakk' else 0))
 
     def spend_munitions(self, faction):
         session = self.session
@@ -870,8 +970,73 @@ class MovementController:
                       else 'invasion')
         affected = [(origin.position, session.player.faction) for origin, _, _ in transfers]
         affected.append((session.target.position, session.player.faction))
+        foresight_destinations = self.foresight_options(session)
+        if foresight_destinations:
+            session.foresight_faction = 'naalu'
+            session.foresight_destinations = tuple(tile.position for tile in foresight_destinations)
+            session.foresight_affected = affected
+            session.foresight_next_stage = next_stage
+            session.stage = 'foresight'
+            return len(transfers)
         self._check_capacity_and_fleet(session, affected, next_stage)
         return len(transfers)
+
+    def foresight_options(self, session=None):
+        """Return systems eligible for the Naalu Foresight reaction."""
+        session = session or self.session
+        if not session or session.player.faction == 'naalu':
+            return []
+        naalu = self.faction_player('naalu')
+        if (naalu is None or naalu.command_pools['strategic'] <= 0 or
+                not any(unit.owner == 'naalu' and unit.location.region == Region.SPACE and
+                        UNIT_TYPES[unit.kind]['ship'] for unit in session.target.units)):
+            return []
+        options = []
+        for tile in self.neighbors(session.target, 'naalu'):
+            if 'naalu' in tile.command_tokens:
+                continue
+            if any(unit.owner != 'naalu' and unit.location.region == Region.SPACE and
+                   UNIT_TYPES[unit.kind]['ship'] for unit in tile.units):
+                continue
+            options.append(tile)
+        return sorted(options, key=lambda tile: (tile.name, tile.position))
+
+    def resolve_foresight(self, position=None):
+        """Accept or decline Naalu Foresight, then resume the interrupted action."""
+        session = self.session
+        if not session or session.stage != 'foresight':
+            raise MovementError('Naalu Foresight is not awaiting a decision.')
+        naalu = self.faction_player('naalu')
+        if naalu is None:
+            raise MovementError('Naalu is no longer in this game.')
+        affected = list(session.foresight_affected)
+        next_stage = session.foresight_next_stage or 'invasion'
+        if position is not None:
+            tile = next((candidate for candidate in self.foresight_options(session)
+                         if candidate.position == position), None)
+            if tile is None:
+                raise MovementError('Choose an eligible adjacent system for Foresight.')
+            ships = [unit for unit in session.target.units if unit.owner == 'naalu' and
+                     unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+            ship_ids = {unit.unit_id for unit in ships}
+            moving = ships + [unit for unit in session.target.units
+                              if unit.owner == 'naalu' and unit.location.region == Region.TRANSPORT and
+                              unit.location.carrier_id in ship_ids]
+            for unit in moving:
+                session.target.units.remove(unit)
+                tile.units.append(unit)
+            naalu.command_pools['strategic'] -= 1
+            tile.command_tokens.add('naalu')
+            affected.extend(((session.target.position, 'naalu'), (tile.position, 'naalu')))
+            session.retreat_log = f'Naalu Foresight moved its fleet to {tile.name}.'
+        else:
+            session.retreat_log = 'Naalu declined Foresight.'
+        session.foresight_faction = None
+        session.foresight_destinations = ()
+        session.foresight_affected.clear()
+        session.foresight_next_stage = None
+        self._check_capacity_and_fleet(session, affected, next_stage)
+        return position is not None
 
     @staticmethod
     def hostile_space_factions(tile, faction):
@@ -1221,13 +1386,13 @@ class MovementController:
 
         self.continue_after_space_cannon(session)
 
-    def apply_hit(self, tile, candidates, session=None):
+    def apply_hit(self, tile, candidates, session=None, source_factions=()):
         target = sorted(candidates, key=lambda unit: (
             not (unit_profile(unit).get('sustainDamage') and not unit.damaged), unit.unit_id))[0]
         if unit_profile(target).get('sustainDamage') and not target.damaged:
             target.damaged = True
         else:
-            self.destroy_unit(tile, target, session)
+            self.destroy_unit(tile, target, session, source_factions)
         return target
 
     def resolve_anti_fighter_barrage(self, session):
@@ -1255,7 +1420,7 @@ class MovementController:
                 if not hits:
                     break
                 if enemy in session.target.units:
-                    session.target.units.remove(enemy)
+                    self.destroy_unit(session.target, enemy, session, (faction,))
                     destroyed.append(enemy.owner.upper())
                     hits -= 1
             session.afb_log.append(
@@ -1567,6 +1732,33 @@ class MovementController:
             self.finish_space_combat_setup(session)
 
     def finish_space_combat_setup(self, session):
+        if not session.mentak_ambush_resolved:
+            session.mentak_ambush_resolved = True
+            mentak = self.faction_player('mentak')
+            if mentak and 'mentak' in session.combat_factions:
+                ambush_ships = sorted(
+                    (unit for unit in self.combat_units(session, 'mentak')
+                     if unit.kind in ('cruiser', 'destroyer')),
+                    key=lambda unit: (self.combat_threshold('mentak', unit_profile(unit)),
+                                      unit.kind, unit.unit_id))[:2]
+                opponents = [faction for faction in session.combat_factions if faction != 'mentak']
+                for index, ship in enumerate(ambush_ships):
+                    value = self.roll_d10(session)
+                    threshold = self.combat_threshold('mentak', unit_profile(ship))
+                    hit = value >= threshold
+                    session.mentak_ambush_rolls.append(
+                        {'unit_id': ship.unit_id, 'kind': ship.kind, 'value': value,
+                         'threshold': threshold, 'hit': hit})
+                    if hit and opponents:
+                        target = opponents[index % len(opponents)]
+                        candidates = [unit.unit_id for unit in self.combat_units(session, target)]
+                        session.space_cannon_events.append({
+                            'owner': 'mentak', 'target': target, 'candidates': candidates,
+                            'graviton': False, 'source': 'mentak_ambush'})
+                if session.space_cannon_events:
+                    session.space_cannon_next_stage = 'space_combat'
+                    self.resolve_space_cannon_hits(session)
+                    return
         self.resolve_anti_fighter_barrage(session)
         session.combat_factions = tuple(faction for faction in session.combat_factions
                                         if self.combat_units(session, faction))
@@ -1598,6 +1790,37 @@ class MovementController:
                                   unit.location.planet_id == planet_id and
                                   unit.kind == 'infantry'}))
         session.combat_factions = (session.player.faction,) + defenders
+        yin = self.faction_player('yin')
+        if yin and 'yin' in session.combat_factions:
+            candidates = sorted((unit for unit in session.target.units
+                                 if unit.owner != 'yin' and unit.kind == 'infantry' and
+                                 unit.location.region == Region.PLANET and
+                                 unit.location.planet_id == planet_id),
+                                key=lambda unit: (unit.damaged, unit.unit_id))
+            controlled_planets = {planet_id for tile in self.board.values()
+                                  for planet_id, owner in tile.planet_owners.items()
+                                  if owner == 'yin'}
+            ready_cards = [card for card in yin.planets if not card.exhausted and
+                           card.planet.planet_id in controlled_planets]
+            ready_cards.sort(key=lambda card: (-card.planet.influence, card.planet.resources,
+                                               card.planet.planet_id))
+            payment = []
+            influence = 0
+            for card in ready_cards:
+                payment.append(card)
+                influence += card.planet.influence
+                if influence >= 2:
+                    break
+            owned_infantry = sum(unit.owner == 'yin' and unit.kind == 'infantry'
+                                 for tile in self.board.values() for unit in tile.units)
+            if candidates and influence >= 2 and owned_infantry < 12:
+                for card in payment:
+                    card.exhausted = True
+                session.target.units.remove(candidates[0])
+                session.target.units.append(Unit(f'yin-indoctrination-{uuid4().hex}', 'infantry',
+                                                 'yin', yin.color_code,
+                                                 UnitLocation(Region.PLANET, planet_id),
+                                                 profile_id=(upgrade_profile(yin, 'infantry') or {}).get('id')))
         session.combat_round = 0
         session.combat_rolls.clear()
         session.combat_hits.clear()
@@ -1770,6 +1993,23 @@ class MovementController:
     def _finish_combat_round(self, session):
         session.pending_direct_hits.clear()
         session.pending_courageous.clear()
+        if session.combat_type == 'space' and session.combat_round > 0:
+            yin = self.faction_player('yin')
+            round_key = f'yin:{session.combat_round}'
+            yin_ships = self.combat_units(session, 'yin') if yin and 'yin' in session.combat_factions else []
+            opponents = [unit for faction in session.combat_factions if faction != 'yin'
+                         for unit in self.combat_units(session, faction)]
+            sacrifices = sorted((unit for unit in yin_ships if unit.kind in ('cruiser', 'destroyer')),
+                                key=lambda unit: (unit.kind == 'cruiser', unit.unit_id))
+            if sacrifices and opponents and round_key not in session.yin_devotion_used:
+                session.yin_devotion_used.add(round_key)
+                sacrifice = sacrifices[0]
+                self.destroy_unit(session.target, sacrifice, session)
+                victim = self.apply_hit(session.target, opponents, session, ('yin',))
+                outcome = 'damaged' if victim.damaged else 'destroyed'
+                session.assault_log.append(
+                    f'Yin Devotion sacrificed a {sacrifice.kind} to {outcome} '
+                    f'{victim.owner.upper()} {victim.kind}.')
         own_alive = bool(self.combat_units(session, session.player.faction))
         enemies_alive = any(self.combat_units(session, faction)
                             for faction in session.combat_factions if faction != session.player.faction)
@@ -2194,7 +2434,12 @@ class MovementController:
     def capture_planet(self, session, planet_id):
         target, player = session.target, session.player
         if target.planet_owners.get(planet_id) == player.faction:
-            return
+            return False
+        if planet_id == 'mr' and target.custodians_present:
+            if not self.pay_custodians(session):
+                session.custodian_payment_failed = True
+                return False
+            target.custodians_present = False
         target.planet_owners[planet_id] = player.faction
         for unit in list(target.units):
             if unit.owner != player.faction and unit.location.region == Region.PLANET and \
@@ -2211,8 +2456,44 @@ class MovementController:
         player.planets.append(PlanetCard(planet, exhausted=True))
         if player.faction == 'saar':
             player.trade_goods += 1
+            self.resolve_pillage(player)
         if planet_id not in session.captured_planets:
             session.captured_planets.append(planet_id)
+        return True
+
+    def pay_custodians(self, session):
+        """Pay influence to remove the Mecatol Rex Custodians token."""
+        player = session.player
+        if player.faction == 'winnu':
+            session.custodian_payment_log.append('Winnu removed the Custodians token for free (Blood Ties).')
+            return True
+        ready = []
+        for card in player.planets:
+            if card.exhausted:
+                continue
+            tile = next((tile for tile in self.board.values()
+                         if any(planet.planet_id == card.planet.planet_id for planet in tile.planets)), None)
+            if tile and tile.planet_owners.get(card.planet.planet_id) == player.faction:
+                ready.append(card)
+        payment = None
+        for size in range(1, len(ready) + 1):
+            eligible = [choice for choice in combinations(ready, size)
+                        if sum(card.planet.influence for card in choice) >= 6]
+            if eligible:
+                payment = min(eligible, key=lambda choice: (
+                    sum(card.planet.influence for card in choice) - 6,
+                    sum(card.planet.resources for card in choice),
+                    tuple(card.planet.planet_id for card in choice)))
+                break
+        if payment is None:
+            session.custodian_payment_log.append(
+                f'{player.faction.upper()} needs 6 ready influence to remove the Custodians token.')
+            return False
+        for card in payment:
+            card.exhausted = True
+        session.custodian_payment_log.append(
+            f'{player.faction.upper()} spent 6 influence to remove the Custodians token.')
+        return True
 
     def finish_ground_battle(self, session, attackers_alive, defenders_alive):
         planet_id = session.combat_planet_id
@@ -2253,12 +2534,35 @@ class MovementController:
         self.finish_invasion(session)
 
     def finish_invasion(self, session):
+        if session.player.faction == 'winnu' and 'mr' in session.captured_planets:
+            planet = next((planet for planet in session.target.planets if planet.planet_id == 'mr'), None)
+            if planet:
+                owned = [unit for tile in self.board.values() for unit in tile.units
+                         if unit.owner == 'winnu']
+                pds_supply = 6 - sum(unit.kind == 'pds' for unit in owned)
+                dock_supply = 3 - sum(unit.kind == 'spacedock' for unit in owned)
+                if pds_supply > 0 and not any(
+                        unit.owner == 'winnu' and unit.kind == 'pds' and
+                        unit.location.planet_id == 'mr' for unit in session.target.units):
+                    session.target.units.append(Unit(f'winnu-reclamation-pds-{uuid4().hex}', 'pds',
+                                                     'winnu', session.player.color_code,
+                                                     UnitLocation(Region.PLANET, 'mr'),
+                                                     profile_id=(upgrade_profile(session.player, 'pds') or {}).get('id')))
+                if dock_supply > 0 and not any(
+                        unit.owner == 'winnu' and unit.kind == 'spacedock' and
+                        unit.location.planet_id == 'mr' for unit in session.target.units):
+                    session.target.units.append(Unit(f'winnu-reclamation-dock-{uuid4().hex}', 'spacedock',
+                                                     'winnu', session.player.color_code,
+                                                     UnitLocation(Region.PLANET, 'mr'),
+                                                     profile_id=(upgrade_profile(session.player, 'spacedock') or {}).get('id')))
         planets = {planet.planet_id: planet for planet in session.target.planets}
         landed_names = [planets[planet_id].name for planet_id in session.landed_planets]
         captured_names = [planets[planet_id].name for planet_id in session.captured_planets]
         session.outcome = ('Landed forces on ' + ', '.join(landed_names) + '. ' +
                            ('Captured: ' + ', '.join(captured_names) + '.' if captured_names else
                             'Control did not change.'))
+        if session.custodian_payment_log:
+            session.outcome += ' ' + ' '.join(session.custodian_payment_log)
         if 'ie' in session.player.technologies and session.captured_planets:
             session.integrated_queue = list(session.captured_planets)
             self.advance_integrated_production(session)

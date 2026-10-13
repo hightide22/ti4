@@ -120,5 +120,7 @@ class TechnologyActions:
             player.command_pools['strategic'] -= 1
             player.trade_goods += 4
             other.trade_goods += 2
+            self.movement.resolve_pillage(player)
+            self.movement.resolve_pillage(other)
         player.exhausted_technologies.add(alias)
         self.movement.history.append(UndoEntry(snapshot))

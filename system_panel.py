@@ -86,7 +86,8 @@ class SystemPanel:
         shields = list(dict.fromkeys(unit.owner.upper() for unit in tile.units if unit.kind == 'pds' and
                                      unit_profile(unit).get('planetaryShield')))
         shield_text = f' · PLANETARY SHIELD: {", ".join(shields)}' if shields else ''
-        text('system_id', f'Tile {tile.system_id} / {len(tile.units)} units{shield_text}',
+        custodians_text = ' · CUSTODIANS: 6 INFLUENCE' if tile.custodians_present else ''
+        text('system_id', f'Tile {tile.system_id} / {len(tile.units)} units{shield_text}{custodians_text}',
              px, window.height - 88, 10, MUTED, max_width=width)
         system_owners = list(dict.fromkeys(tile.planet_owners.values()))
         owner_text = ', '.join(faction.upper() for faction in system_owners) if system_owners else 'None'

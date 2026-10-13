@@ -70,7 +70,8 @@ class SetupTests(unittest.TestCase):
             load_board(map_path, ('sol', 'jolnar', 'hacan'))
 
     def test_new_base_factions_setup_with_their_faction_homeworlds(self):
-        for faction in ('arborec', 'saar', 'muaat', 'l1z1x', 'ghost'):
+        for faction in ('arborec', 'saar', 'muaat', 'l1z1x', 'ghost', 'mentak',
+                        'naalu', 'nekro', 'sardakk', 'winnu', 'xxcha', 'yin', 'yssaril'):
             with self.subTest(faction=faction):
                 fillers = [alias for alias in ('sol', 'jolnar', 'hacan', 'letnev')]
                 factions = [faction, *fillers[:3]]

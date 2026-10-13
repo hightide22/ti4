@@ -98,6 +98,16 @@ def create_players(board, config):
         alias = entry.get('faction')
         if alias:
             faction = factions[alias]
+            starting_techs = list(faction.get('startingTech') or ())
+            if not starting_techs and faction.get('startingTechOptions'):
+                from technology import technology_catalog
+                catalog = technology_catalog()
+                available = {tech for tech in faction['startingTechOptions']
+                             if tech in catalog and catalog[tech].get('source') == 'base' and
+                             catalog[tech].get('faction') is None}
+                preference = ('st', 'det', 'amd', 'ps', 'pa', 'nm', 'sdn')
+                amount = int(faction.get('startingTechAmount') or 0)
+                starting_techs = [tech for tech in preference if tech in available][:amount]
             tile = next((candidate for candidate in board.values()
                          if any(planet.faction_homeworld == alias for planet in candidate.planets)), None)
             if tile is None:
@@ -105,5 +115,5 @@ def create_players(board, config):
             tile.planet_owners.update({planet.planet_id: alias for planet in tile.planets})
             players.append(PlayerState(alias, faction['factionName'], entry['unit_color'],
                                        faction['commodities'], [PlanetCard(p) for p in tile.planets],
-                                       technologies=frozenset(faction['startingTech'])))
+                                       technologies=frozenset(starting_techs)))
     return players

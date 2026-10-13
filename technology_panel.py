@@ -8,6 +8,7 @@ import arcade
 from technology import (available_technologies, is_unit_upgrade, missing_prerequisites,
                         technology_catalog, technology_image, unit_stats, unit_upgrade)
 from units import UNIT_TYPES
+from player import command_tokens_in_reinforcements
 
 
 INK = (225, 235, 246)
@@ -234,34 +235,43 @@ class TechnologyPanel:
                    right, list_top - 38, 11, MUTED, right_width)
 
         if research:
-            cost = controller.technology_cost()
-            paid = controller.technology_payment()
-            selected = s.technology_selected == (selected_tech['alias'] if selected_tech else None)
-            status = f'Resources selected: {paid}/{cost}  ·  Trade goods: {s.trade_goods}/{player.trade_goods}'
-            w.text('tech_payment', status, right, bottom + 191, 11, GOLD, right_width)
-            w.text('tech_planet_help', 'Click planet cards below for resources or technology specialties.',
-                   right, bottom + 170, 9, MUTED, right_width)
-            self._button(w, ('mode', 'resources'), 'PAY RESOURCES', right, bottom + 127,
-                         141, selected=self.planet_mode == 'resources')
-            self._button(w, ('mode', 'specialty'), 'USE SPECIALTY', right + 149,
-                         bottom + 127, 141, selected=self.planet_mode == 'specialty')
-            self._button(w, ('goods', -1), '−', right + 305, bottom + 127, 35,
-                         enabled=s.trade_goods > 0)
-            self._button(w, ('goods', 1), '+', right + 346, bottom + 127, 35,
-                         enabled=s.trade_goods < player.trade_goods)
-            if selected_tech:
-                specialties = [card for card in player.planets
-                               if card.planet.planet_id in s.technology_planets]
-                shortfall = missing_prerequisites(player, selected_tech, specialties)
-                w.text('tech_missing', f'Unmet prerequisites: {shortfall}', right,
-                       bottom + 109, 10, GREEN if shortfall == 0 else GOLD)
+            if player.faction == 'nekro':
+                w.text('nekro_propagation_help',
+                       'You cannot research technology. Gain up to 3 command tokens, then allocate them.',
+                       right, bottom + 191, 11, INK, right_width)
+                self._button(w, ('propagation',), 'PROPAGATION · GAIN 3 COMMAND TOKENS',
+                             right, bottom + 127, right_width, 38,
+                             enabled=command_tokens_in_reinforcements(player, w.board) > 0)
+                self._button(w, ('skip',), 'SKIP', right, bottom + 27, right_width, 34)
             else:
-                shortfall = 1
-            can_research = bool(selected and selected_tech and shortfall == 0 and paid >= cost)
-            self._button(w, ('research',), 'RESEARCH', right, bottom + 27,
-                         right_width * .55 - 5, 34, can_research)
-            self._button(w, ('skip',), 'SKIP RESEARCH', right + right_width * .55 + 5,
-                         bottom + 27, right_width * .45 - 5, 34)
+                cost = controller.technology_cost()
+                paid = controller.technology_payment()
+                selected = s.technology_selected == (selected_tech['alias'] if selected_tech else None)
+                status = f'Resources selected: {paid}/{cost}  ·  Trade goods: {s.trade_goods}/{player.trade_goods}'
+                w.text('tech_payment', status, right, bottom + 191, 11, GOLD, right_width)
+                w.text('tech_planet_help', 'Click planet cards below for resources or technology specialties.',
+                       right, bottom + 170, 9, MUTED, right_width)
+                self._button(w, ('mode', 'resources'), 'PAY RESOURCES', right, bottom + 127,
+                             141, selected=self.planet_mode == 'resources')
+                self._button(w, ('mode', 'specialty'), 'USE SPECIALTY', right + 149,
+                             bottom + 127, 141, selected=self.planet_mode == 'specialty')
+                self._button(w, ('goods', -1), '−', right + 305, bottom + 127, 35,
+                             enabled=s.trade_goods > 0)
+                self._button(w, ('goods', 1), '+', right + 346, bottom + 127, 35,
+                             enabled=s.trade_goods < player.trade_goods)
+                if selected_tech:
+                    specialties = [card for card in player.planets
+                                   if card.planet.planet_id in s.technology_planets]
+                    shortfall = missing_prerequisites(player, selected_tech, specialties)
+                    w.text('tech_missing', f'Unmet prerequisites: {shortfall}', right,
+                           bottom + 109, 10, GREEN if shortfall == 0 else GOLD)
+                else:
+                    shortfall = 1
+                can_research = bool(selected and selected_tech and shortfall == 0 and paid >= cost)
+                self._button(w, ('research',), 'RESEARCH', right, bottom + 27,
+                             right_width * .55 - 5, 34, can_research)
+                self._button(w, ('skip',), 'SKIP RESEARCH', right + right_width * .55 + 5,
+                             bottom + 27, right_width * .45 - 5, 34)
         elif selected_tech and selected_tech['alias'] == 'td' and 'td' in player.technologies:
             state = w.technology_actions.transit
             choosing_planet = bool(state and state.selected_unit)

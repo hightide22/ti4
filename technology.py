@@ -13,7 +13,9 @@ from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles
 
 COLORS = {'B': 'PROPULSION', 'G': 'BIOTIC', 'R': 'WARFARE', 'Y': 'CYBERNETIC'}
 COLOR_CODES = {name: code for code, name in COLORS.items()}
-FACTIONS = {'sol', 'jolnar', 'letnev', 'hacan', 'arborec', 'saar', 'muaat', 'l1z1x', 'ghost'}
+FACTIONS = {'arborec', 'ghost', 'hacan', 'jolnar', 'letnev', 'l1z1x', 'mentak',
+            'muaat', 'naalu', 'nekro', 'saar', 'sardakk', 'sol', 'winnu', 'xxcha',
+            'yin', 'yssaril'}
 
 
 @lru_cache(maxsize=1)
@@ -34,11 +36,31 @@ def is_unit_upgrade(tech):
 
 
 def available_technologies(player):
+    if player.faction == 'nekro':
+        return []
     catalog = technology_catalog()
     replacements = {tech['baseUpgrade'] for tech in catalog.values()
                     if tech.get('faction') == player.faction and tech.get('baseUpgrade')}
     return [tech for tech in catalog.values()
             if tech.get('faction') in (None, player.faction) and tech['alias'] not in replacements]
+
+
+def copy_technology(player, alias, board, allow_faction_technology=False):
+    """Grant a copied base-game technology, including its unit-upgrade effect."""
+    tech = technology_catalog().get(alias)
+    if (tech is None or alias in player.technologies or tech.get('source') != 'base' or
+            (tech.get('faction') not in (None, player.faction) and
+             not allow_faction_technology)):
+        raise ValueError('This technology cannot be copied.')
+    player.technologies = player.technologies | {alias}
+    if is_unit_upgrade(tech):
+        for tile in board.values():
+            for unit in tile.units:
+                if unit.owner == player.faction:
+                    profile = upgrade_profile(player, unit.kind)
+                    if profile:
+                        unit.profile_id = profile['id']
+    return tech
 
 
 def upgrade_profile(player, kind):

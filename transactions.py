@@ -132,6 +132,8 @@ class TransactionController:
                                      if card not in s.take_action_cards]
         s.initiator.action_cards.extend(s.take_action_cards)
         s.partner.action_cards.extend(s.give_action_cards)
+        for player in (s.initiator, s.partner):
+            self.movement.resolve_pillage(player)
         self.used_partners.add(s.partner.faction)
         self.session = None
 

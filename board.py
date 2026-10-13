@@ -57,6 +57,11 @@ class Tile:
     units: list[Unit] = field(default_factory=list)
     command_tokens: set[str] = field(default_factory=set)
     planet_owners: dict[str, str] = field(default_factory=dict)
+    custodians_present: bool = False
+
+    def __post_init__(self):
+        if self.number == 18:
+            self.custodians_present = True
 
     @property
     def number(self) -> int:
@@ -223,7 +228,11 @@ def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
             'letnev': (219, 111, 132), 'hacan': (244, 183, 87),
             'arborec': (106, 190, 131), 'ghost': (112, 190, 215),
             'l1z1x': (178, 116, 132), 'muaat': (231, 121, 75),
-            'saar': (208, 188, 91),
+            'saar': (208, 188, 91), 'mentak': (240, 196, 78),
+            'naalu': (104, 219, 147), 'nekro': (170, 91, 100),
+            'sardakk': (218, 86, 86), 'winnu': (194, 132, 255),
+            'xxcha': (94, 183, 132), 'yin': (178, 131, 216),
+            'yssaril': (115, 207, 144),
         }
         for entry, alias in zip(slots, factions):
             faction = faction_data.get(alias)

@@ -385,6 +385,8 @@ class GameAI:
                     player.available_values[0] + player.trade_goods +
                     int('st' in player.technologies) >= 1)
         if card == 7:
+            if player.faction == 'nekro':
+                return command_tokens_in_reinforcements(player, self.window.board) > 0
             cost = 0 if player.faction == 'jolnar' else ctl.technology_cost()
             return self.choose_technology(player, cost) is not None
         return False
@@ -487,6 +489,10 @@ class GameAI:
             else:
                 ctl._participant_done()
         elif s.stage == 'technology':
+            if player.faction == 'nekro':
+                ctl.resolve_propagation()
+                self.report(player, 'Used Propagation to gain command tokens.', 1.2)
+                return
             choice = self.choose_technology(player, ctl.technology_cost())
             if choice:
                 alias, specialty_ids, payment_ids, goods = choice
@@ -604,6 +610,29 @@ class GameAI:
         w = self.window
         ctl, s = w.movement, w.movement.session
         ai_turn = self.is_bot(s.player)
+        if s.stage == 'foresight':
+            faction = s.foresight_faction
+            if faction not in self.bot_factions:
+                return
+            options = ctl.foresight_options(s)
+            if options:
+                def value(tile):
+                    empty_planets = [planet for planet in tile.planets
+                                     if tile.planet_owners.get(planet.planet_id) is None]
+                    enemy_neighbors = sum(self._tile_threat(other, faction)
+                                          for other in ctl.neighbors(tile, faction))
+                    friendly = sum(SHIP_VALUE.get(unit.kind, 1) for unit in tile.units
+                                   if unit.owner == faction and unit.location.region == Region.SPACE)
+                    return (sum(planet.resources * 1.4 + planet.influence * .5
+                                for planet in empty_planets) + friendly - .4 * enemy_neighbors,
+                            tuple(-part for part in tile.position))
+                destination = max(options, key=value)
+                ctl.resolve_foresight(destination.position)
+                self.report(ctl.faction_player(faction),
+                            f'Foresight moved the fleet to {destination.name}.', .6)
+            else:
+                ctl.resolve_foresight()
+            return
         if s.fire_team_pending and s.fire_team_pending not in self.bot_factions:
             return
         # Assault Cannon's target chooses which of their own ships is
