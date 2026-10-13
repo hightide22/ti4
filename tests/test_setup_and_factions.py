@@ -1,5 +1,6 @@
 import unittest
 import random
+import json
 from unittest.mock import patch
 
 from board import ROOT, load_board
@@ -10,7 +11,7 @@ from player import create_players
 from strategic_action import StrategyController, StrategyResolution
 from transactions import TransactionController, TransactionError
 from turn_order import TurnOrder
-from technology import production_allowed
+from technology import production_allowed, technology_catalog
 from units import Region, Unit, UnitLocation, mobile_ship
 
 
@@ -91,6 +92,41 @@ class SetupTests(unittest.TestCase):
                     self.assertEqual(dock.location.region, Region.SPACE)
                     self.assertTrue(mobile_ship(dock))
                     self.assertFalse(capital_ship(dock))
+
+    def test_every_base_faction_starts_with_technologies_in_the_base_catalog(self):
+        faction_data = json.loads(
+            (ROOT / 'assets/source/asyncti4/src/main/resources/data/factions/base.json')
+            .read_text(encoding='utf-8'))
+        factions = [entry['alias'] for entry in faction_data]
+        catalog = technology_catalog()
+
+        for faction in factions:
+            with self.subTest(faction=faction):
+                fillers = [alias for alias in factions if alias != faction][:3]
+                config, board = load_board(ROOT / 'maps/four_player.json',
+                                           [faction, *fillers])
+                player = next(player for player in create_players(board, config)
+                              if player.faction == faction)
+                data = next(entry for entry in faction_data if entry['alias'] == faction)
+                declared = set(data.get('startingTech') or ())
+                options = set(data.get('startingTechOptions') or ())
+                if declared:
+                    self.assertEqual(player.technologies,
+                                     frozenset({'md_base' if tech == 'md' else tech
+                                                for tech in declared}))
+                elif options:
+                    self.assertEqual(len(player.technologies),
+                                     int(data.get('startingTechAmount') or 0))
+                    self.assertTrue(player.technologies <= options)
+                    for alias in player.technologies:
+                        self.assertFalse(catalog[alias].get('requirements'))
+                else:
+                    self.assertFalse(player.technologies)
+
+                for alias in player.technologies:
+                    self.assertIn(alias, catalog)
+                    self.assertEqual(catalog[alias].get('source'), 'base')
+                    self.assertIn(catalog[alias].get('faction'), (None, faction))
 
     def test_ghost_home_system_routes_to_the_galaxy_through_the_gate(self):
         config, board = load_board(ROOT / 'maps/four_player.json',

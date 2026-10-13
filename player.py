@@ -8,6 +8,11 @@ from board import Planet, RESOURCES
 
 COMMAND_TOKEN_SUPPLY = 16
 
+# The faction data uses the historical Magen Defense Grid alias, while the
+# base-game card in the technology catalog is distinguished from its Codex
+# Omega replacement as ``md_base``.
+STARTING_TECH_ALIAS_OVERRIDES = {'md': 'md_base'}
+
 
 def command_tokens_in_play(player, board):
     on_sheet = sum(player.command_pools.values()) + player.pending_commands
@@ -98,7 +103,8 @@ def create_players(board, config):
         alias = entry.get('faction')
         if alias:
             faction = factions[alias]
-            starting_techs = list(faction.get('startingTech') or ())
+            starting_techs = [STARTING_TECH_ALIAS_OVERRIDES.get(alias, alias)
+                               for alias in (faction.get('startingTech') or ())]
             if not starting_techs and faction.get('startingTechOptions'):
                 from technology import technology_catalog
                 catalog = technology_catalog()
