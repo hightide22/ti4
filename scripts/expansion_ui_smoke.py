@@ -7,6 +7,7 @@ import arcade
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import BoardWindow  # noqa: E402
+from exploration import PendingExploration  # noqa: E402
 from movement import Session, Snapshot  # noqa: E402
 from player import PlanetCard  # noqa: E402
 from strategic_action import StrategyResolution  # noqa: E402
@@ -315,6 +316,74 @@ def main():
         assert infantry.location.region == Region.TRANSPORT
         assert infantry.location.carrier_id == dock.unit_id
         print('PASS: leaders/relics, exploration, Freelancers, secrets, production, Riftmeld, Naaz, legendary planets and Supercharge')
+
+        # Exploration can award a command token mid-turn. It must be allocated
+        # without ending or resetting the current player's action.
+        window.configure_game(Path(__file__).resolve().parents[1] /
+                              'maps/three_player.json', ('sol', 'hacan', 'jolnar'))
+        player = window.turn_order.active_player
+        active = player
+        owned_system = next(tile for tile in window.board.values()
+                            if player.faction in tile.planet_owners.values())
+        window.movement.activate(player, owned_system.position)
+        assert window.movement.session is not None
+        had_action = window.turn_order.action_used
+        original_tactical = player.command_pools['tactical']
+        player.pending_commands = 1
+        window.on_draw()
+        assert window.turn_button_hit is not None
+        left, right, bottom, top = window.turn_button_hit
+        window.on_mouse_press((left + right) / 2, (bottom + top) / 2,
+                              arcade.MOUSE_BUTTON_LEFT, 0)
+        assert window.immediate_command_allocation
+        window.on_draw()
+        pool_control = next(control for control in window.player_panel.controls
+                            if control.action == ('pool', 'tactical'))
+        window.on_mouse_press(pool_control.left + pool_control.width / 2,
+                              pool_control.bottom + pool_control.height / 2,
+                              arcade.MOUSE_BUTTON_LEFT, 0)
+        assert player.pending_commands == 0
+        assert player.command_pools['tactical'] == original_tactical + 1
+        assert window.turn_order.active_player is active
+        assert window.turn_order.action_used == had_action
+        assert window.movement.session is not None
+        assert not window.immediate_command_allocation
+
+        # Verify both the effect and the actual modal button for declining it.
+        tile = next(tile for tile in window.board.values()
+                    if any(planet.planet_type == 'HAZARDOUS' for planet in tile.planets))
+        planet = next(planet for planet in tile.planets
+                      if planet.planet_type == 'HAZARDOUS')
+        tile.planet_owners[planet.planet_id] = player.faction
+        if not any(card.planet.planet_id == planet.planet_id for card in player.planets):
+            player.planets.append(PlanetCard(planet, exhausted=True))
+        infantry = Unit('smoke-decline-infantry', 'infantry', player.faction,
+                        player.color_code, UnitLocation(Region.PLANET, planet.planet_id))
+        tile.units.append(infantry)
+        window.exploration.pending = PendingExploration(
+            player.faction, tile.position, planet.planet_id, 'exp1',
+            ('remove_infantry', 'decline'))
+        window.on_draw()
+        decline = next(hit for hit in window.exploration_panel.hits
+                      if hit[0] == ('resolve', 'decline'))
+        click(window, decline)
+        window.on_draw()
+        assert window.exploration.pending is None
+        assert infantry in tile.units
+        assert 'exp1' in window.exploration.discards['hazardous']
+
+        # The system inspector and player dashboard share the effective
+        # specialty/value view for exploration attachments.
+        attachment_planet = next(p for p in tile.planets
+                                 if not p.tech_specialties)
+        window.exploration.attachments[attachment_planet.planet_id] = ['biotic']
+        assert window.exploration.planet_specialties(attachment_planet) == ('BIOTIC',)
+        assert window.exploration.planet_values(attachment_planet) == (
+            attachment_planet.resources, attachment_planet.influence)
+        window.system_panel.draw(window, tile, window.width - window.sidebar)
+        assert window.labels[(attachment_planet.planet_id, 'specialties')].text == 'Technology: BIOTIC'
+        assert window.labels[(attachment_planet.planet_id, 'attachments')].text == 'Attached: Biotic'
+        print('PASS: immediate token allocation, decline interaction and visible research-facility data')
     finally:
         window.close()
 

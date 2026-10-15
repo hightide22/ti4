@@ -317,7 +317,10 @@ class ExplorationController:
             return ExplorationOutcome(selected_card, next_choices, (), False)
         card = self.catalog[pending.alias]
         self._validate_cost(player, tile, pending.planet_id, card, choice)
-        events = self._resolve(player, tile, pending.planet_id, card, choice)
+        # Declining an optional exploration effect is a real resolution: the
+        # card is discarded, but none of its costs or benefits are applied.
+        events = ([{'type': 'declined'}] if choice == 'decline' else
+                  self._resolve(player, tile, pending.planet_id, card, choice))
         self.pending = None
         if card.resolution == 'attach':
             self.attachments.setdefault(pending.planet_id, []).append(card.alias)

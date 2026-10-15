@@ -94,6 +94,7 @@ class BoardWindow(arcade.Window):
         self.configure_game(map_path, self.main_menu.active_factions)
 
     def configure_game(self, map_path, factions):
+        self.immediate_command_allocation = False
         map_config = json.loads(Path(map_path).read_text(encoding='utf-8'))
         slot_count = sum(bool(entry.get('faction')) for entry in map_config['tiles'])
         self.map_config, self.board = load_board(
@@ -1144,10 +1145,17 @@ class BoardWindow(arcade.Window):
                   left - 370, self.height - 19, 9, ACCENT if self.turn_order.action_used else MUTED, max_width=364)
         turn_bottom, turn_top = self.height - 58, self.height - 27
         pending_commands = active_player.pending_commands if active_player else 0
-        enabled = (not self.movement.session and not pending_commands and
-                   not self.turn_order.command_allocation and not self.turn_order.strategy_selection and not self.strategy.session)
+        allocation_available = (pending_commands > 0 and
+                                not self.turn_order.command_allocation and
+                                not self.turn_order.strategy_selection and
+                                not self.strategy.session)
+        enabled = (not self.immediate_command_allocation and
+                   (allocation_available or not self.movement.session) and
+                   not self.turn_order.command_allocation and
+                   not self.turn_order.strategy_selection and not self.strategy.session)
         button_label = ('STRATEGY PHASE' if self.turn_order.strategy_selection else
                         'STRATEGY ACTION' if self.strategy.session else
+                        'ALLOCATING COMMANDS' if self.immediate_command_allocation else
                         'ALLOCATE COMMANDS' if pending_commands else
                         'END TURN' if self.turn_order.action_used else 'PASS')
         if not self.bot_actor:
@@ -2523,6 +2531,17 @@ class BoardWindow(arcade.Window):
             except ValueError as error:
                 self.movement_error = str(error)
             return
+        if self.immediate_command_allocation:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                panel_control = next((control for control in reversed(self.player_panel.controls)
+                                      if control.contains(x, y)), None)
+                if (panel_control and panel_control.action[0] in ('pool', 'pending') and
+                        self.player_panel.player is self.turn_order.active_player):
+                    self.player_panel.handle_click(x, y)
+                    if self.turn_order.active_player.pending_commands == 0:
+                        self.immediate_command_allocation = False
+                        self.player_panel.source_pool = None
+            return
         if self.relic_action_panel.open:
             if button == arcade.MOUSE_BUTTON_LEFT:
                 action = self.relic_action_panel.hit_test(x, y)
@@ -2883,6 +2902,21 @@ class BoardWindow(arcade.Window):
         if self.token_context and self.token_context[0] != self.selected:
             self.token_context = None
         left = self.width - self.sidebar
+        if self.turn_button_hit and self.turn_button_hit[0] <= x <= self.turn_button_hit[1] and \
+                self.turn_button_hit[2] <= y <= self.turn_button_hit[3]:
+            if self.turn_order.active_player and self.turn_order.active_player.pending_commands:
+                self.immediate_command_allocation = True
+                self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
+                self.player_panel.source_pool = 'pending'
+            elif self.movement.session:
+                self.movement_error = 'Finish the current activation before ending your turn.'
+            elif self.movement.legendary_planet_options(self.turn_order.active_player):
+                self.legendary_modal = True
+                self.legendary_choice = None
+                self.legendary_page = 0
+            else:
+                self.pass_turn()
+            return
         if self.movement.session:
             if self.movement.session.stage == 'production' and y < self.player_panel.HEIGHT:
                 control = next((control for control in reversed(self.player_panel.controls)
@@ -3018,7 +3052,9 @@ class BoardWindow(arcade.Window):
             if self.turn_order.command_allocation and (
                     not panel_control or panel_control.action[0] not in ('pool', 'pending')):
                 return
-            if panel_control and panel_control.action[0] in ('pool', 'pending') and not self.turn_order.command_allocation and not self.smoke:
+            if (panel_control and panel_control.action[0] in ('pool', 'pending') and
+                    not self.turn_order.command_allocation and not self.immediate_command_allocation and
+                    not self.smoke):
                 return
             if panel_control and panel_control.action[0] == 'orbital_drop':
                 self.orbital_drop_mode = True
@@ -3035,6 +3071,11 @@ class BoardWindow(arcade.Window):
                     self.movement_error = str(error)
                 return
             self.player_panel.handle_click(x, y)
+            if self.immediate_command_allocation:
+                if self.turn_order.active_player.pending_commands == 0:
+                    self.immediate_command_allocation = False
+                    self.player_panel.source_pool = None
+                return
             if self.turn_order.command_allocation and self.player_panel.player and \
                     self.player_panel.player.pending_commands == 0:
                 finished = self.turn_order.finish_player_command_allocation()
@@ -3046,15 +3087,6 @@ class BoardWindow(arcade.Window):
                 self.frame_player_systems(self.turn_order.active_player)
                 self.player_panel.source_pool = None
                 self.player_panel.card_offset = 0
-            return
-        if self.turn_button_hit and self.turn_button_hit[0] <= x <= self.turn_button_hit[1] and \
-                self.turn_button_hit[2] <= y <= self.turn_button_hit[3]:
-            if self.movement.legendary_planet_options(self.turn_order.active_player):
-                self.legendary_modal = True
-                self.legendary_choice = None
-                self.legendary_page = 0
-            else:
-                self.pass_turn()
             return
         if self.control_toggle_hit and self.control_toggle_hit[0] <= x <= self.control_toggle_hit[1] and \
                 self.control_toggle_hit[2] <= y <= self.control_toggle_hit[3]:

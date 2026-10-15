@@ -246,7 +246,9 @@ class PlayerPanel:
             arcade.draw_lrbt_rectangle_outline(x, x + width, pending_bottom, pending_bottom + pending_height,
                                                ACCENT if selected_pending else BORDER, 1)
             instruction = ('AI is allocating' if not self.interactive else
-                           'choose a pool' if window.strategy.session else 'click to allocate to a pool')
+                           'choose a pool' if (window.strategy.session or
+                                               getattr(window, 'immediate_command_allocation', False))
+                           else 'click to allocate to a pool')
             window.text('pending_command_help',
                         f'New commands: {self.player.pending_commands} · {instruction}',
                         x + 8, pending_bottom + 7, 10, ACCENT if selected_pending else INK, width - 16)
@@ -269,6 +271,11 @@ class PlayerPanel:
     def draw_planet(self, window, index, x, y, width, height):
         card = self.player.planets[index]
         planet = card.planet
+        exploration = getattr(window, 'exploration', None)
+        resources, influence = (exploration.planet_values(planet) if exploration else
+                                (planet.resources, planet.influence))
+        specialties = (exploration.planet_specialties(planet) if exploration else
+                       planet.tech_specialties)
         exhausted = card.exhausted
         paying_for_production = planet.planet_id in self.production_planets
         hit_y = y
@@ -292,15 +299,26 @@ class PlayerPanel:
         suffix = 'exh' if exhausted else 'rdy'
         self.image(f'planet_cards/pc_res_{suffix}.png', x + 16, y + 15, 18)
         self.image(f'planet_cards/pc_inf_{suffix}.png', x + 70, y + 15, 18)
-        window.text(('planet_res', index), str(planet.resources), x + 30, y + 9, 14, GOLD if not exhausted else MUTED)
-        window.text(('planet_inf', index), str(planet.influence), x + 84, y + 9, 14, ACCENT if not exhausted else MUTED)
-        if planet.tech_specialties:
-            self.image(f'planet_cards/pc_tech_{planet.tech_specialties[0].lower()}_{suffix}.png', x + width - 12, y + 59, 13)
+        window.text(('planet_res', index), str(resources), x + 30, y + 9, 14, GOLD if not exhausted else MUTED)
+        window.text(('planet_inf', index), str(influence), x + 84, y + 9, 14, ACCENT if not exhausted else MUTED)
+        if specialties:
+            self.image(f'planet_cards/pc_tech_{specialties[0].lower()}_{suffix}.png', x + width - 12, y + 59, 13)
         self.controls.append(Control(('planet', index), x, hit_y, width, height))
 
     def draw_details(self, window):
         card = self.player.planets[self.hovered_planet]
         planet = card.planet
+        exploration = getattr(window, 'exploration', None)
+        resources, influence = (exploration.planet_values(planet) if exploration else
+                                (planet.resources, planet.influence))
+        specialties = (exploration.planet_specialties(planet) if exploration else
+                       planet.tech_specialties)
+        attachment_names = []
+        if exploration:
+            from exploration import RESEARCH_FACILITIES
+            attachment_names = [f'Research Facility · {RESEARCH_FACILITIES[alias].title()}'
+                                for alias in exploration.attachments.get(planet.planet_id, ())
+                                if alias in RESEARCH_FACILITIES]
         x, y = 16, self.HEIGHT + 12
         surface(x, x + 330, y, y + 125, PANEL, ACCENT)
 
@@ -309,6 +327,8 @@ class PlayerPanel:
         state = 'Exhausted' if card.exhausted else 'Ready'
         kind = 'Homeworld' if planet.faction_homeworld else (planet.planet_type or 'Planet').title()
         window.text('planet_detail_state', f'{kind} · {state}', x + 15, y + 58, 12, MUTED)
-        window.text('planet_detail_values', f'Resources {planet.resources}   Influence {planet.influence}', x + 15, y + 35, 13, ACCENT)
-        extra = ', '.join(planet.tech_specialties) or 'No technology specialty'
+        window.text('planet_detail_values', f'Resources {resources}   Influence {influence}', x + 15, y + 35, 13, ACCENT)
+        extra = ', '.join(specialties) or 'No technology specialty'
+        if attachment_names:
+            extra += ' · ' + ', '.join(attachment_names)
         window.text('planet_detail_extra', extra, x + 15, y + 13, 11, MUTED)

@@ -279,6 +279,30 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertFalse(player.planets[0].exhausted)
         self.assertFalse(tile.units)
 
+    def test_declining_hazardous_offer_keeps_infantry_and_discards_card(self):
+        tile = next(TILES.create(number, (0, 0)) for number, definition in TILES.by_number.items()
+                    if any(planet.planet_type == 'HAZARDOUS' for planet in definition.planets))
+        board = Board([tile])
+        planet = next(planet for planet in tile.planets if planet.planet_type == 'HAZARDOUS')
+        player = PlayerState('sol', 'Sol', 'blu', 4, [PlanetCard(planet, exhausted=True)])
+        tile.planet_owners[planet.planet_id] = 'sol'
+        infantry = Unit('test-infantry', 'infantry', 'sol', 'blu',
+                        UnitLocation(Region.PLANET, planet.planet_id))
+        tile.units.append(infantry)
+        engine = ExplorationController(board, [player], decks={
+            'cultural': [], 'hazardous': ['exp1'], 'industrial': [], 'frontier': []},
+            relic_deck=[])
+        outcome = engine.explore_planet(player, tile, planet.planet_id)
+
+        self.assertEqual(('remove_infantry', 'decline'), outcome.choices)
+        declined = engine.resolve_pending('decline')
+
+        self.assertEqual(({'type': 'declined'},), declined.events)
+        self.assertEqual([infantry], tile.units)
+        self.assertTrue(player.planets[0].exhausted)
+        self.assertIsNone(engine.pending)
+        self.assertIn('exp1', engine.discards['hazardous'])
+
     def test_frontier_token_is_consumed_and_card_discarded(self):
         number = next(number for number, definition in TILES.by_number.items()
                       if not definition.planets)

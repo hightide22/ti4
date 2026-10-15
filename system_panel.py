@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 
 import arcade
-from ui_theme import (CARD, INK, MUTED, ACCENT, BORDER, SELECTED, DISABLED, DANGER, ROW_HEIGHT,
+from ui_theme import (CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, DISABLED, DANGER, ROW_HEIGHT,
                       surface)
 
 from units import UNIT_TYPES, Unit, system_inventory, unit_profile
@@ -143,14 +143,34 @@ class SystemPanel:
                 text('cargo_title', 'TRANSPORTED UNITS', px, y, 11, MUTED)
                 y = self.draw_counts(window, 'cargo', inventory['cargo'], px, y - 15, width) - 10
             for planet in tile.planets:
+                exploration = getattr(window, 'exploration', None)
+                resources, influence = (exploration.planet_values(planet) if exploration else
+                                        (planet.resources, planet.influence))
+                specialties = (exploration.planet_specialties(planet) if exploration else
+                               planet.tech_specialties)
+                attachments = (exploration.attachments.get(planet.planet_id, ())
+                               if exploration else ())
                 arcade.draw_line(px, y + 6, px + width, y + 6, BORDER, 1)
                 text((planet.planet_id, 'name'), planet.name, px, y - 17, 15, INK, max_width=width - 106)
                 label = PLANET_TYPES.get(planet.planet_type, planet.planet_type or '')
                 text((planet.planet_id, 'type'), label, px + width - 92, y - 17, 10, MUTED)
                 owner = tile.planet_owners.get(planet.planet_id)
                 text((planet.planet_id, 'owner'), f'Owner: {owner.upper() if owner else "None"}', px, y - 37, 10, ACCENT if owner else MUTED)
-                text((planet.planet_id, 'values'), f'Resources: {planet.resources}   Influence: {planet.influence}', px, y - 55, 11, ACCENT)
-                y = self.draw_counts(window, planet.planet_id, inventory['planets'][planet.planet_id], px, y - 65, width) - 10
+                text((planet.planet_id, 'values'), f'Resources: {resources}   Influence: {influence}', px, y - 55, 11, ACCENT)
+                y -= 65
+                if specialties:
+                    text((planet.planet_id, 'specialties'),
+                         'Technology: ' + ', '.join(specialties), px, y - 1, 10, ACCENT, width)
+                    y -= 16
+                if attachments:
+                    from exploration import RESEARCH_FACILITIES
+                    facility_names = [RESEARCH_FACILITIES[alias].title()
+                                      for alias in attachments if alias in RESEARCH_FACILITIES]
+                    if facility_names:
+                        text((planet.planet_id, 'attachments'),
+                             'Attached: ' + ', '.join(facility_names), px, y - 1, 10, GOLD, width)
+                        y -= 16
+                y = self.draw_counts(window, planet.planet_id, inventory['planets'][planet.planet_id], px, y, width) - 10
             if not tile.planets:
                 text('no_planets', 'No planets in this system', px, y - 18, 13, MUTED)
                 y -= 45
