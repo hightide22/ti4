@@ -457,7 +457,7 @@ class MovementController:
         return [unit for unit in tile.units if unit.owner == player.faction and
                 ((unit.kind == 'fighter' and unit.location.region == Region.SPACE) or
                  (unit.kind in MovementController.GROUND_FORCES and unit.location.region in
-                  (Region.PLANET, Region.SPACE)))]
+                  (Region.PLANET, Region.SPACE, Region.SPACE_AREA)))]
 
     def _refresh_pickup_sources(self, session):
         """Expose cargo in systems traversed by at least one currently legal route."""
@@ -873,7 +873,7 @@ class MovementController:
                 source.passengers = [u for u in origin.units if u.owner == player.faction and
                                      ((u.kind == 'fighter' and u.location.region == Region.SPACE) or
                                      (u.kind in self.GROUND_FORCES and u.location.region in
-                                      (Region.PLANET, Region.SPACE)))]
+                                       (Region.PLANET, Region.SPACE, Region.SPACE_AREA)))]
 
         self._refresh_pickup_sources(session)
 
@@ -1238,7 +1238,7 @@ class MovementController:
         return [unit for unit in tile.units if unit.owner == faction and
                 ((unit.kind == 'fighter' and unit.location.region in (Region.SPACE, Region.TRANSPORT)) or
                  (unit.kind in self.GROUND_FORCES and unit.location.region in
-                  (Region.TRANSPORT, Region.SPACE)))]
+                  (Region.TRANSPORT, Region.SPACE, Region.SPACE_AREA)))]
 
     def _capacity_value(self, tile, faction):
         return sum(unit.capacity for unit in tile.units if unit.owner == faction and
@@ -1810,6 +1810,7 @@ class MovementController:
             if unit.owner == 'naaz' and unit.kind == 'mech' and \
                     unit.profile_id == 'naaz_mech_space':
                 unit.profile_id = 'naaz_mech'
+                unit.location = UnitLocation(Region.SPACE_AREA)
         retreating_player = next((player for player in self.players
                                   if player.faction == session.retreat_announced), session.player)
         if (session.skilled_retreat and session.retreat_announced not in destination.command_tokens and
@@ -2035,7 +2036,7 @@ class MovementController:
         session.combat_planet_id = None
         for unit in session.target.units:
             if (unit.owner == 'naaz' and unit.kind == 'mech' and
-                    unit.location.region in (Region.TRANSPORT, Region.SPACE)):
+                    unit.location.region in (Region.TRANSPORT, Region.SPACE_AREA, Region.SPACE)):
                 unit.location = UnitLocation(Region.SPACE)
                 unit.profile_id = 'naaz_mech_space'
         session.combat_factions = (session.player.faction,) + self.hostile_space_factions(
@@ -2137,6 +2138,7 @@ class MovementController:
             if unit.owner == 'naaz' and unit.kind == 'mech' and \
                     unit.profile_id == 'naaz_mech_space':
                 unit.profile_id = 'naaz_mech'
+                unit.location = UnitLocation(Region.SPACE_AREA)
 
     def start_ground_combat(self, session, planet_id):
         session.combat_type = 'ground'
@@ -2907,7 +2909,7 @@ class MovementController:
     def landing_forces(self, session):
         return [unit for unit in session.target.units if unit.owner == session.player.faction and
                 unit.kind in self.GROUND_FORCES and unit.location.region in
-                (Region.TRANSPORT, Region.SPACE)]
+                (Region.TRANSPORT, Region.SPACE, Region.SPACE_AREA)]
 
     def cycle_landing(self, unit_id):
         session = self.session

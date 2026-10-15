@@ -7,7 +7,7 @@ from board import ROOT, load_board
 from exploration import ExplorationController
 from movement import MovementController, MovementError, Session, Snapshot
 from player import PlanetCard, create_players
-from units import Region, Unit, UnitLocation, unit_profile
+from units import Region, Unit, UnitLocation, layout_units, unit_profile
 
 
 def game(faction='sol'):
@@ -259,9 +259,37 @@ class PokMovementEffectsTests(unittest.TestCase):
         self.assertIn(mech, movement.combat_units(session, 'naaz'))
         movement._reset_naaz_space_mechs(session)
         self.assertEqual('naaz_mech', mech.profile_id)
+        self.assertEqual(Region.SPACE_AREA, mech.location.region)
+        self.assertTrue(any(unit.unit_id == mech.unit_id
+                            for placement in layout_units(target, True)
+                            for unit in placement.units))
         session.snapshot.restore()
         self.assertIsNone(mech.profile_id)
         self.assertEqual(Region.TRANSPORT, mech.location.region)
+
+    def test_naaz_mech_in_space_area_flips_for_combat_then_remains_renderable(self):
+        board, players, movement = game('naaz')
+        naaz, sol = players[:2]
+        target = next(tile for tile in board.values() if not tile.units)
+        mech = Unit('naaz-ground-side', 'mech', 'naaz', naaz.color_code,
+                    UnitLocation(Region.SPACE_AREA))
+        enemy = Unit('sol-carrier', 'carrier', sol.faction, sol.color_code,
+                     UnitLocation(Region.SPACE))
+        target.units.extend((mech, enemy))
+        session = Session(naaz, target, {}, Snapshot.capture(board, naaz, players))
+
+        movement.start_combat(session)
+
+        self.assertEqual(Region.SPACE, mech.location.region)
+        self.assertEqual('naaz_mech_space', mech.profile_id)
+        self.assertIn(mech, movement.combat_units(session, 'naaz'))
+        movement._reset_naaz_space_mechs(session)
+        self.assertEqual(Region.SPACE_AREA, mech.location.region)
+        self.assertEqual('naaz_mech', mech.profile_id)
+        self.assertIn(mech, movement.landing_forces(session))
+        self.assertTrue(any(unit.unit_id == mech.unit_id
+                            for placement in layout_units(target, True)
+                            for unit in placement.units))
 
     def test_naaz_flagship_adds_one_combat_die_to_each_mech(self):
         board, players, movement = game('naaz')
