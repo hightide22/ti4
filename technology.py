@@ -15,14 +15,21 @@ COLORS = {'B': 'PROPULSION', 'G': 'BIOTIC', 'R': 'WARFARE', 'Y': 'CYBERNETIC'}
 COLOR_CODES = {name: code for code, name in COLORS.items()}
 FACTIONS = {'arborec', 'ghost', 'hacan', 'jolnar', 'letnev', 'l1z1x', 'mentak',
             'muaat', 'naalu', 'nekro', 'saar', 'sardakk', 'sol', 'winnu', 'xxcha',
-            'yin', 'yssaril'}
+            'yin', 'yssaril', 'argent', 'cabal', 'empyrean', 'mahact', 'naaz',
+            'nomad', 'titans', 'keleres', 'keleresm', 'keleresx', 'keleresa'}
+TECH_SOURCES = {'base', 'pok', 'codex1', 'codex4'}
+# Codex replacements are the cards used for new games. The older records stay
+# in the bundled data for compatibility, but are never offered as research.
+SUPERSEDED_TECHNOLOGIES = {'md_base': 'md', 'md_c1': 'md',
+                           'x89_base': 'x89c4', 'x89': 'x89c4'}
 
 
 @lru_cache(maxsize=1)
 def technology_catalog():
     records = json.loads((RESOURCES / 'data/technologies/pok.json').read_text(encoding='utf-8'))
     return {tech['alias']: tech for tech in records
-            if tech.get('source') == 'base' and
+            if tech.get('source') in TECH_SOURCES and
+            tech['alias'] not in SUPERSEDED_TECHNOLOGIES and
             (not tech.get('faction') or tech['faction'] in FACTIONS)}
 
 
@@ -35,6 +42,11 @@ def is_unit_upgrade(tech):
     return 'UNITUPGRADE' in tech.get('types', ())
 
 
+def _faction_can_research(player_faction, tech_faction):
+    return tech_faction in (None, player_faction) or (tech_faction == 'keleres' and
+            player_faction in ('keleresm', 'keleresx', 'keleresa'))
+
+
 def available_technologies(player):
     if player.faction == 'nekro':
         return []
@@ -42,14 +54,15 @@ def available_technologies(player):
     replacements = {tech['baseUpgrade'] for tech in catalog.values()
                     if tech.get('faction') == player.faction and tech.get('baseUpgrade')}
     return [tech for tech in catalog.values()
-            if tech.get('faction') in (None, player.faction) and tech['alias'] not in replacements]
+            if _faction_can_research(player.faction, tech.get('faction')) and
+            tech['alias'] not in replacements]
 
 
 def copy_technology(player, alias, board, allow_faction_technology=False):
-    """Grant a copied base-game technology, including its unit-upgrade effect."""
+    """Grant a copied technology, including its unit-upgrade effect."""
     tech = technology_catalog().get(alias)
-    if (tech is None or alias in player.technologies or tech.get('source') != 'base' or
-            (tech.get('faction') not in (None, player.faction) and
+    if (tech is None or alias in player.technologies or
+            (not _faction_can_research(player.faction, tech.get('faction')) and
              not allow_faction_technology)):
         raise ValueError('This technology cannot be copied.')
     player.technologies = player.technologies | {alias}
@@ -68,7 +81,7 @@ def upgrade_profile(player, kind):
     definitions, _ = unit_profiles()
     choices = [profile for profile in definitions.values()
                if profile.get('baseType') == kind and profile.get('requiredTechId') in player.technologies
-               and profile.get('faction') in (None, player.faction)]
+               and _faction_can_research(player.faction, profile.get('faction'))]
     if not choices:
         return None
     choices.sort(key=lambda profile: profile.get('faction') == player.faction, reverse=True)
@@ -81,10 +94,20 @@ def unit_upgrade(player, kind):
     for tech in available_technologies(player):
         if is_unit_upgrade(tech) and any(
                 profile.get('baseType') == kind and profile.get('requiredTechId') == tech['alias']
-                and profile.get('faction') in (None, player.faction)
+                and _faction_can_research(player.faction, profile.get('faction'))
                 for profile in definitions.values()):
             return tech
     return None
+
+
+def unit_upgrade_kind(player, tech):
+    """Return the unit type upgraded by a research card, if any."""
+    if not is_unit_upgrade(tech):
+        return None
+    definitions, _ = unit_profiles()
+    return next((profile.get('baseType') for profile in definitions.values()
+                 if profile.get('requiredTechId') == tech['alias'] and
+                 _faction_can_research(player.faction, profile.get('faction'))), None)
 
 
 def research_technology(player, alias, board):
@@ -122,7 +145,13 @@ def _specialty_coverage(missing, specialties):
     return best
 
 
-def missing_prerequisites(player, tech, specialty_planets=()):
+def _planet_specialties(card, exploration=None):
+    return (exploration.planet_specialties(card.planet) if exploration else
+            card.planet.tech_specialties)
+
+
+def missing_prerequisites(player, tech, specialty_planets=(), *, use_aida=True,
+                          exploration=None):
     """Return how many requirements remain after owned colors and chosen skips."""
     owned = Counter()
     for alias in player.technologies:
@@ -131,12 +160,30 @@ def missing_prerequisites(player, tech, specialty_planets=()):
             owned.update(COLOR_CODES[typ] for typ in card.get('types', ()) if typ in COLOR_CODES)
     required = Counter(tech.get('requirements', ''))
     missing = list((required - owned).elements())
-    specialties = [tuple(COLOR_CODES[typ] for typ in card.planet.tech_specialties
+    specialties = [tuple(COLOR_CODES[typ] for typ in _planet_specialties(card, exploration)
                          if typ in COLOR_CODES) for card in specialty_planets]
     remaining = _specialty_coverage(missing, specialties)
     if player.faction == 'jolnar' and not is_unit_upgrade(tech):
         remaining -= 1
+    if (use_aida and is_unit_upgrade(tech) and 'aida' in player.technologies and
+            'aida' not in player.exhausted_technologies):
+        remaining -= 1
     return max(0, remaining)
+
+
+def ai_development_skip_required(player, tech, specialty_planets=(), *, exploration=None):
+    """Whether researching this upgrade consumes AI Development Algorithm."""
+    if not is_unit_upgrade(tech) or 'aida' not in player.technologies or \
+            'aida' in player.exhausted_technologies:
+        return False
+    return missing_prerequisites(player, tech, specialty_planets, use_aida=False,
+                                 exploration=exploration) > 0
+
+
+def can_use_specialty_planet(player, card, *, exploration=None):
+    """Psychoarchaeology allows exhausted specialties and keeps them ready."""
+    return bool(_planet_specialties(card, exploration) and
+                (not card.exhausted or 'pa' in player.technologies))
 
 
 def unit_stats(player, kind):
@@ -153,7 +200,8 @@ def unit_stats(player, kind):
 
 
 def production_allowed(player, kind):
-    if kind not in UNIT_TYPES or (kind == 'warsun' and 'ws' not in player.technologies):
+    if kind not in UNIT_TYPES or (kind == 'warsun' and 'ws' not in player.technologies
+                                  and player.faction != 'muaat'):
         return False
     # Their space docks cannot produce infantry; the Letani Warriors'
     # production value is accounted for separately by the production picker.

@@ -214,6 +214,17 @@ class CombatPanel:
                    card_x, card_y, 138, 29, primary=True, size=9)
             self.action_hits.append((('action_cards',), card_x, card_x + 138,
                                      card_y, card_y + 29))
+        supercharge_players = [player for player in combat_players
+                               if not window.ai.is_bot(player) and
+                               window.movement.supercharge_available(player.faction)]
+        for index, player in enumerate(supercharge_players):
+            charge_x = left + width - 162 - (index + 1) * 148 if playable_cards else left + width - 162 - index * 148
+            charge_y = bottom + height - 68
+            button(window, ('combat_supercharge', player.faction),
+                   f'{player.faction.upper()} · SUPERCHARGE', charge_x, charge_y,
+                   138, 29, primary=True, size=8)
+            self.action_hits.append((('supercharge', player.faction), charge_x,
+                                     charge_x + 138, charge_y, charge_y + 29))
         if session.stage == 'space_cannon_choose_target':
             if window.ai.is_bot(session.player):
                 window.text('space_cannon_ai_target', 'AI is choosing a target…',

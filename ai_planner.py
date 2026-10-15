@@ -15,7 +15,7 @@ from ai_combat import win_probability
 from ai_economy import production_frontier
 from action_cards import canonical_action_card
 from movement import capital_ship, cargo_cost
-from units import Region, UNIT_TYPES, UnitLocation, mobile_ship, unit_profile
+from units import Region, UNIT_TYPES, Unit, UnitLocation, mobile_ship, unit_profile
 
 
 SHIP_VALUE = {'fighter': .8, 'destroyer': 1.4, 'cruiser': 2.4,
@@ -42,7 +42,7 @@ def planet_value(planet, owner, human, round_number):
 
 
 def _landing_options(ai, target, player, ground):
-    """Smallest credible force for each planet, including its own PDS."""
+    """Credible, explicitly identified landing forces for each planet."""
     options = []
     human = ai.human_faction()
     session = getattr(getattr(ai.window, 'movement', None), 'session', None)
@@ -52,36 +52,81 @@ def _landing_options(ai, target, player, ground):
         if owner == player.faction:
             continue
         enemies = [unit for unit in target.units if unit.owner != player.faction and
-                   unit.kind == 'infantry' and unit.location.planet_id == planet.planet_id]
+                   unit.kind in ('infantry', 'mech') and
+                   unit.location.planet_id == planet.planet_id]
+        structures = [unit for unit in target.units if unit.owner != player.faction and
+                      unit.kind in ('pds', 'spacedock') and
+                      unit.location.planet_id == planet.planet_id]
+        magen_owner = next((other for other in ai.window.turn_order.players
+                            if 'md' in other.technologies and
+                            any(unit.owner == other.faction for unit in structures)), None)
+        # Magen puts infantry with the structures as soon as the system is
+        # activated. Account for that before choosing an attack, but do not
+        # count them twice once activation has actually taken place.
+        if magen_owner and not (session and session.target is target):
+            existing = sum(unit.owner == magen_owner.faction and unit.kind == 'infantry'
+                           for tile in ai.window.board.values() for unit in tile.units)
+            for index in range(min(len(structures), max(0, 12 - existing))):
+                enemies.append(Unit(f'forecast-magen-{index}', 'infantry',
+                                    magen_owner.faction, magen_owner.color_code,
+                                    UnitLocation(Region.PLANET, planet.planet_id)))
         cannons = [unit for unit in target.units if unit.owner != player.faction and
                    unit.unit_id not in disabled and
                    unit.kind == 'pds' and unit.location.planet_id == planet.planet_id]
-        for count in range(1, len(ground) + 1):
-            chance = win_probability(ground[:count], enemies,
-                                     ai.window.turn_order.players, space=False,
-                                     cannons=cannons)
-            if chance >= MIN_WIN_CHANCE:
-                worth = planet_value(planet, owner, human, ai.window.turn_order.round_number)
-                options.append((planet.planet_id, count, worth, chance,
-                                bool(enemies or cannons)))
-                break
+        contested = bool(enemies or cannons)
+        worth = planet_value(planet, owner, human, ai.window.turn_order.round_number)
+        # A cheap infantry claims an undefended world; a mech should lead an
+        # assault. Keep both orders so the planner can split mixed forces over
+        # multiple planets without assigning the same unit twice.
+        orders = ((sorted(ground, key=lambda unit: (unit.kind != 'mech', unit.unit_id)),
+                   sorted(ground, key=lambda unit: (unit.kind != 'infantry', unit.unit_id)))
+                  if contested else
+                  (sorted(ground, key=lambda unit: (unit.kind != 'infantry', unit.unit_id)),))
+        seen = set()
+        for ordered in orders:
+            for count in range(1, len(ordered) + 1):
+                chance = win_probability(ordered[:count], enemies,
+                                         ai.window.turn_order.players, space=False,
+                                         cannons=cannons,
+                                         defender_faction=magen_owner.faction if magen_owner else owner,
+                                         magen_structures=bool(magen_owner))
+                if chance >= MIN_WIN_CHANCE:
+                    # Slide this credible group through the force. Another
+                    # planet may need the same number of distinct infantry.
+                    for offset in range(len(ordered) - count + 1):
+                        units = ordered[offset:offset + count]
+                        ids = tuple(unit.unit_id for unit in units)
+                        if ids in seen:
+                            continue
+                        seen.add(ids)
+                        chance = win_probability(units, enemies,
+                                                 ai.window.turn_order.players,
+                                                 space=False, cannons=cannons,
+                                                 defender_faction=magen_owner.faction if magen_owner else owner,
+                                                 magen_structures=bool(magen_owner))
+                        if chance >= MIN_WIN_CHANCE:
+                            options.append((planet.planet_id, ids, worth,
+                                            chance, contested))
+                    break
     return options
 
 
 def _landing_selection(ai, target, player, ground, cache=None):
     # A system has at most three planets: considering their subsets is cheap
     # and avoids committing all troops to one fight or a low-value free planet.
-    key = (target.position, tuple(sorted((unit.owner, unit.profile_id, unit.damaged)
+    key = (target.position, tuple(sorted((unit.unit_id, unit.owner, unit.profile_id, unit.damaged)
                                          for unit in ground)))
     if cache is not None and key in cache:
         return cache[key]
-    choices = [(0.0, 0, ())]
+    choices = [(0.0, frozenset(), ())]
     for option in _landing_options(ai, target, player, ground):
-        _, count, worth, chance, _ = option
-        choices += [(value + worth * chance, used + count, selected + (option,))
+        _, ids, worth, chance, _ = option
+        selected_ids = frozenset(ids)
+        choices += [(value + worth * chance, used | selected_ids, selected + (option,))
                     for value, used, selected in list(choices)
-                    if used + count <= len(ground)]
-    selected = max(choices, key=lambda item: (item[0], -item[1]))[2]
+                    if not selected_ids.intersection(used) and
+                    not any(earlier[0] == option[0] for earlier in selected)]
+    selected = max(choices, key=lambda item: (item[0], -len(item[1])))[2]
     if cache is not None:
         cache[key] = selected
     return selected
@@ -89,13 +134,10 @@ def _landing_selection(ai, target, player, ground, cache=None):
 
 def plan_landings(ai, target, player, ground):
     """Share the forecast's exact, minimum-force planetary assignments with AI UI."""
-    ground = sorted(ground, key=lambda unit: unit.unit_id)
     selected = _landing_selection(ai, target, player, ground)
     assignments = {}
-    offset = 0
-    for planet_id, count, _, _, _ in selected:
-        assignments.update((unit.unit_id, planet_id) for unit in ground[offset:offset + count])
-        offset += count
+    for planet_id, ids, _, _, _ in selected:
+        assignments.update((unit_id, planet_id) for unit_id in ids)
     return assignments
 
 
@@ -131,10 +173,11 @@ def _eligible_ships(ai, player, target, speed_bonus):
 def _source_ground(source, player, ships):
     ids = {unit.unit_id for unit in ships}
     aboard = [unit for unit in source.units if unit.owner == player.faction and
-              unit.kind == 'infantry' and unit.location.region == Region.TRANSPORT and
+              unit.kind in ('infantry', 'mech') and
+              unit.location.region == Region.TRANSPORT and
               unit.location.carrier_id in ids]
     available = [unit for unit in source.units if unit.owner == player.faction and
-                 unit.kind == 'infantry' and unit.location.region == Region.PLANET]
+                 unit.kind in ('infantry', 'mech') and unit.location.region == Region.PLANET]
     # Leave one defender on an owned planet when another can go instead.
     for planet in source.planets:
         defenders = [unit for unit in available
@@ -144,7 +187,7 @@ def _source_ground(source, player, ships):
     return aboard, sorted(available, key=lambda unit: unit.unit_id)
 
 
-def _manifest(ai, player, entries, ground_goal):
+def _manifest(ai, player, entries, ground_goal, *, prefer_mechs=False):
     grouped = defaultdict(list)
     for source, unit, _ in entries:
         grouped[source.position].append(unit)
@@ -156,12 +199,14 @@ def _manifest(ai, player, entries, ground_goal):
         aboard = [unit for unit in source.units if unit.owner == player.faction and
                   unit.location.region == Region.TRANSPORT and
                   unit.location.carrier_id in ids]
-        ground.extend(unit for unit in aboard if unit.kind == 'infantry')
+        ground.extend(unit for unit in aboard if unit.kind in ('infantry', 'mech'))
         fighters.extend(unit for unit in aboard if unit.kind == 'fighter')
         capacity = max(0, sum(unit.capacity for unit in ships) -
                        sum(cargo_cost(unit) for unit in aboard))
-        _, infantry = _source_ground(source, player, ships)
-        for unit in infantry:
+        _, available = _source_ground(source, player, ships)
+        available.sort(key=lambda unit: (unit.kind != ('mech' if prefer_mechs else 'infantry'),
+                                         unit.unit_id))
+        for unit in available:
             if capacity < cargo_cost(unit) or len(ground) >= ground_goal:
                 break
             passenger_ids.append(unit.unit_id)
@@ -209,7 +254,10 @@ def _counterattack_forces(ai, player, target):
                 chosen.append(entry)
                 gravity_used |= entry[2]
                 capitals += int(capital_ship(entry[1]))
-            _, ground, fighters = _manifest(ai, opponent, chosen, 4)
+            _, ground, fighters = _manifest(
+                ai, opponent, chosen, 4,
+                prefer_mechs=any(unit.kind in ('infantry', 'mech') and
+                                 unit.owner != opponent.faction for unit in target.units))
             fleet = [unit for _, unit, _ in chosen] + fighters
             if fleet:
                 forces.append((opponent, fleet, ground))
@@ -239,7 +287,7 @@ def _source_exposure(ai, player, source, units, threats):
             invasions = []
             for planet in owned:
                 guards = [unit for unit in units if unit.owner == player.faction and
-                          unit.kind == 'infantry' and
+                          unit.kind in ('infantry', 'mech') and
                           unit.location.planet_id == planet.planet_id]
                 pds = [unit for unit in cannons if unit.location.planet_id == planet.planet_id]
                 invasion = win_probability(ground, guards, ai.window.turn_order.players,
@@ -309,7 +357,7 @@ def _limits_allow_plan(ai, player, target, entries, passenger_ids):
         carrier_id = next((ship.unit_id for ship in ships if ship.capacity > 0), None)
         transfers.extend((source, unit, UnitLocation(
             Region.SPACE if unit.kind == 'fighter' else Region.TRANSPORT,
-            carrier_id=carrier_id if unit.kind == 'infantry' else None))
+            carrier_id=carrier_id if unit.kind in ('infantry', 'mech') else None))
             for unit in source.units if unit.unit_id in passenger_ids)
     for source, unit, location in transfers:
         projected[source.position].remove(unit)
@@ -341,7 +389,7 @@ def _ground_carriers(ai, player, entries, passenger_ids, independent_ids):
             cargo_cost(unit) for unit in carried
             if unit.location.carrier_id == ship.unit_id) for ship in ships}
         carriers.update(unit.location.carrier_id for unit in carried
-                        if unit.kind == 'infantry')
+                        if unit.kind in ('infantry', 'mech'))
         for unit in source.units:
             if unit.unit_id not in passenger_ids or unit.unit_id in independent_ids:
                 continue
@@ -351,7 +399,7 @@ def _ground_carriers(ai, player, entries, passenger_ids, independent_ids):
             if carrier_id is None:
                 return None
             remaining[carrier_id] -= cost
-            if unit.kind == 'infantry':
+            if unit.kind in ('infantry', 'mech'):
                 carriers.add(carrier_id)
     return carriers
 
@@ -386,7 +434,7 @@ def best_activation(ai, player):
             local = [unit for unit in target.units if unit.owner == player.faction]
             transport = sum(unit.capacity for unit in local
                             if unit.location.region == Region.SPACE)
-            infantry = sum(unit.kind == 'infantry' for unit in local)
+            infantry = sum(unit.kind in ('infantry', 'mech') for unit in local)
             fighters = sum(unit.kind == 'fighter' for unit in local)
             fleet_slots = movement.fleet_supply(player) - sum(capital_ship(unit) for unit in local)
             frontier = bool(production_frontier(movement, target, player)[0])
@@ -402,7 +450,7 @@ def best_activation(ai, player):
         if not uncaptured and not enemies:
             continue
         ground_goal = (len(uncaptured) + 2 * sum(
-            unit.kind == 'infantry' and unit.owner != player.faction
+            unit.kind in ('infantry', 'mech') and unit.owner != player.faction
             for unit in target.units) + 2 * sum(
             unit.kind == 'pds' and unit.owner != player.faction and
             unit.location.planet_id in uncaptured_ids
@@ -479,7 +527,9 @@ def best_activation(ai, player):
 def _evaluate_activation(ai, player, target, chosen, ground_goal, friendly, enemies,
                          cannons, gravity_by_id, speed_bonus, threat_cache):
     passenger_ids, ground, fighters = _manifest(
-        ai, player, chosen, ground_goal)
+        ai, player, chosen, ground_goal,
+        prefer_mechs=any(unit.kind in ('infantry', 'mech') and
+                         unit.owner != player.faction for unit in target.units))
     boosts = (sum(boosted for _, _, boosted in chosen) +
               sum(gravity_by_id.get(unit_id, False)
                   for unit_id in passenger_ids))
@@ -590,7 +640,11 @@ def _best_staging(ai, player, threat_cache):
                     escorts.sort(key=lambda unit: (-SHIP_VALUE.get(unit.kind, 0), unit.unit_id))
                     for escort_count in range(min(len(escorts), 3) + 1):
                         chosen = entries + [(source, unit, False) for unit in escorts[:escort_count]]
-                        passengers, ground, fighters = _manifest(ai, player, chosen, 6)
+                        passengers, ground, fighters = _manifest(
+                            ai, player, chosen, 6,
+                            prefer_mechs=any(unit.kind in ('infantry', 'mech') and
+                                             unit.owner != player.faction
+                                             for unit in goal.units))
                         if not ground or not _limits_allow_plan(ai, player, waypoint, chosen, passengers):
                             continue
                         fleet = [unit for _, unit, _ in chosen if UNIT_TYPES[unit.kind]['ship']] + fighters

@@ -1,6 +1,6 @@
 {
-  "name": "Official three-player galaxy",
-  "source": "Fantasy Flight Games, TI4 Learn to Play, page 22",
+  "name": "Prophecy of Kings three-player galaxy",
+  "source": "Prophecy of Kings variant of the Fantasy Flight Games TI4 Learn to Play three-player layout",
   "source_url": "https://images-cdn.fantasyflightgames.com/filer_public/c4/f0/c4f03c19-f9da-422f-b162-73f393e64a28/ti-k0289_learn_to_play_2020_web.pdf",
   "tiles": [
     {
@@ -49,7 +49,7 @@
     {
       "q": -1,
       "r": 1,
-      "id": "45"
+      "id": "79"
     },
     {
       "q": -1,
@@ -59,12 +59,12 @@
     {
       "q": -1,
       "r": -1,
-      "id": "47"
+      "id": "78"
     },
     {
       "q": -1,
       "r": -2,
-      "id": "34"
+      "id": "70"
     },
     {
       "q": 0,
@@ -74,7 +74,7 @@
     {
       "q": 0,
       "r": 1,
-      "id": "22"
+      "id": "65"
     },
     {
       "q": 0,
@@ -84,7 +84,7 @@
     {
       "q": 0,
       "r": -1,
-      "id": "42"
+      "id": "68"
     },
     {
       "q": 0,
@@ -112,32 +112,32 @@
     {
       "q": 1,
       "r": 0,
-      "id": "44"
+      "id": "67"
     },
     {
       "q": 1,
       "r": -1,
-      "id": "19"
+      "id": "66"
     },
     {
       "q": 1,
       "r": -2,
-      "id": "25"
+      "id": "64"
     },
     {
       "q": 1,
       "r": -3,
-      "id": "29"
+      "id": "76"
     },
     {
       "q": 2,
       "r": 1,
-      "id": "50"
+      "id": "77"
     },
     {
       "q": 2,
       "r": 0,
-      "id": "36"
+      "id": "74"
     },
     {
       "q": 2,
@@ -147,7 +147,7 @@
     {
       "q": 2,
       "r": -2,
-      "id": "38"
+      "id": "75"
     },
     {
       "q": 3,
@@ -165,7 +165,7 @@
     {
       "q": 3,
       "r": -1,
-      "id": "31"
+      "id": "62"
     }
   ],
   "setup": "starting_fleets"

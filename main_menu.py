@@ -24,6 +24,16 @@ FACTIONS = (
     ('xxcha', 'The Xxcha Kingdom', 'peace_accords'),
     ('yin', 'The Yin Brotherhood', 'indoctrination'),
     ('yssaril', 'The Yssaril Tribes', 'scheming'),
+    ('argent', 'The Argent Flight', 'zeal'),
+    ('cabal', "The Vuil'raith Cabal", 'devour'),
+    ('empyrean', 'The Empyrean', 'voidborn'),
+    ('mahact', 'The Mahact Gene-Sorcerers', 'edict'),
+    ('naaz', 'The Naaz-Rokha Alliance', 'distant_suns'),
+    ('nomad', 'The Nomad', 'the_company'),
+    ('titans', 'The Titans of Ul', 'terragenesis'),
+    ('keleresm', 'The Council Keleres · Mentak', 'the_tribuni'),
+    ('keleresx', 'The Council Keleres · Xxcha', 'the_tribuni'),
+    ('keleresa', 'The Council Keleres · Argent', 'the_tribuni'),
 )
 FACTION_NAMES = {alias: name for alias, name, _ in FACTIONS}
 FACTION_ICONS = {alias: f'factions/{alias}.png' for alias, _, _ in FACTIONS}
@@ -65,9 +75,21 @@ class MainMenu:
         aliases = [alias for alias, _, _ in FACTIONS]
         selected = set()
         for slot in range(self._player_count):
-            if self.factions[slot] in selected:
-                self.factions[slot] = next(alias for alias in aliases if alias not in selected)
+            if self.factions[slot] in selected or not self._valid_choice(selected, self.factions[slot]):
+                self.factions[slot] = next(alias for alias in aliases
+                                           if self._valid_choice(selected, alias))
             selected.add(self.factions[slot])
+
+    @staticmethod
+    def _valid_choice(selected, candidate):
+        from factions import validate_faction_selection
+        if candidate in selected:
+            return False
+        try:
+            validate_faction_selection((*selected, candidate))
+        except ValueError:
+            return False
+        return True
 
     def select_faction(self, slot, direction):
         if slot < 0 or slot >= self.player_count:
@@ -78,7 +100,7 @@ class MainMenu:
                               if other != slot}
         for step in range(1, len(aliases) + 1):
             choice = aliases[(index + direction * step) % len(aliases)]
-            if choice not in selected_elsewhere:
+            if self._valid_choice(selected_elsewhere, choice):
                 self.factions[slot] = choice
                 return
 

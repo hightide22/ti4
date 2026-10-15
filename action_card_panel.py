@@ -241,6 +241,16 @@ class ActionCardPanel:
         window.text('action_pending_title', f'{player.faction.upper()} · {card["name"]}',
                     left + 22, top - 34, 16, ACCENT)
         help_text = ('Choose a system for the cruiser.' if pending['effect'] == 'war_effort' else
+                     ('Capacity exceeded: choose a fighter or ground force to destroy.'
+                      if pending['overflow_kind'] == 'capacity' else
+                      'Fleet supply exceeded: choose a ship to destroy.')
+                     if pending['effect'] == 'fighter_conscription' else
+                     (f'Choose a neighboring technology to copy.' if 'technology' not in pending else
+                      f'Spend influence from ready planets and trade goods: '
+                      f'{window.action_cards._plagiarize_influence(player, pending.get("planets", set())) + pending.get("goods", 0)}/5.')
+                     if pending['effect'] == 'plagiarize' else
+                     'Choose one or two infantry to replace; finish after one if you prefer.'
+                     if pending['effect'] == 'refit' else
                      'Choose a system whose ships may pass through enemy fleets.'
                      if pending['effect'] == 'in_the_silence_of_space' else
                      'Choose the nearby Space Dock to fire.'
@@ -265,7 +275,7 @@ class ActionCardPanel:
                         left + 22, bottom + 50, 10, GOLD)
             window.text('action_pending_opponent', 'The opponent chooses a ship for each hit.',
                         left + 22, bottom + 31, 9, MUTED)
-        if pending['effect'] != 'courageous':
+        if pending['effect'] != 'courageous' and not pending.get('mandatory'):
             close_x, close_y = left + width - 98, top - 49
             button(window, 'action_pending_cancel', 'CANCEL', close_x, close_y, 76, 26, size=9)
             self.hits.append((('cancel_pending',), close_x, close_x + 76, close_y, close_y + 26))

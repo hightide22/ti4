@@ -1,9 +1,10 @@
 import unittest
+from types import SimpleNamespace
 
-from board import load_board
+from board import ROOT, load_board
 from player import PlanetCard, create_players, command_tokens_in_play
 from movement import MovementController
-from strategic_action import StrategyController
+from strategic_action import StrategyController, StrategyResolution
 from turn_order import TurnOrder
 from units import Unit, UnitLocation, Region
 
@@ -94,6 +95,54 @@ class StrategicActionTests(unittest.TestCase):
         c.pay_leadership()
         self.assertEqual(self.hacan.trade_goods, 1)
         self.assertTrue(all(not p.exhausted for p in self.hacan.planets))
+
+    def test_exploration_attachment_modifies_leadership_payment(self):
+        card = self.sol.planets[0]
+        self.controller.exploration = SimpleNamespace(
+            planet_values=lambda planet: (planet.resources, planet.influence + 2))
+        self.start_card(1)
+        self.controller.change_purchase(1)
+        self.controller.toggle_payment(card.planet.planet_id)
+        self.assertEqual(self.controller.payment(), card.planet.influence + 2)
+        self.controller.pay_leadership()
+
+    def test_hero_planet_attachment_benefits_new_controller(self):
+        planet = self.hacan.planets[0].planet
+        self.sol.hero_attachments.add(planet.planet_id)
+        self.start_card(1, owner=1)
+        values = self.controller.planet_values(self.hacan.planets[0])
+        self.assertEqual(values, (planet.resources + 3, planet.influence + 3))
+
+    def test_dynamis_core_changes_trade_replenishment(self):
+        self.controller.exploration = SimpleNamespace(
+            relics=SimpleNamespace(commodity_limit=lambda player: player.commodity_limit + 2))
+        self.start_card(5)
+        self.controller.confirm_trade()
+        self.assertEqual(self.sol.commodities, self.sol.commodity_limit + 2)
+        self.controller.accept_secondary()
+        self.assertEqual(self.hacan.commodities, self.hacan.commodity_limit + 2)
+
+    def test_psychoarchaeology_uses_exhausted_attachment_specialty(self):
+        card = self.sol.planets[0]
+        card.exhausted = True
+        self.sol.technologies |= {'pa'}
+        self.controller.exploration = SimpleNamespace(
+            planet_values=lambda planet: (planet.resources, planet.influence),
+            planet_specialties=lambda planet: ('WARFARE',))
+        self.start_card(7)
+        self.controller.select_technology('md')
+        self.controller.toggle_technology_planet(card.planet.planet_id, specialty=True)
+        self.controller.research_selected()
+        self.assertIn('md', self.sol.technologies)
+        self.assertTrue(card.exhausted, 'Psychoarchaeology does not ready a planet.')
+
+    def test_aida_exhausts_only_when_upgrade_needs_its_skip(self):
+        self.sol.technologies |= {'aida'}
+        self.start_card(7)
+        self.controller.select_technology('ac2')
+        self.controller.research_selected()
+        self.assertIn('ac2', self.sol.technologies)
+        self.assertIn('aida', self.sol.exhausted_technologies)
 
     def test_leadership_supply_includes_board_and_allows_partial_free_gain(self):
         self.sol.command_pools = dict(tactical=6, fleet=5, strategic=3)
@@ -241,7 +290,7 @@ class StrategicActionTests(unittest.TestCase):
         c.decline_secondary()
         self.assertTrue(self.turn.action_used)
 
-    def test_base_diplomacy_readies_chosen_system_then_secondary_any_planets(self):
+    def test_codex_diplomacy_readies_any_two_planets_after_system_choice(self):
         self.start_card(2, owner=1)
         for card in self.hacan.planets:
             card.exhausted = True
@@ -257,15 +306,22 @@ class StrategicActionTests(unittest.TestCase):
         self.hacan.planets.append(chosen)
         self.hacan.planets.append(stale)
         remote_system.planet_owners[chosen.planet.planet_id] = self.hacan.faction
+        stale_system.planet_owners[stale.planet.planet_id] = self.hacan.faction
         c.select_system(selected_system.position)
+        self.assertEqual(c.session.stage, 'ready_planets')
+        self.assertTrue(chosen.exhausted)
+        self.assertTrue(stale.exhausted)
+        c.toggle_ready(chosen.planet.planet_id)
+        c.toggle_ready(stale.planet.planet_id)
+        c.confirm_ready()
         self.assertEqual(c.session.stage, 'offer')
         self.assertIs(c.player, self.jolnar)
         c.decline_secondary()
         self.assertIs(c.player, self.sol)
-        self.assertTrue(all(not card.exhausted for card in self.hacan.planets
+        self.assertTrue(all(card.exhausted for card in self.hacan.planets
                             if selected_system.planet_owners.get(card.planet.planet_id) == 'hacan'))
-        self.assertTrue(chosen.exhausted, 'The primary cannot ready a planet outside the chosen system.')
-        self.assertTrue(stale.exhausted)
+        self.assertFalse(chosen.exhausted, 'Codex primary can ready a planet outside the chosen system.')
+        self.assertFalse(stale.exhausted)
         self.assertEqual(selected_system.command_tokens, {'sol', 'jolnar'})
         self.sol.planets[0].exhausted = True
         c.accept_secondary()
@@ -275,7 +331,7 @@ class StrategicActionTests(unittest.TestCase):
         c.toggle_ready(self.sol.planets[0].planet.planet_id)
         c.confirm_ready()
         self.assertFalse(self.sol.planets[0].exhausted)
-        self.assertTrue(chosen.exhausted)
+        self.assertFalse(chosen.exhausted)
 
     def test_completing_secondary_production_keeps_next_offer_and_owner_turn(self):
         self.start_card(6, owner=2)
@@ -299,6 +355,102 @@ class StrategicActionTests(unittest.TestCase):
         self.assertIs(c.player, self.hacan)
         self.assertIs(self.turn.active_player, self.jolnar)
         self.assertFalse(self.turn.action_used)
+
+
+class NaazHeroSecondaryTests(unittest.TestCase):
+    def setUp(self):
+        config, self.board = load_board(ROOT / 'maps/three_player.json',
+                                       ('naaz', 'sol', 'hacan'))
+        self.players = create_players(self.board, config)
+        self.naaz = self.players[0]
+        self.turn = TurnOrder(self.players, strategy_enabled=False)
+        self.movement = MovementController(self.board, self.players)
+        self.controller = StrategyController(self.board, self.turn, self.movement)
+        self.naaz.leaders['naazhero'].unlocked = True
+        self.naaz.leaders['naazhero'].purged = True
+        self.turn.mark_action_completed()
+
+    def test_two_different_secondaries_are_free_and_do_not_complete_another_action(self):
+        c = self.controller
+        self.naaz.command_pools['strategic'] = 0
+        c.start_hero_secondary(self.naaz, 5)
+        self.assertEqual(c.secondary_cost(), 0)
+        c.accept_secondary()
+        self.assertIsNone(c.session)
+        self.assertEqual(self.naaz.commodities, self.naaz.commodity_limit)
+        self.assertEqual(self.turn.actions_used, 1)
+        c.start_hero_secondary(self.naaz, 4)
+        c.accept_secondary()
+        c.session.structure = 'pds'
+        planet = c.buildable_planets()[0]
+        tile = c.planet_system(planet.planet.planet_id)
+        before = set(tile.command_tokens)
+        c.select_system(tile.position)
+        c.build(planet.planet.planet_id)
+        self.assertIsNone(c.session)
+        self.assertEqual(self.naaz.command_pools['strategic'], 0)
+        self.assertEqual(tile.command_tokens, before)
+        self.assertEqual(self.turn.actions_used, 1)
+        with self.assertRaises(ValueError):
+            c.start_hero_secondary(self.naaz, 4)
+        with self.assertRaises(ValueError):
+            c.start_hero_secondary(self.naaz, 7)
+
+    def test_warfare_production_does_not_spend_strategy_token(self):
+        c = self.controller
+        self.naaz.command_pools['strategic'] = 0
+        c.start_hero_secondary(self.naaz, 6)
+        c.accept_secondary()
+        tile, dock = c.home_docks()[0]
+        c.produce_at(dock.unit_id)
+        self.assertEqual(self.naaz.command_pools['strategic'], 0)
+        self.assertEqual(c.session.stage, 'production')
+        self.movement.skip_production()
+        c.poll()
+        self.assertIsNone(c.session)
+        self.assertEqual(self.turn.actions_used, 1)
+
+
+class CabalRiftmeldTests(unittest.TestCase):
+    def test_matching_captured_unit_ignores_all_upgrade_prerequisites(self):
+        config, board = load_board(ROOT / 'maps/three_player.json',
+                                   ('cabal', 'sol', 'hacan'))
+        players = create_players(board, config)
+        cabal = players[0]
+        cabal.captured_units['destroyer'] = 1
+        turn = TurnOrder(players, strategy_enabled=False)
+        movement = MovementController(board, players)
+        controller = StrategyController(board, turn, movement)
+        session = StrategyResolution(7, cabal, cabal, [], stage='technology')
+        controller.session = turn.strategy_resolution = session
+        controller.select_technology('dd2')
+        with self.assertRaisesRegex(ValueError, 'prerequisites'):
+            controller.research_selected()
+        self.assertEqual(cabal.captured_units['destroyer'], 1)
+        controller.toggle_riftmeld()
+        self.assertEqual(session.riftmeld_kind, 'destroyer')
+        controller.research_selected()
+        self.assertIn('dd2', cabal.technologies)
+        self.assertNotIn('destroyer', cabal.captured_units)
+
+
+class MuaatCommanderTests(unittest.TestCase):
+    def test_strategy_secondary_spend_gains_one_trade_good(self):
+        config, board = load_board(ROOT / 'maps/three_player.json',
+                                   ('muaat', 'sol', 'hacan'))
+        players = create_players(board, config)
+        muaat, sol, _ = players
+        muaat.leaders['muaatcommander'].unlocked = True
+        turn = TurnOrder(players, strategy_enabled=False)
+        movement = MovementController(board, players)
+        controller = StrategyController(board, turn, movement)
+        session = StrategyResolution(5, sol, muaat, [], primary=False, stage='offer')
+        controller.session = turn.strategy_resolution = session
+        tokens = muaat.command_pools['strategic']
+        goods = muaat.trade_goods
+        controller.accept_secondary()
+        self.assertEqual(muaat.command_pools['strategic'], tokens - 1)
+        self.assertEqual(muaat.trade_goods, goods + 1)
 
 
 if __name__ == '__main__':

@@ -118,7 +118,7 @@ class EconomicPlanningTests(unittest.TestCase):
         tile.units[:] = [self.unit(player, 'destroyer', i) for i in range(4)]
         other = next(t for t in ai.window.board.values() if t is not tile)
         other.units.extend(self.unit(enemy, 'fighter', i + 20) for i in range(12))
-        player.technologies = frozenset({'amd', 'ps', 'md_base'})
+        player.technologies = frozenset({'amd', 'ps', 'md'})
         player.trade_goods = 4
         with patch('game_ai.available_technologies', return_value=[
                 technology_catalog()['dd2'], technology_catalog()['gd']]):
@@ -159,10 +159,10 @@ class EconomicPlanningTests(unittest.TestCase):
         player.technologies = frozenset({'ps'})
         ai.window.turn_order.round_number = 3
         values = technology_values(player, ai.window.board, 3)
-        self.assertGreater(values['md_base'], values['nm'])
+        self.assertGreater(values['md'], values['nm'])
         with patch('game_ai.available_technologies', return_value=[
-                technology_catalog()['md_base'], technology_catalog()['nm']]):
-            self.assertEqual(ai.choose_technology(player, 0)[0], 'md_base')
+                technology_catalog()['md'], technology_catalog()['nm']]):
+            self.assertEqual(ai.choose_technology(player, 0)[0], 'md')
 
     def test_command_allocation_matches_full_fleet_and_letnev_bonus(self):
         ai, player, tile = self.game()

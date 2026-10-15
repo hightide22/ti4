@@ -17,11 +17,11 @@ from unit_view import UnitRenderer
 from system_panel import SystemPanel
 from player import PlanetCard, create_players
 from player_panel import PlayerPanel
-from movement import MovementController, MovementError
+from movement import MovementController, MovementError, Snapshot, UndoEntry
 from movement_panel import MovementPanel
 from combat_panel import CombatPanel
 from turn_order import TurnOrder
-from strategy_panel import StrategyPanel
+from strategy_panel import StrategyPanel, STRATEGY_CARDS
 from strategic_action import StrategyController
 from player_roster import PlayerRoster
 from main_menu import MainMenu
@@ -35,6 +35,16 @@ from technology import restore_infantry_on_cards
 from action_cards import ActionCardController
 from action_card_panel import ActionCardPanel
 from game_ai import GameAI
+from exploration import ExplorationController
+from exploration_panel import ExplorationPanel
+from relic_action_panel import RelicActionPanel
+from leader_panel import LeaderPanel
+from leaders import ready_leaders, refresh_leader_unlocks, record_scored_objective
+from leader_effects import (clear_round_hero_effects, use_cabal_hero,
+                            use_empyrean_hero, use_keleres_harka_hero,
+                            use_naaz_agent, use_naaz_hero, use_nomad_hero,
+                            use_titans_hero)
+from pok_factions import keleres_council_patronage, naaz_fabrication
 
 ROOT = Path(__file__).resolve().parent
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
@@ -111,6 +121,7 @@ class BoardWindow(arcade.Window):
         self.show_planet_control = True
         self.control_toggle_hit = None
         self.turn_history_size = 0
+        self.turn_history_action_count = 0
         self.last_infantry_return_turn = None
         self.turn_button_hit = None
         self.ai_pause_hit = None
@@ -122,8 +133,28 @@ class BoardWindow(arcade.Window):
                                                  deck=self.action_card_deck.cards,
                                                  turn=self.turn_order)
         self.action_card_panel = ActionCardPanel()
-        self.strategy = StrategyController(self.board, self.turn_order, self.movement, self.action_cards)
+        self.exploration = ExplorationController(self.board, self.player_panel.players,
+                                                 action_cards=self.action_cards)
+        self.exploration.secret_objectives.deal_starting_hands()
+        self.exploration_panel = ExplorationPanel()
+        self.relic_action_panel = RelicActionPanel()
+        self.leader_panel = LeaderPanel()
+        self.hero_frontier_queue = []
+        self.naaz_hero_pending = False
+        self.naaz_hero_hits = []
+        self.legendary_modal = False
+        self.legendary_choice = None
+        self.legendary_page = 0
+        self.legendary_hits = []
+        self.exploration_button_hit = None
+        self.leader_button_hit = None
+        self.movement.exploration = self.exploration
+        self.strategy = StrategyController(self.board, self.turn_order, self.movement,
+                                           self.action_cards, exploration=self.exploration)
+        self.patronage_round = 0
+        self.apply_council_patronage()
         self.ai = GameAI(self, set())
+        self.movement.exploration_is_bot = lambda player: self.smoke or self.ai.is_bot(player)
         self.transaction = TransactionController(self.board, self.player_panel.players,
                                                 self.turn_order, self.movement)
         self.transaction_panel = TransactionPanel()
@@ -410,12 +441,17 @@ class BoardWindow(arcade.Window):
         if self.smoke:
             return
         history_size = len(self.movement.history)
-        if history_size > self.turn_history_size:
+        action_count = sum(entry.counts_as_action for entry in self.movement.history)
+        if action_count > self.turn_history_action_count and self.turn_order.can_take_action:
             self.turn_order.mark_action_completed()
-        elif history_size < self.turn_history_size and self.turn_order.action_used and not self.movement.session:
+        elif action_count < self.turn_history_action_count and self.turn_order.action_used and not self.movement.session:
             self.turn_order.actions_used = max(0, self.turn_order.actions_used - 1)
-            self.turn_order.action_used = bool(self.turn_order.actions_used)
+            master_plan = self.action_cards._master_plan_waiting
+            self.turn_order.action_used = bool(
+                self.turn_order.actions_used or
+                (master_plan and master_plan[0] == self.turn_order.turn_serial))
         self.turn_history_size = history_size
+        self.turn_history_action_count = action_count
 
     def restore_infantry_on_cards(self):
         turn = self.turn_order
@@ -506,6 +542,7 @@ class BoardWindow(arcade.Window):
             self.player_panel.hovered_planet = None
         self.strategy_view = bool(self.strategy.session and self.strategy.session.stage != 'production')
         self.turn_history_size = len(self.movement.history)
+        self.turn_history_action_count = sum(entry.counts_as_action for entry in self.movement.history)
 
     def handle_strategy_action(self, action):
         if not action:
@@ -618,6 +655,8 @@ class BoardWindow(arcade.Window):
                                           else None)
             elif kind == 'mode':
                 panel.planet_mode = args[0]
+            elif kind == 'riftmeld' and research:
+                ctl.toggle_riftmeld()
             elif kind == 'goods' and research:
                 ctl.change_goods(args[0])
             elif kind == 'research' and research:
@@ -654,6 +693,177 @@ class BoardWindow(arcade.Window):
             self.movement_error = None
         except (ValueError, StopIteration) as error:
             self.movement_error = str(error) or 'This choice is no longer available.'
+
+    def exploration_decision_owner(self):
+        """The player who must answer the currently open exploration decision."""
+        if self.exploration.pending is not None:
+            return self.exploration.players[self.exploration.pending.faction]
+        if self.exploration.freelancer_offer is not None:
+            return self.exploration.players[self.exploration.freelancer_offer[0]]
+        for player in self.turn_order.players:
+            if player.faction in self.exploration.secret_objectives.pending_returns:
+                return player
+        return self.turn_order.active_player
+
+    def _component_action_snapshot(self):
+        player = self.turn_order.active_player
+        if (player is None or self.ai.is_bot(player) or not self.turn_order.can_take_action or
+                self.movement.session or self.strategy.session or self.exploration.pending or
+                self.turn_order.strategy_selection or self.turn_order.command_allocation):
+            raise ValueError('Finish the current decision before using this action.')
+        return Snapshot.capture(self.board, player, self.player_panel.players,
+                                self.action_cards, self.exploration)
+
+    def _finish_component_action(self, snapshot):
+        self.movement.history.append(UndoEntry(snapshot))
+        self.sync_turn_action()
+
+    def use_relic_action(self, alias):
+        try:
+            self._component_action_snapshot()
+            if not self.exploration.relics.is_ready(self.turn_order.active_player.faction, alias):
+                raise ValueError('This relic is unavailable.')
+            command = self.relic_action_panel.begin(alias, self.turn_order.active_player)
+            self.exploration_panel.close()
+            if command:
+                self.resolve_relic_command(command)
+            self.movement_error = None
+        except ValueError as error:
+            self.movement_error = str(error)
+
+    def resolve_relic_command(self, command):
+        if command and command[0] == 'discard_to_limit':
+            player = self.turn_order.active_player
+            chosen = command[2]
+            required = max(0, len(player.action_cards) - 7)
+            if (player.faction != command[1] or player.faction == 'yssaril' or
+                    required == 0 or len(chosen) != required or
+                    len({index for index, _ in chosen}) != required or
+                    any(index < 0 or index >= len(player.action_cards) or
+                        player.action_cards[index] != alias for index, alias in chosen)):
+                self.relic_action_panel.begin_discard(player)
+                self.movement_error = 'Choose exactly the excess action cards to discard.'
+                return
+            for index, alias in sorted(chosen, reverse=True):
+                player.action_cards.pop(index)
+                self.action_cards.discard.append(alias)
+            self.movement_error = None
+            return
+        if not command or command[0] != 'use_relic':
+            return
+        player = self.turn_order.active_player
+        snapshot = self._component_action_snapshot()
+        alias = command[1]
+        try:
+            if not self.exploration.relics.is_ready(player.faction, alias):
+                raise ValueError('This relic is unavailable.')
+            if alias == 'dynamiscore':
+                self.exploration.relics.use_dynamis_core(player)
+            elif alias == 'codex':
+                self.exploration.relics.use_codex(player, self.action_cards, command[2])
+            elif alias == 'nanoforge':
+                self.exploration.use_nano_forge(player, command[2])
+            elif alias == 'stellarconverter':
+                self.exploration.use_stellar_converter(player, command[2])
+            elif alias == 'titanprototype':
+                recipient = self.exploration.players[command[2]]
+                self.exploration.use_titan_prototype(
+                    player, recipient, planet_id=command[3], kind=command[4],
+                    planet_ids=command[5], trade_goods=command[6])
+            else:
+                raise ValueError('This relic has no action window.')
+        except (ValueError, KeyError) as error:
+            snapshot.restore()
+            self.movement_error = str(error)
+            return
+        self.relic_action_panel.close()
+        self._finish_component_action(snapshot)
+        if alias == 'codex':
+            self.relic_action_panel.begin_discard(player)
+        self.movement_error = None
+
+    def advance_hero_frontier(self):
+        while (self.hero_frontier_queue and self.exploration.pending is None and
+               self.exploration.freelancer_offer is None and
+               not self.exploration.secret_objectives.pending_returns and
+               not (self.movement.session and self.movement.session.stage in
+                    ('capacity_overflow', 'fleet_overflow'))):
+            player, position = self.hero_frontier_queue.pop(0)
+            outcome = self.exploration.explore_frontier(player, self.board[position])
+            self.movement.exploration_outcomes.append((player.faction, outcome))
+
+    def resolve_leader_action(self, command):
+        if not command:
+            return
+        if command[0] == 'record_objective':
+            player = self.turn_order.active_player
+            if player is None or self.ai.is_bot(player) or self.movement.session:
+                self.movement_error = 'Record an already scored objective for the active human player.'
+                return
+            snapshot = Snapshot.capture(self.board, player, self.player_panel.players,
+                                        self.action_cards, self.exploration)
+            record_scored_objective(player, secret=bool(command[1]))
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            self.movement_error = None
+            return
+        if command[0] != 'use':
+            return
+        alias = command[1]
+        player = self.turn_order.active_player
+        if alias == 'naazagent':
+            if (player is None or player.faction != 'naaz' or not self.turn_order.action_used or
+                    self.movement.session or self.strategy.session):
+                self.movement_error = 'Use this agent at the end of your turn.'
+                return
+            snapshot = Snapshot.capture(self.board, player, self.player_panel.players,
+                                        self.action_cards, self.exploration)
+            try:
+                faction, position, planet_id = command[2]
+                beneficiary = self.exploration.players[faction]
+                outcome = use_naaz_agent(player, beneficiary, self.exploration,
+                                         self.board[position], planet_id)
+                self.movement.exploration_outcomes.append((beneficiary.faction, outcome))
+            except (ValueError, KeyError) as error:
+                snapshot.restore()
+                self.movement_error = str(error)
+                return
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            self.leader_panel.close()
+            self.movement_error = None
+            return
+        snapshot = None
+        try:
+            snapshot = self._component_action_snapshot()
+            if alias == 'cabalhero':
+                results = use_cabal_hero(player, self.board, self.exploration.rng)
+                self.movement_error = f'Cabal hero rolled for {len(results)} ships.'
+            elif alias == 'empyreanhero':
+                tiles = use_empyrean_hero(player, self.exploration, self.board)
+                self.hero_frontier_queue = [(player, tile.position) for tile in tiles]
+                self.advance_hero_frontier()
+            elif alias == 'keleresheroharka':
+                use_keleres_harka_hero(player, self.action_card_deck)
+            elif alias == 'naazhero':
+                use_naaz_hero(player, self.exploration)
+                self.naaz_hero_pending = True
+            elif alias == 'nomadhero':
+                use_nomad_hero(player)
+            elif alias == 'titanshero':
+                use_titans_hero(player)
+            else:
+                raise ValueError('This leader has no action effect in the current phase.')
+        except (ValueError, KeyError) as error:
+            if snapshot is not None:
+                snapshot.restore()
+            self.hero_frontier_queue.clear()
+            self.movement_error = str(error)
+            return
+        self.leader_panel.close()
+        self._finish_component_action(snapshot)
+        if alias == 'keleresheroharka':
+            self.relic_action_panel.begin_discard(player)
+        if alias != 'cabalhero':
+            self.movement_error = None
 
     def handle_transaction_action(self, action):
         if not action:
@@ -735,6 +945,13 @@ class BoardWindow(arcade.Window):
 
     def pass_turn(self):
         self.strategy_view = False
+        self.hero_frontier_queue.clear()
+        self.naaz_hero_pending = False
+        self.legendary_modal = False
+        self.leader_panel.close()
+        self.relic_action_panel.close()
+        if self.exploration.pending is None:
+            self.exploration_panel.close()
         try:
             round_complete = self.turn_order.end_turn()
         except ValueError as error:
@@ -755,8 +972,11 @@ class BoardWindow(arcade.Window):
                 for card in player.planets:
                     card.exhausted = False
                 player.exhausted_technologies.clear()
+                ready_leaders(player)
+                clear_round_hero_effects(player)
                 for _ in range(2 if 'nm' in player.technologies else 1):
                     self.action_cards.draw(player, 1)
+            self.exploration.relics.ready_all()
             arborec = next((player for player in self.turn_order.players
                             if player.faction == 'arborec' and
                             any(tile.planet_owners.get(planet.planet_id) == 'arborec'
@@ -789,6 +1009,7 @@ class BoardWindow(arcade.Window):
         self.player_panel.card_offset = 0
         self.player_panel.hovered_planet = None
         self.turn_history_size = len(self.movement.history)
+        self.turn_history_action_count = sum(entry.counts_as_action for entry in self.movement.history)
         self.selected_units = ()
         self.token_context = None
         self.movement_error = None
@@ -802,10 +1023,20 @@ class BoardWindow(arcade.Window):
         self.strategy_view = False
         if not self.turn_order.command_allocation and self.turn_order.strategy_enabled:
             self.turn_order.begin_strategy_phase()
+            self.apply_council_patronage()
             self.strategy_view = True
         if self.turn_order.active_player:
             self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
             self.frame_player_systems(self.turn_order.active_player)
+
+    def apply_council_patronage(self):
+        if (not self.turn_order.strategy_selection or
+                self.patronage_round == self.turn_order.round_number):
+            return
+        for player in self.turn_order.players:
+            if player.faction.startswith('keleres'):
+                keleres_council_patronage(player, self.exploration)
+        self.patronage_round = self.turn_order.round_number
 
     def clear_round_tokens(self):
         """Remove every faction's command token from every system at round end."""
@@ -874,6 +1105,8 @@ class BoardWindow(arcade.Window):
             pending_system = self.strategy.session.pending_system
             if pending_system is not None:
                 self.outline(pending_system, (255, 230, 128), 6)
+        if self.relic_action_panel.open and self.relic_action_panel.hovered_position is not None:
+            self.outline(self.relic_action_panel.hovered_position, GOLD, 5)
         if self.unit_renderer.is_loading:
             self.text('unit_layout_loading', 'Preparing fleet layouts…',
                       (self.width - self.sidebar) / 2, self.height * .55, 13, MUTED)
@@ -946,8 +1179,15 @@ class BoardWindow(arcade.Window):
                    card_left, turn_bottom, card_right - card_left, turn_top - turn_bottom,
                    primary=bool(playable_count), selected=self.action_card_panel.open, size=9)
             self.action_card_button_hit = (card_left, card_right, turn_bottom, turn_top)
+            discovery_left = card_left - 120
+            button(self, 'discoveries_button', 'DISCOVERIES', discovery_left, turn_bottom,
+                   112, turn_top - turn_bottom,
+                   selected=self.exploration_panel.open, size=9)
+            self.exploration_button_hit = (discovery_left, discovery_left + 112,
+                                           turn_bottom, turn_top)
         else:
             self.action_card_button_hit = None
+            self.exploration_button_hit = None
         if self.bot_actor:
             self.draw_bot_sidebar(left)
         elif not self.inspector_visible:
@@ -984,6 +1224,15 @@ class BoardWindow(arcade.Window):
             if self.movement.session and self.movement.session.stage == 'production' else set())
         self.player_panel.draw(self, show_details=False, interactive=not self.bot_actor)
         self.roster.draw(self)
+        if not self.bot_actor and self.turn_order.active_player and self.turn_order.active_player.leaders:
+            leader_left = self.roster.WIDTH - 57
+            leader_bottom = self.height - 113
+            button(self, 'leaders_button', 'LDR', leader_left, leader_bottom,
+                   47, 24, selected=self.leader_panel.open, size=8)
+            self.leader_button_hit = (leader_left, leader_left + 47,
+                                      leader_bottom, leader_bottom + 24)
+        else:
+            self.leader_button_hit = None
         if self.ai.bot_factions:
             feed_left = self.roster.WIDTH + 12
             feed_right = min(feed_left + 465, left - 12)
@@ -1027,6 +1276,138 @@ class BoardWindow(arcade.Window):
             self.action_card_panel.draw(self)
         if self.star_forge_target is not None:
             self.draw_star_forge_modal()
+        if not self.exploration_panel.is_visible(self.exploration):
+            while self.movement.exploration_outcomes:
+                faction, outcome = self.movement.exploration_outcomes.pop(0)
+                player = next((p for p in self.player_panel.players if p.faction == faction), None)
+                if player is not None and not self.smoke and not self.ai.is_bot(player):
+                    self.exploration_panel.show_result(outcome)
+                    break
+        if self.exploration_panel.is_visible(self.exploration):
+            owner = self.exploration_decision_owner()
+            if owner is not None and (self.smoke or not self.ai.is_bot(owner)):
+                self.exploration_panel.draw(self, owner, self.exploration)
+        if self.leader_panel.open and self.turn_order.active_player:
+            player = self.turn_order.active_player
+            available = ('naazagent',) if (
+                player.faction == 'naaz' and self.turn_order.action_used and
+                self.movement.session is None and not self.strategy.session) else ()
+            self.leader_panel.draw(self, player, self.board, self.movement,
+                                   available_actions=available)
+        if self.relic_action_panel.open and self.turn_order.active_player:
+            self.relic_action_panel.draw(self, self.turn_order.active_player,
+                                         self.exploration, self.action_cards)
+        if self.naaz_hero_pending and self.strategy.session is None:
+            self.draw_naaz_hero_secondary_modal()
+        if self.legendary_modal:
+            self.draw_legendary_modal()
+
+    def draw_naaz_hero_secondary_modal(self):
+        from ui_theme import modal
+        width = min(620, self.width - 40)
+        height = min(420, self.height - 40)
+        left = (self.width - width) / 2
+        bottom = (self.height - height) / 2
+        modal(left, left + width, bottom, bottom + height)
+        self.text('naaz_hero_title', 'NAAZ-ROKHA HERO',
+                  left + 20, bottom + height - 38, 17, ACCENT)
+        player = self.turn_order.active_player
+        chosen = self.strategy.hero_secondary_choices.get(
+            (player.faction, self.turn_order.turn_serial), set())
+        self.text('naaz_hero_help',
+                  f'Choose up to two different strategy-card secondary abilities · {len(chosen)}/2',
+                  left + 20, bottom + height - 66, 10, MUTED, width - 40)
+        if self.movement_error:
+            self.text('naaz_hero_error', self.movement_error,
+                      left + 20, bottom + 19, 9, DANGER, width - 40)
+        self.naaz_hero_hits.clear()
+        cell_width = (width - 52) / 2
+        for card in range(1, 8):
+            row, col = divmod(card - 1, 2)
+            x = left + 20 + col * (cell_width + 12)
+            y = bottom + height - 118 - row * 67
+            available = card not in chosen
+            button(self, ('naaz_hero_card', card),
+                   f'{card} · {STRATEGY_CARDS[card][0].upper()}', x, y,
+                   cell_width, 48, primary=available, enabled=available, size=10)
+            if available:
+                self.naaz_hero_hits.append((card, x, x + cell_width, y, y + 48))
+        x, y = left + cell_width + 32, bottom + height - 118 - 3 * 67
+        button(self, 'naaz_hero_done', 'DONE', x, y, cell_width, 48, size=10)
+        self.naaz_hero_hits.append(('done', x, x + cell_width, y, y + 48))
+
+    def draw_legendary_modal(self):
+        from ui_theme import modal
+        player = self.turn_order.active_player
+        options = self.movement.legendary_planet_options(player)
+        width = min(650, self.width - 40)
+        height = min(510, self.height - 40)
+        left, bottom = (self.width - width) / 2, (self.height - height) / 2
+        modal(left, left + width, bottom, bottom + height)
+        self.text('legendary_title', 'END OF TURN · LEGENDARY PLANETS',
+                  left + 22, bottom + height - 39, 16, ACCENT)
+        self.text('legendary_help', 'Exhaust a legendary planet now, or finish your turn.',
+                  left + 22, bottom + height - 66, 10, MUTED, width - 44)
+        self.legendary_hits.clear()
+
+        def add(key, label, x, y, w, h, *, primary=False):
+            button(self, ('legendary', key), label, x, y, w, h,
+                   primary=primary, size=9)
+            self.legendary_hits.append((key, x, x + w, y, y + h))
+
+        if self.legendary_choice is None:
+            for index, source in enumerate(options):
+                label = ('PRIMOR · PLACE INFANTRY' if source == 'primor' else
+                         "HOPE'S END · MECH OR ACTION CARD")
+                add(('select', source), label, left + 22,
+                    bottom + height - 127 - index * 58, width - 44, 43,
+                    primary=True)
+            if not options:
+                self.text('legendary_empty', 'No ready legendary ability remains.',
+                          left + 22, bottom + height - 132, 11, MUTED)
+        else:
+            source, choice, count = self.legendary_choice
+            if source not in options:
+                self.legendary_choice = None
+                return
+            add(('back',), 'BACK', left + 22, bottom + height - 126, 84, 32)
+            if source == 'primor':
+                for quantity in range(1, options[source]['maximum'] + 1):
+                    add(('count', quantity), f'{quantity} INFANTRY',
+                        left + 119 + (quantity - 1) * 139,
+                        bottom + height - 126, 130, 32,
+                        primary=count == quantity)
+                destinations = options[source]['infantry']
+            else:
+                if options[source].get('card'):
+                    add(('use', source, 'card', None, 1), 'DRAW ACTION CARD',
+                        left + 119, bottom + height - 126, 180, 32, primary=True)
+                destinations = options[source].get('mech', ())
+            if destinations:
+                self.text('legendary_destination', 'CHOOSE A CONTROLLED PLANET',
+                          left + 22, bottom + height - 173, 10, GOLD)
+                pages = max(1, (len(destinations) + 7) // 8)
+                self.legendary_page = min(self.legendary_page, pages - 1)
+                for index, planet_id in enumerate(destinations[self.legendary_page * 8:
+                                                                self.legendary_page * 8 + 8]):
+                    row, col = divmod(index, 2)
+                    bx = left + 22 + col * ((width - 34) / 2)
+                    by = bottom + height - 222 - row * 46
+                    planet = next(planet for tile in self.board.values()
+                                  for planet in tile.planets if planet.planet_id == planet_id)
+                    add(('use', source, 'infantry' if source == 'primor' else 'mech',
+                         planet_id, count if source == 'primor' else 1),
+                        planet.name, bx, by, (width - 56) / 2, 35, primary=True)
+                if pages > 1:
+                    add(('page', -1), 'PREV', left + 22, bottom + 71, 75, 28)
+                    self.text('legendary_page', f'{self.legendary_page + 1}/{pages}',
+                              left + 109, bottom + 81, 9, MUTED)
+                    add(('page', 1), 'NEXT', left + 145, bottom + 71, 75, 28)
+        add(('finish',), 'FINISH TURN', left + width - 181, bottom + 23,
+            159, 37, primary=True)
+        if self.movement_error:
+            self.text('legendary_error', self.movement_error,
+                      left + 22, bottom + 29, 9, DANGER, width - 220)
 
     def draw_star_forge_modal(self):
         left, right = self.width / 2 - 220, self.width / 2 + 220
@@ -2049,6 +2430,169 @@ class BoardWindow(arcade.Window):
                     elif action[0] == 'start':
                         self.start_from_menu()
             return
+        if self.exploration_panel.is_visible(self.exploration):
+            owner = self.exploration_decision_owner()
+            if owner is None or self.ai.is_bot(owner):
+                return
+            if button != arcade.MOUSE_BUTTON_LEFT:
+                return
+            action = self.exploration_panel.hit_test(x, y)
+            if action is None and self.exploration_panel.drag_header(x, y):
+                self.dragging_modal = 'exploration'
+                return
+            try:
+                if action and action[0] == 'resolve':
+                    self.movement.resolve_exploration_choice(action[1])
+                    self.advance_hero_frontier()
+                    self.exploration_panel.close()
+                elif action and action[0] == 'freelancer_kind':
+                    self.exploration_panel.freelancer_kind = action[1]
+                elif action and action[0] == 'freelancer_planet':
+                    self.exploration_panel.freelancer_planet = action[1]
+                elif action and action[0] == 'freelancer_payment':
+                    _, mode, planet_id = action
+                    panel = self.exploration_panel
+                    chosen = (panel.freelancer_resource_planets if mode == 'resources'
+                              else panel.freelancer_influence_planets)
+                    other = (panel.freelancer_influence_planets if mode == 'resources'
+                             else panel.freelancer_resource_planets)
+                    if planet_id in chosen:
+                        chosen.remove(planet_id)
+                    else:
+                        chosen.add(planet_id)
+                        other.discard(planet_id)
+                elif action and action[0] == 'freelancer_goods':
+                    panel = self.exploration_panel
+                    panel.freelancer_trade_goods = max(0, min(
+                        owner.trade_goods, panel.freelancer_trade_goods + action[1]))
+                elif action and action[0] == 'freelancer_page':
+                    panel = self.exploration_panel
+                    pages = max(1, (sum(not card.exhausted for card in owner.planets) + 7) // 8)
+                    panel.freelancer_payment_page = max(0, min(
+                        pages - 1, panel.freelancer_payment_page + action[1]))
+                elif action and action[0] == 'freelancer_produce':
+                    panel = self.exploration_panel
+                    position = self.exploration.freelancer_offer[1]
+                    snapshot = Snapshot.capture(self.board, owner, self.player_panel.players,
+                                                self.action_cards, self.exploration)
+                    self.exploration.produce_freelancers(
+                        owner, self.movement, panel.freelancer_kind,
+                        planet_id=panel.freelancer_planet,
+                        resource_planets=panel.freelancer_resource_planets,
+                        influence_planets=panel.freelancer_influence_planets,
+                        trade_goods=panel.freelancer_trade_goods)
+                    panel.close()
+                    self.movement.check_freelancers_limits(owner, position, snapshot)
+                    self.advance_hero_frontier()
+                elif action and action[0] == 'freelancer_decline':
+                    self.exploration.produce_freelancers(owner, self.movement, None)
+                    self.exploration_panel.close()
+                    self.movement.resolve_exploration_queue()
+                    self.advance_hero_frontier()
+                elif action and action[0] == 'return_secret':
+                    self.exploration.secret_objectives.return_unscored(
+                        owner.faction, action[1])
+                    if owner.faction not in self.exploration.secret_objectives.pending_returns:
+                        self.exploration_panel.close()
+                        self.movement.resolve_exploration_queue()
+                        self.advance_hero_frontier()
+                elif action and action[0] == 'assemble_relic':
+                    snapshot = self._component_action_snapshot()
+                    player = self.turn_order.active_player
+                    self.exploration.purge_fragments_for_relic(
+                        player.faction, action[1], required=action[2])
+                    self._finish_component_action(snapshot)
+                elif action and action[0] == 'fabrication_trait':
+                    self.exploration_panel.fabrication_trait = action[1]
+                elif action and action[0] == 'fabricate_token':
+                    snapshot = self._component_action_snapshot()
+                    naaz_fabrication(self.turn_order.active_player, self.exploration,
+                                     (action[1],), board=self.board,
+                                     command_pool=action[2])
+                    self._finish_component_action(snapshot)
+                    self.exploration_panel.fabrication_trait = None
+                    self.exploration_panel.close()
+                elif action and action[0] == 'relic_action':
+                    self.use_relic_action(action[1])
+                elif (action and action[0] == 'close' and
+                      self.exploration.pending is None and
+                      self.exploration.freelancer_offer is None and
+                      not self.exploration.secret_objectives.pending_returns):
+                    self.exploration_panel.close()
+                self.movement_error = None
+            except ValueError as error:
+                self.movement_error = str(error)
+            return
+        if self.relic_action_panel.open:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                action = self.relic_action_panel.hit_test(x, y)
+                if action is None and self.relic_action_panel.drag_header(x, y):
+                    self.dragging_modal = 'relic'
+                else:
+                    command = self.relic_action_panel.handle(
+                        action, self.exploration, self.action_cards)
+                    if command:
+                        self.resolve_relic_command(command)
+            return
+        if self.leader_panel.open:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                action = self.leader_panel.hit_test(x, y)
+                if action is None and self.leader_panel.drag_header(x, y):
+                    self.dragging_modal = 'leader'
+                else:
+                    self.resolve_leader_action(self.leader_panel.handle_click(
+                        x, y, self.turn_order.active_player))
+            return
+        if self.legendary_modal:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                action = next((key for key, left, right, bottom, top in self.legendary_hits
+                               if left <= x <= right and bottom <= y <= top), None)
+                if action:
+                    try:
+                        if action[0] == 'select':
+                            self.legendary_choice = (action[1], None, 2)
+                            self.legendary_page = 0
+                        elif action[0] == 'count' and self.legendary_choice:
+                            self.legendary_choice = (self.legendary_choice[0], None, action[1])
+                        elif action[0] == 'back':
+                            self.legendary_choice = None
+                        elif action[0] == 'page':
+                            self.legendary_page = max(0, self.legendary_page + action[1])
+                        elif action[0] == 'use':
+                            self.movement.use_legendary_planet(
+                                self.turn_order.active_player, action[1],
+                                destination_planet_id=action[3], choice=action[2],
+                                count=action[4])
+                            self.legendary_choice = None
+                            if not self.movement.legendary_planet_options(
+                                    self.turn_order.active_player):
+                                self.legendary_modal = False
+                                self.pass_turn()
+                        elif action[0] == 'finish':
+                            self.legendary_modal = False
+                            self.pass_turn()
+                        self.movement_error = None
+                    except (ValueError, MovementError) as error:
+                        self.movement_error = str(error)
+            return
+        if self.naaz_hero_pending and self.strategy.session is None:
+            if button == arcade.MOUSE_BUTTON_LEFT:
+                choice = next((card for card, left, right, bottom, top in self.naaz_hero_hits
+                               if left <= x <= right and bottom <= y <= top), None)
+                if choice == 'done':
+                    self.naaz_hero_pending = False
+                elif isinstance(choice, int):
+                    try:
+                        self.strategy.start_hero_secondary(self.turn_order.active_player, choice)
+                        selected = self.strategy.hero_secondary_choices.get(
+                            (self.turn_order.active_player.faction, self.turn_order.turn_serial), set())
+                        if len(selected) >= 2:
+                            self.naaz_hero_pending = False
+                        self.sync_strategy_actor()
+                        self.movement_error = None
+                    except ValueError as error:
+                        self.movement_error = str(error)
+            return
         if self.ai.bot_factions and button == arcade.MOUSE_BUTTON_LEFT:
             if self.ai_pause_hit and all((self.ai_pause_hit[0] <= x <= self.ai_pause_hit[1],
                                           self.ai_pause_hit[2] <= y <= self.ai_pause_hit[3])):
@@ -2104,6 +2648,7 @@ class BoardWindow(arcade.Window):
                         (response[0] in ('announce_retreat', 'decline_retreat') and
                          len(response) > 1 and response[1] not in self.ai.bot_factions) or
                         (response[0] in ('assign_hit', 'spend_munitions', 'reroll_die',
+                                         'supercharge',
                                          'reroll_dice', 'fire_team_die', 'fire_team_resolve') and
                          len(response) > 1 and response[1] not in self.ai.bot_factions)))
                     if not allowed:
@@ -2247,6 +2792,8 @@ class BoardWindow(arcade.Window):
                         self.movement.assign_combat_hit(action[1], action[2])
                     elif action[0] == 'spend_munitions':
                         self.movement.spend_munitions(action[1])
+                    elif action[0] == 'supercharge':
+                        self.movement.use_supercharge(action[1])
                     elif action[0] == 'reroll_die':
                         self.movement.toggle_combat_reroll(action[1], action[2])
                     elif action[0] == 'reroll_dice':
@@ -2287,6 +2834,16 @@ class BoardWindow(arcade.Window):
                 self.action_card_button_hit[0] <= x <= self.action_card_button_hit[1] and \
                 self.action_card_button_hit[2] <= y <= self.action_card_button_hit[3]:
             self.action_card_panel.open = True
+            return
+        if button == arcade.MOUSE_BUTTON_LEFT and self.exploration_button_hit and all((
+                self.exploration_button_hit[0] <= x <= self.exploration_button_hit[1],
+                self.exploration_button_hit[2] <= y <= self.exploration_button_hit[3])):
+            self.exploration_panel.open = True
+            return
+        if button == arcade.MOUSE_BUTTON_LEFT and self.leader_button_hit and all((
+                self.leader_button_hit[0] <= x <= self.leader_button_hit[1],
+                self.leader_button_hit[2] <= y <= self.leader_button_hit[3])):
+            self.leader_panel.open = True
             return
         if button == arcade.MOUSE_BUTTON_LEFT and self.inspector_toggle_hit and all((
                 self.inspector_toggle_hit[0] <= x <= self.inspector_toggle_hit[1],
@@ -2349,6 +2906,12 @@ class BoardWindow(arcade.Window):
                             self.movement_error = None
                         elif action[0] == 'spatial_conduit':
                             self.movement.use_spatial_conduit()
+                        elif action[0] == 'scanlink':
+                            self.movement.explore_with_scanlink(action[1])
+                        elif action[0] == 'awaken_sleepers':
+                            from pok_factions import titans_awaken
+                            titans_awaken(self.movement.session.player, self.board,
+                                          self.movement.session.target)
                         elif action[0] == 'action_cards':
                             self.action_card_panel.open = True
                         elif action[0] == 'foresight':
@@ -2388,16 +2951,24 @@ class BoardWindow(arcade.Window):
                             self.movement.toggle_overflow_ship(action[1])
                         elif action[0] == 'resolve_overflow':
                             self.movement.resolve_fleet_overflow()
+                            self.advance_hero_frontier()
                             self.movement_panel.reset()
                         elif action[0] == 'capacity_overflow':
                             self.movement.toggle_capacity_overflow_unit(action[1])
                         elif action[0] == 'resolve_capacity_overflow':
                             self.movement.resolve_capacity_overflow()
+                            self.advance_hero_frontier()
                             self.movement_panel.reset()
                         elif action[0] == 'production_unit':
                             self.movement.adjust_production(action[1], action[2])
                         elif action[0] == 'production_trade_goods':
                             self.movement.change_production_trade_goods(action[1])
+                        elif action[0] == 'aida_discount':
+                            self.movement.toggle_ai_development_discount()
+                        elif action[0] == 'sar_planet':
+                            self.movement.choose_self_assembly_planet(action[1])
+                        elif action[0] == 'amalgamation':
+                            self.movement.adjust_amalgamation(action[1], action[2])
                         elif action[0] == 'establish':
                             self.movement.establish_control()
                             self.movement_panel.reset()
@@ -2410,7 +2981,7 @@ class BoardWindow(arcade.Window):
                             self.movement.skip_production()
                             self.movement_panel.reset()
                             self.selected_units = ()
-                    except MovementError as error:
+                    except ValueError as error:
                         self.movement_error = str(error)
                 self.sync_turn_action()
             return
@@ -2469,6 +3040,7 @@ class BoardWindow(arcade.Window):
                 finished = self.turn_order.finish_player_command_allocation()
                 if finished and self.turn_order.strategy_enabled:
                     self.turn_order.begin_strategy_phase()
+                    self.apply_council_patronage()
                     self.strategy_view = True
                 self.player_panel.active = self.player_panel.players.index(self.turn_order.active_player)
                 self.frame_player_systems(self.turn_order.active_player)
@@ -2477,7 +3049,12 @@ class BoardWindow(arcade.Window):
             return
         if self.turn_button_hit and self.turn_button_hit[0] <= x <= self.turn_button_hit[1] and \
                 self.turn_button_hit[2] <= y <= self.turn_button_hit[3]:
-            self.pass_turn()
+            if self.movement.legendary_planet_options(self.turn_order.active_player):
+                self.legendary_modal = True
+                self.legendary_choice = None
+                self.legendary_page = 0
+            else:
+                self.pass_turn()
             return
         if self.control_toggle_hit and self.control_toggle_hit[0] <= x <= self.control_toggle_hit[1] and \
                 self.control_toggle_hit[2] <= y <= self.control_toggle_hit[3]:
@@ -2582,6 +3159,12 @@ class BoardWindow(arcade.Window):
             if buttons & arcade.MOUSE_BUTTON_LEFT:
                 if self.dragging_modal == 'strategy_card':
                     self.strategy_panel.move_card(dx, dy)
+                elif self.dragging_modal == 'exploration':
+                    self.exploration_panel.move(dx, dy)
+                elif self.dragging_modal == 'relic':
+                    self.relic_action_panel.move(dx, dy)
+                elif self.dragging_modal == 'leader':
+                    self.leader_panel.move(dx, dy)
                 else:
                     panel = (self.strategy_panel if self.dragging_modal == 'strategy' else
                              self.technology_panel if self.dragging_modal == 'technology' else self.combat_panel)
@@ -2592,7 +3175,9 @@ class BoardWindow(arcade.Window):
             else:
                 self.dragging_modal = None
             return
-        if (self.strategy_modal or self.technology_modal or
+        if (self.exploration_panel.is_visible(self.exploration) or
+                self.relic_action_panel.open or self.leader_panel.open or
+                self.strategy_modal or self.technology_modal or
                 (self.movement.session and self.movement.session.stage in
                  ('space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won')) or
                 x < self.roster.WIDTH):
@@ -2611,6 +3196,15 @@ class BoardWindow(arcade.Window):
             x /= mouse_scale
             y /= mouse_scale
         if self.main_menu_visible:
+            return
+        if self.exploration_panel.is_visible(self.exploration):
+            self.exploration_panel.scroll_by(-scroll_y)
+            return
+        if self.relic_action_panel.open:
+            self.relic_action_panel.scroll_by(-scroll_y)
+            return
+        if self.leader_panel.open:
+            self.leader_panel.scroll_by(-scroll_y)
             return
         if self.transaction_modal:
             return
@@ -2686,6 +3280,42 @@ class BoardWindow(arcade.Window):
         if (self.ai.bot_factions and symbol == arcade.key.Z and modifiers & arcade.key.MOD_CTRL and
                 self.ai.is_bot(self.turn_order.active_player)):
             return
+        if self.exploration_panel.is_visible(self.exploration):
+            if symbol == arcade.key.Z and modifiers & arcade.key.MOD_CTRL:
+                if self.movement.undo():
+                    self.exploration_panel.close()
+                    self.hero_frontier_queue.clear()
+                    self.naaz_hero_pending = False
+                    self.movement_panel.reset()
+            elif (symbol == arcade.key.ESCAPE and
+                  self.exploration.pending is None and
+                  self.exploration.freelancer_offer is None and
+                  not self.exploration.secret_objectives.pending_returns):
+                self.exploration_panel.close()
+            return
+        if self.relic_action_panel.open:
+            if symbol == arcade.key.ESCAPE and self.relic_action_panel.alias != 'hand_discard':
+                self.relic_action_panel.close()
+            return
+        if self.leader_panel.open:
+            if symbol == arcade.key.ESCAPE:
+                self.leader_panel.close()
+            return
+        if self.legendary_modal:
+            if symbol == arcade.key.ESCAPE:
+                self.legendary_modal = False
+                self.legendary_choice = None
+            return
+        if self.naaz_hero_pending and self.strategy.session is None:
+            if symbol == arcade.key.ESCAPE:
+                self.naaz_hero_pending = False
+            elif symbol == arcade.key.Z and modifiers & arcade.key.MOD_CTRL:
+                if self.movement.undo():
+                    self.naaz_hero_pending = False
+                    self.strategy.hero_secondary_choices.pop(
+                        (self.turn_order.active_player.faction, self.turn_order.turn_serial), None)
+                    self.sync_turn_action()
+            return
         self.sync_turn_action()
         if self.transaction_modal:
             if symbol == arcade.key.ESCAPE:
@@ -2716,6 +3346,8 @@ class BoardWindow(arcade.Window):
         if symbol == arcade.key.Z and modifiers & arcade.key.MOD_CTRL:
             if (self.movement.session or self.turn_order.action_used or self.smoke) and self.movement.undo():
                 self.movement_error = None
+                self.hero_frontier_queue.clear()
+                self.naaz_hero_pending = False
                 self.movement_panel.reset()
                 self.selected_units = ()
                 self.sync_turn_action()

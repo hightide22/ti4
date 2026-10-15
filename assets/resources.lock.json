@@ -1891,6 +1891,2016 @@
       "path": "command_token/fleet_mgm.png",
       "size": 10541,
       "sha": "a22f27e14b3c877d3f9c175c795b606333f0d986"
+    },
+    {
+      "path": "hover_images/techs/generic/dark_energy_tap.png",
+      "size": 243726,
+      "sha": "a2bd64eb68515af8227890cb717c37be9beda195"
+    },
+    {
+      "path": "hover_images/techs/generic/sling_relay.png",
+      "size": 219584,
+      "sha": "0a2a2bd875e62d299f1da9bb2952112827f3aeec"
+    },
+    {
+      "path": "hover_images/techs/generic/x89_bacterial_weapon_omega_omega.png",
+      "size": 389792,
+      "sha": "709dc35783e607eaa1ba1e1b55ec37505285244a"
+    },
+    {
+      "path": "hover_images/techs/generic/psychoarchaeology.png",
+      "size": 238666,
+      "sha": "184de5155bf4c4221d25720e6ef2cbeedd214967"
+    },
+    {
+      "path": "hover_images/techs/generic/biostims.png",
+      "size": 227661,
+      "sha": "e841858647e0a32abebac8e14df8c8e79c100e7c"
+    },
+    {
+      "path": "hover_images/techs/generic/magen_defense_grid_omega_omega.png",
+      "size": 387627,
+      "sha": "967993f06d2828a32fcf32ef76dfcdee490dd42b"
+    },
+    {
+      "path": "hover_images/techs/generic/ai_development_algorithm.png",
+      "size": 248412,
+      "sha": "81c38a96020dd0fc19c0d275cb277e2b092096ed"
+    },
+    {
+      "path": "hover_images/techs/generic/self_assembly_routines.png",
+      "size": 241274,
+      "sha": "bdeea0c3e9e5d625874e358b27e701782f745b76"
+    },
+    {
+      "path": "hover_images/techs/generic/scanlink_drone_network.png",
+      "size": 217048,
+      "sha": "154364c8ee2b5e541f18c620923001701319ac05"
+    },
+    {
+      "path": "hover_images/techs/generic/predictive_intelligence.png",
+      "size": 246576,
+      "sha": "13f1084542d2101d8b9fdde9cb23fd61f589ae9d"
+    },
+    {
+      "path": "hover_images/techs/faction/strike_wing_alpha_2.jpg",
+      "size": 190428,
+      "sha": "77c9f51976a3dd246137c3faefdd540f031d4acd"
+    },
+    {
+      "path": "hover_images/techs/faction/aetherstream.jpg",
+      "size": 167086,
+      "sha": "72e84c526c5707c85cccee66e4fab79a8a11bef1"
+    },
+    {
+      "path": "hover_images/techs/faction/crimson_legionnaire_2.jpg",
+      "size": 198257,
+      "sha": "01aeb064202a3d231850bc0c24400ea467cb2ba7"
+    },
+    {
+      "path": "hover_images/techs/faction/prefab_arcologies.jpg",
+      "size": 156819,
+      "sha": "a02aba9e2886bd1fa511c7374bfc6995a8a52397"
+    },
+    {
+      "path": "hover_images/techs/faction/memoria_2.jpg",
+      "size": 182547,
+      "sha": "c281c3f5d2723adaf2d29d8855015cb60a7f7bb5"
+    },
+    {
+      "path": "hover_images/techs/faction/saturn_engine_2.jpg",
+      "size": 188834,
+      "sha": "049bf4f005bf51a08267fc7269a0333fdc86e71a"
+    },
+    {
+      "path": "hover_images/techs/faction/dimensional_tear_2.jpg",
+      "size": 183199,
+      "sha": "2fdfd5fa91d2c86f1fefbaec71c35dde20699f9a"
+    },
+    {
+      "path": "hover_images/techs/faction/aerie_hololattice.jpg",
+      "size": 176056,
+      "sha": "2fe65e65da72ca165f4e2d2cc861997c041efd5a"
+    },
+    {
+      "path": "hover_images/techs/faction/voidwatch.jpg",
+      "size": 166250,
+      "sha": "8038bb8f4996cdac8ef476d368f9e427c8c282d4"
+    },
+    {
+      "path": "hover_images/techs/faction/genetic_recombination.jpg",
+      "size": 176624,
+      "sha": "126e2ef5fa4299b8cbbfce55d19d4f15198f21c1"
+    },
+    {
+      "path": "hover_images/techs/faction/supercharge.jpg",
+      "size": 167280,
+      "sha": "b61118b3c2c84df98bf109e72dacfaaf22108ec7"
+    },
+    {
+      "path": "hover_images/techs/faction/temporal_command_suite.jpg",
+      "size": 175799,
+      "sha": "ff70d631b14b134d101a95435f1b639dabd9f395"
+    },
+    {
+      "path": "hover_images/techs/faction/heltitan_2.jpg",
+      "size": 165851,
+      "sha": "d1467a7e6f4d60ed148d2f69db81911301245610"
+    },
+    {
+      "path": "hover_images/techs/faction/vortex.jpg",
+      "size": 182481,
+      "sha": "42e23e8e4a3d048f83dd3a06a287c6c7b8cddbae"
+    },
+    {
+      "path": "hover_images/techs/faction/iihq_modernization.jpg",
+      "size": 228933,
+      "sha": "7cb3ff2352d2a8421429c293d22f6dc31e666a74"
+    },
+    {
+      "path": "hover_images/techs/faction/agency_supply_network_te.jpg",
+      "size": 227342,
+      "sha": "265988999609583aa907586c5f7d30fb92f4ff1d"
+    },
+    {
+      "path": "hover_images/techs/faction/null_ref.jpg",
+      "size": 284997,
+      "sha": "11637467fa6c1adae99f20ffbaa9c5e395d30e9d"
+    },
+    {
+      "path": "hover_images/techs/faction/error_error.jpg",
+      "size": 318622,
+      "sha": "c9dbd8e27657cd2cc9a9cdfee3520d956fc1d6c8"
+    },
+    {
+      "path": "command_token/command_bld.png",
+      "size": 5319,
+      "sha": "a8334c2a9550e4eb52042dffaa4c2b1b41a6c729"
+    },
+    {
+      "path": "command_token/command_eme.png",
+      "size": 5258,
+      "sha": "5e309c21e8c4dad72616bbf36bedb07d35d887d2"
+    },
+    {
+      "path": "command_token/command_nvy.png",
+      "size": 5233,
+      "sha": "60f17881469dba11195e34801cef222a72dda3c4"
+    },
+    {
+      "path": "command_token/command_org.png",
+      "size": 6635,
+      "sha": "7d36554c63d3744802e0a864115857aa17ce1e1e"
+    },
+    {
+      "path": "command_token/command_pnk.png",
+      "size": 6753,
+      "sha": "378c7ca413ee61e3078f488732e5b8b2d63013fc"
+    },
+    {
+      "path": "command_token/command_red.png",
+      "size": 5696,
+      "sha": "aa1d39cbf45dfb287bfb2dda0ad9367148176f87"
+    },
+    {
+      "path": "command_token/control_bld.png",
+      "size": 2484,
+      "sha": "487e9a167d9dafa193af530e2d134c0c3dc4ccb5"
+    },
+    {
+      "path": "command_token/control_eme.png",
+      "size": 2463,
+      "sha": "7b20e6c5ddb9ad088876b9097bdc1b1b262d4cb4"
+    },
+    {
+      "path": "command_token/control_nvy.png",
+      "size": 2456,
+      "sha": "ed24275d04bb0045fee114e64305add4a935d97e"
+    },
+    {
+      "path": "command_token/control_org.png",
+      "size": 3098,
+      "sha": "bb365ea1d7a525d0b85821198e116cc930667e74"
+    },
+    {
+      "path": "command_token/control_pnk.png",
+      "size": 3063,
+      "sha": "1a02ed05b512adf905990bb91e00b94e9ef4c535"
+    },
+    {
+      "path": "command_token/control_red.png",
+      "size": 2802,
+      "sha": "d7dcad57c05835a54102773845ad0d892bac1485"
+    },
+    {
+      "path": "data/abilities/other.json",
+      "size": 7576,
+      "sha": "32ae2be7c37d1b049f93dec7feb95393575691b3"
+    },
+    {
+      "path": "data/abilities/pok.json",
+      "size": 5602,
+      "sha": "d5416c67fb714933c94810346fbbf87bcc4e9568"
+    },
+    {
+      "path": "data/factions/keleres.json",
+      "size": 3798,
+      "sha": "90b8c5dc3afbd232f48e235a4a48098d868249ca"
+    },
+    {
+      "path": "data/factions/pok.json",
+      "size": 9437,
+      "sha": "158b8bd0ed47049ec9bd7008b52b81504ce2822e"
+    },
+    {
+      "path": "data/leaders/pok.json",
+      "size": 83173,
+      "sha": "8c9ae1e23c31e96c9ef3f6aecea5a6ee6067146b"
+    },
+    {
+      "path": "factions/argent.png",
+      "size": 222679,
+      "sha": "24e53820c85cb278e6dca0b04c703077d58ef5b5"
+    },
+    {
+      "path": "factions/cabal.png",
+      "size": 74453,
+      "sha": "bf370c9dfdcedd8f48247073af80dd15343f888c"
+    },
+    {
+      "path": "factions/empyrean.png",
+      "size": 234574,
+      "sha": "2e0257f3b176edf58d9ceaf1550290b3fa794e2f"
+    },
+    {
+      "path": "factions/keleresa.png",
+      "size": 33004,
+      "sha": "7258d32d67a180a67cf214eff80279fb787f7d49"
+    },
+    {
+      "path": "factions/keleresm.png",
+      "size": 33004,
+      "sha": "df1f473010a1caa1a8be4edb5f19fd35ebc7c910"
+    },
+    {
+      "path": "factions/keleresx.png",
+      "size": 33004,
+      "sha": "c1637bc6c80f16209384455ad1ff5f5d7ea0e14c"
+    },
+    {
+      "path": "factions/mahact.png",
+      "size": 68704,
+      "sha": "c9e9200df0ed6ad6b721c6aa2bf39acbb4d561d6"
+    },
+    {
+      "path": "factions/naaz.png",
+      "size": 218968,
+      "sha": "f499a96bec97baecf54c588748845d1ae90ad35e"
+    },
+    {
+      "path": "factions/nomad.png",
+      "size": 214801,
+      "sha": "8aee3ce74a8179015b65b1c09e01a629478b4546"
+    },
+    {
+      "path": "factions/titans.png",
+      "size": 286485,
+      "sha": "d5e402251df11ae43f0ead40e83ae72ca8e94a1c"
+    },
+    {
+      "path": "hover_images/leaders/codex/keleresagent.png",
+      "size": 438235,
+      "sha": "1fa432ea5aeca099ed137f4d089598f2355e35b1"
+    },
+    {
+      "path": "hover_images/leaders/codex/keleresagent_back.png",
+      "size": 382174,
+      "sha": "67fc92123197cf4a49dd678bd24a411eed83a283"
+    },
+    {
+      "path": "hover_images/leaders/codex/kelerescommander.png",
+      "size": 391267,
+      "sha": "48c4409faa112560806a674accc162a83c0282a7"
+    },
+    {
+      "path": "hover_images/leaders/codex/kelerescommander_back.png",
+      "size": 467645,
+      "sha": "30e862706f8b51e63721e4966a6a3a3ee9715ed0"
+    },
+    {
+      "path": "hover_images/leaders/codex/keleresheroharka.png",
+      "size": 443151,
+      "sha": "be0f444cab720d537ed16f9da6f8affbb1efe41b"
+    },
+    {
+      "path": "hover_images/leaders/codex/keleresheroharka_back.png",
+      "size": 433816,
+      "sha": "6bd680313c6288c0985b5806e1c10b7340ae8562"
+    },
+    {
+      "path": "hover_images/leaders/codex/keleresherokuuasi.png",
+      "size": 459392,
+      "sha": "0162665701d5e5a40a546fedae79d8148aca4420"
+    },
+    {
+      "path": "hover_images/leaders/codex/keleresherokuuasi_back.png",
+      "size": 449134,
+      "sha": "297bd9c26d9d7d37508f1fef47e14e19280586c7"
+    },
+    {
+      "path": "hover_images/leaders/codex/keleresheroodlynn.png",
+      "size": 511440,
+      "sha": "3236a5fa9549ec4ae3e8e153f0bf6ef496b294cb"
+    },
+    {
+      "path": "hover_images/leaders/codex/keleresheroodlynn_back.png",
+      "size": 451861,
+      "sha": "7a3487dcd0cb00af0965f889efbfa5ea23c158a3"
+    },
+    {
+      "path": "hover_images/leaders/codex/naaluagent.png",
+      "size": 483056,
+      "sha": "0de3fcc9de8d3f8521b32a263136dccaee3b81a8"
+    },
+    {
+      "path": "hover_images/leaders/codex/naaluagent_back.png",
+      "size": 498678,
+      "sha": "1fac6f1b3cea403a99a36c3f4691aecdde851d27"
+    },
+    {
+      "path": "hover_images/leaders/codex/naalucommander.png",
+      "size": 430607,
+      "sha": "ec031a802c1c50c9772c648ef073f93d33e47ac1"
+    },
+    {
+      "path": "hover_images/leaders/codex/naalucommander_back.png",
+      "size": 431017,
+      "sha": "ed10346a7f5c90e0e216ad508e748046f94f1ca9"
+    },
+    {
+      "path": "hover_images/leaders/codex/orlandohero.png",
+      "size": 481461,
+      "sha": "7e2a54fc4d5b409b34f62a37d17a8fb131fcf2c0"
+    },
+    {
+      "path": "hover_images/leaders/codex/orlandohero_back.png",
+      "size": 527348,
+      "sha": "8ce44d92277be010afbef517732e8c61243b5ada"
+    },
+    {
+      "path": "hover_images/leaders/codex/redcreussagent.png",
+      "size": 438376,
+      "sha": "779b9697775e1876a8f7a9ee3faa52382a24f3b9"
+    },
+    {
+      "path": "hover_images/leaders/codex/redcreussagent_back.png",
+      "size": 435269,
+      "sha": "c918341c22523488ed05083e42ccf818abaedc19"
+    },
+    {
+      "path": "hover_images/leaders/codex/redcreusscommander.png",
+      "size": 404651,
+      "sha": "a4f37056a60e9e4cb1e93b93ae628dcc14e4e42c"
+    },
+    {
+      "path": "hover_images/leaders/codex/redcreusscommander_back.png",
+      "size": 418080,
+      "sha": "06729ab4f80c4bcddbbf6463e91f07b416815f4d"
+    },
+    {
+      "path": "hover_images/leaders/codex/redcreusshero.png",
+      "size": 420750,
+      "sha": "722af457e81f6bf3a73a18ba9a8b74cdea0f54f0"
+    },
+    {
+      "path": "hover_images/leaders/codex/redcreusshero_back.png",
+      "size": 439323,
+      "sha": "ddb7338ead8830d59b8ce79600a921313b8d5274"
+    },
+    {
+      "path": "hover_images/leaders/codex/xxchahero.png",
+      "size": 407402,
+      "sha": "0ead81c6e341bcef41ab8e989349561c55872925"
+    },
+    {
+      "path": "hover_images/leaders/codex/xxchahero_back.png",
+      "size": 454340,
+      "sha": "849d1a2065b51a428e1c3f1f13b9ae036c85696d"
+    },
+    {
+      "path": "hover_images/leaders/codex/yincommander.png",
+      "size": 472299,
+      "sha": "6c1146b4bf640e2c8841a0e684b6fbceab3d2f99"
+    },
+    {
+      "path": "hover_images/leaders/codex/yincommander_back.png",
+      "size": 414237,
+      "sha": "1db9430c21752473577e322f5e9a3a39d2bbc40c"
+    },
+    {
+      "path": "hover_images/leaders/codex/yinhero.png",
+      "size": 422440,
+      "sha": "2baa288d2f982a5ace58fa00ef7beceffd2f6e74"
+    },
+    {
+      "path": "hover_images/leaders/codex/yinhero_back.png",
+      "size": 408680,
+      "sha": "39fe726d0002fde023ba77ee09f737f21e2c50a7"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/arborecagent.png",
+      "size": 545014,
+      "sha": "f63492c6e57a4d30c9dbdbcacbe753347e209436"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/arborecagent_back.png",
+      "size": 435991,
+      "sha": "a0f122148205021547bfac51ee420c8807049781"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/argentagent.png",
+      "size": 602097,
+      "sha": "cc1583c2a91daeedcbeac12ee9c27e4a0e267646"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/argentagent_back.png",
+      "size": 464754,
+      "sha": "7cd3aa43064c41b03baed457b95a51810cb13f33"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/cabalagent.png",
+      "size": 569976,
+      "sha": "0f259f1d2ddc5a43785e1e9303fe5c05b38b6898"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/cabalagent_back.png",
+      "size": 484611,
+      "sha": "e0b6103dde5edb2defa40f7ea0caf6146663a519"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/empyreanagent.png",
+      "size": 504206,
+      "sha": "abe75d362b83903cb7ecd063247c9c374a39388e"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/empyreanagent_back.png",
+      "size": 365991,
+      "sha": "8104324bb40c3cbf69087a3c53819295b573a942"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/ghostagent.png",
+      "size": 587256,
+      "sha": "77e51dfc6944af4066f585eec95e507d0ebe25c2"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/ghostagent_back.png",
+      "size": 476478,
+      "sha": "fedcc9b87ef7d2b6c55f8837661b28ac8da16d0e"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/hacanagent.png",
+      "size": 544930,
+      "sha": "c7c5d0a41314c7ce7ab80b94509a911c51a4dcdf"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/hacanagent_back.png",
+      "size": 469839,
+      "sha": "27f2d75bd0cd241f1416768edf052aa755446407"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/jolnaragent.png",
+      "size": 530839,
+      "sha": "f90e9b054be59cae033bd42e660c8767fc878ba7"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/jolnaragent_back.png",
+      "size": 467717,
+      "sha": "0471d5aa82339a39545f49aba23d713a10c20bce"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/l1z1xagent.png",
+      "size": 553357,
+      "sha": "75c59ea9e4334d5b3d703cbe770a6a3be49a1de5"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/l1z1xagent_back.png",
+      "size": 430944,
+      "sha": "011f024ddca17868c7fea0b742257a49b1ccfc03"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/letnevagent.png",
+      "size": 480717,
+      "sha": "891486fe4e099f16c4b6b48de21c676bdacb6df0"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/letnevagent_back.png",
+      "size": 432375,
+      "sha": "5156954c674f7d3ea298d0c9d2b257d77639286d"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/mahactagent.png",
+      "size": 567345,
+      "sha": "faec90a47bf3c7a55b00b36adadde8f4aaf05a8b"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/mahactagent_back.png",
+      "size": 387562,
+      "sha": "f3df6069be3e9f34a31903122c80518aa3b41e2e"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/mentakagent.png",
+      "size": 530619,
+      "sha": "4649b09d649c096f1c9c0e2b0631b7a09c66f4c9"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/mentakagent_back.png",
+      "size": 447791,
+      "sha": "fe1b3f05f544b8b930a488026c5f1ebe3fc099a5"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/muaatagent.png",
+      "size": 555155,
+      "sha": "9f315d72848654ffeac3de9d3684cf4179930190"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/muaatagent_back.png",
+      "size": 466227,
+      "sha": "208e4638a4ec8bf30ac2cbac4955c951c531a211"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/naazagent.png",
+      "size": 490340,
+      "sha": "d109ddfa0910a4c120579af1de052900fb17e9f7"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/naazagent_back.png",
+      "size": 394311,
+      "sha": "b39cd8bdb9195754ea016d5a25450d4653acd1f4"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/nekroagent.png",
+      "size": 551680,
+      "sha": "fdbd4ac41c7d06971cf15ea95912dae58a8559bc"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/nekroagent_back.png",
+      "size": 418593,
+      "sha": "438041c28f7a6638bd22f8b906ab667f3fd55b8a"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/nomadagentartuno.png",
+      "size": 497294,
+      "sha": "902d170d38166c51592d794c14d9bfc1ab8b5ab7"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/nomadagentartuno_back.png",
+      "size": 439169,
+      "sha": "e7045b098fb518280ff3c7983e5351d9b8c96efc"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/nomadagentmercer.png",
+      "size": 550081,
+      "sha": "239e3f44f4c8a049011f5770ea0ef8c2d8413a6e"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/nomadagentmercer_back.png",
+      "size": 438626,
+      "sha": "ac03051eb92c903a117e5e348b90e86388d9a157"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/nomadagentthundarian.png",
+      "size": 511476,
+      "sha": "e5b4fb13b95fe3fb22c2ab4e254fd51d6b73ad35"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/nomadagentthundarian_back.png",
+      "size": 435681,
+      "sha": "f30f55490cd458beea9d3f6fc14f7132062b73f1"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/saaragent.png",
+      "size": 530869,
+      "sha": "ab254535c2018c253d5f07ce471a81a9a1cc57cc"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/saaragent_back.png",
+      "size": 453952,
+      "sha": "e45f0698df9e8dea251c5b522db942470b36e7a3"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/sardakkagent.png",
+      "size": 501063,
+      "sha": "f41630e006fdde1a235e75b00c6a984ac10ec0a8"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/sardakkagent_back.png",
+      "size": 450439,
+      "sha": "72307d6bb793e97963c6d896722b939c140bfbd9"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/solagent.png",
+      "size": 569538,
+      "sha": "7a4372c7c3bc25443e552e2b95230e9c0d966eb1"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/solagent_back.png",
+      "size": 437254,
+      "sha": "7c9308e35ead50cc7ce5f7a83f8afd005028fcb9"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/titansagent.png",
+      "size": 533903,
+      "sha": "b1a7d05ed763aa3015786664700df1537644428b"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/titansagent_back.png",
+      "size": 449565,
+      "sha": "54cef2b80331fe54439cb737b13b5a311f338b68"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/winnuagent.png",
+      "size": 500978,
+      "sha": "acb2a4c23ac0b73998cb78203624a7ac999a9638"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/winnuagent_back.png",
+      "size": 452300,
+      "sha": "209ca7cf30ec03dbac8d4d1c493e7be4009f7210"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/xxchaagent.png",
+      "size": 550817,
+      "sha": "794040e8c90c203f9d56da4c5579c271af49fe91"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/xxchaagent_back.png",
+      "size": 438482,
+      "sha": "df95b5993db7d7f83aaf48c65fdaecc4be8436b5"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/yssarilagent.png",
+      "size": 499413,
+      "sha": "0a634c32d1c3810ee732910bf055c20fac8ae0d6"
+    },
+    {
+      "path": "hover_images/leaders/pok/agents/yssarilagent_back.png",
+      "size": 439111,
+      "sha": "a9a045264feaa7384be831687a4f580035357faf"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/arboreccommander.png",
+      "size": 541417,
+      "sha": "529c9e9ff323152594e6fe93f8ff1161aa412125"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/arboreccommander_back.png",
+      "size": 432723,
+      "sha": "62d2e301398bc0860b44bbba112977c077042454"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/argentcommander.png",
+      "size": 532364,
+      "sha": "20ba0a41bfb9fd29a29bd660afce440f7071d37b"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/argentcommander_back.png",
+      "size": 452433,
+      "sha": "974c5b1c18a58c5d6c9acd623037c0caf120ba5b"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/cabalcommander.png",
+      "size": 556512,
+      "sha": "508cb2213a509bc4ce2f0649b5bd8685a6d5b8ee"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/cabalcommander_back.png",
+      "size": 477327,
+      "sha": "738056153815037b115748df8de335ce81569b8f"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/empyreancommander.png",
+      "size": 532151,
+      "sha": "26b5451128aa43c2b2323a99093c0ce738878af8"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/empyreancommander_back.png",
+      "size": 402400,
+      "sha": "ed237f25296b7051ac3785de232b44351cf82c57"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/ghostcommander.png",
+      "size": 579937,
+      "sha": "5f74a4091ecdd8a33bc75d4837765759a40b507f"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/ghostcommander_back.png",
+      "size": 430184,
+      "sha": "4a70a5c1adff1f6f26267d5544dd12fa58c6f8a2"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/hacancommander.png",
+      "size": 562431,
+      "sha": "b9678e9e6b6122f0cbaafcc1996d97535b5c4e8e"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/hacancommander_back.png",
+      "size": 442293,
+      "sha": "bb6bfee18e0f9e51580a81d1f47c3320351a8b6d"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/l1z1xcommander.png",
+      "size": 534349,
+      "sha": "e9df22bffa18357895c82ed371814f3a003f3e40"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/l1z1xcommander_back.png",
+      "size": 463865,
+      "sha": "a9adeb337475d51187a7ae6f252c07fa8e38200c"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/letnevcommander.png",
+      "size": 449946,
+      "sha": "24685e8fd7ad48d02087254aff3c28a04dc7f7d0"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/letnevcommander_back.png",
+      "size": 422604,
+      "sha": "ea2ca5aa3aa469c322d71a2f8591f8dc38ef066e"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/mahactcommander.png",
+      "size": 582176,
+      "sha": "ed408672ac6677e65c6b4b0ae1b7d91a0ed681bb"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/mahactcommander_back.png",
+      "size": 473901,
+      "sha": "a0f0197a0639fe52986710f22ea9efa482dcddf4"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/mentakcommander.png",
+      "size": 519827,
+      "sha": "9403e83175be6c10699c35f56dcfd7cf459b5cc7"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/mentakcommander_back.png",
+      "size": 455339,
+      "sha": "9d98098844bc6a67ded745370227036c675f45e3"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/muaatcommander.png",
+      "size": 474025,
+      "sha": "28cc81cae9d37e13563a1e2cb5e63f08948a2fcd"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/muaatcommander_back.png",
+      "size": 427910,
+      "sha": "3313fceff2da4256df22fcbcdb7da53b883e4613"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/naazcommander.png",
+      "size": 494199,
+      "sha": "8ec77303346c4971d35eb555aca821d1de561233"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/naazcommander_back.png",
+      "size": 397204,
+      "sha": "dd528357f07359e6a94aae43e645b580570e00c7"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/nekrocommander.png",
+      "size": 584574,
+      "sha": "697ae1805ba050ab0755e130e5102879ba298fdb"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/nekrocommander_back.png",
+      "size": 506226,
+      "sha": "a825a9a31095d7ed0b59185e480513b3afe1deea"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/nomadcommander.png",
+      "size": 397298,
+      "sha": "ada8fe3bbf70a894e9da6c2ff8504e5765b56e90"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/nomadcommander_back.png",
+      "size": 438669,
+      "sha": "e3a75f00f45d320fcceb2d07bbc33f2d1cc4d147"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/saarcommander.png",
+      "size": 490032,
+      "sha": "61a3406278907d3f350bae3e518642a2268aadc1"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/saarcommander_back.png",
+      "size": 436678,
+      "sha": "e2d7c75f20cab9f4a715084d08317f66e65f268f"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/sardakkcommander.png",
+      "size": 545925,
+      "sha": "d866265a9b4c4e0b444b0e5094adba294fc464bb"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/sardakkcommander_back.png",
+      "size": 443846,
+      "sha": "11a1a4a591bba5a09efb328749f798bb320a7bc4"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/solcommander.png",
+      "size": 549637,
+      "sha": "77c96b4dee99746c2d3ec86035b663111f2dee7c"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/solcommander_back.png",
+      "size": 478965,
+      "sha": "52fd6bfc3b0baf692377a0fb74e3a5ced3cd04fe"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/titanscommander.png",
+      "size": 467826,
+      "sha": "558b4e20a8e75d063cc94a9fcf5524be4a634f4b"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/titanscommander_back.png",
+      "size": 432988,
+      "sha": "a10c8de2e738a9086ce48e1e2f987f5b9b2cfb57"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/winnucommander.png",
+      "size": 501370,
+      "sha": "5333c34de34b66afaaade9b44fc5c5ab669cbd8f"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/winnucommander_back.png",
+      "size": 457053,
+      "sha": "9044179e27e052b21b2eaaeddb2fb7ebc397bede"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/xxchacommander.png",
+      "size": 545352,
+      "sha": "130d558a97a9ed1f052b9ecd6c8f51ce53e94438"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/xxchacommander_back.png",
+      "size": 470956,
+      "sha": "3c7884fc3c3d0ca89c9a5179f384bdeec7f095d0"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/yssarilcommander.png",
+      "size": 557065,
+      "sha": "daf994a63e17a0eb98c58762f74a9dbd4e717d28"
+    },
+    {
+      "path": "hover_images/leaders/pok/commanders/yssarilcommander_back.png",
+      "size": 436321,
+      "sha": "403321c8c2924f3713ba71592dcbe22eb18d2b23"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/arborechero.png",
+      "size": 489409,
+      "sha": "7c9d43b7a6dc50f19c2a259f9a89649baead4b08"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/arborechero_back.png",
+      "size": 419480,
+      "sha": "214be697f324dc54879d9304d36d20008f6ce0bc"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/argenthero.png",
+      "size": 519495,
+      "sha": "8871901c653fa7cb53e774e9d8d94a68dc85bae3"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/argenthero_back.png",
+      "size": 415746,
+      "sha": "81df0401f0c4900feba7b2c73e5804573e926ecf"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/cabalhero.png",
+      "size": 569228,
+      "sha": "288ec09a53e39d22366ddc79f79bf7081f42820b"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/cabalhero_back.png",
+      "size": 427660,
+      "sha": "1a96b7b82775ff526bacea5b36931c316ab65e24"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/empyreanhero.png",
+      "size": 526458,
+      "sha": "a62e91e19dd396d342834029f96f9d16da15c01b"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/empyreanhero_back.png",
+      "size": 421177,
+      "sha": "9d42c624d6de58a7ad665bd54b976bdb32c2ef15"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/ghosthero.png",
+      "size": 540180,
+      "sha": "d902ec5e7d9ee186e278bb3f995716cb85435b3b"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/ghosthero_back.png",
+      "size": 441337,
+      "sha": "f46cccc84e547d3b0d24234d2dc90c1e59abd282"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/hacanhero.png",
+      "size": 548461,
+      "sha": "9ce7cc3147f7096b0ec3eba5d1e8559cc338ae6f"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/hacanhero_back.png",
+      "size": 447965,
+      "sha": "fae7706b53d9e6d69e1758e802147ca445098417"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/jolnarhero.png",
+      "size": 497842,
+      "sha": "f854056d09b66dad319ed96d1cae05e26dc202c1"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/jolnarhero_back.png",
+      "size": 462894,
+      "sha": "11b78d96e760327898da282526effb96a5f04c2a"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/l1z1xhero.png",
+      "size": 545264,
+      "sha": "4afb338a8c5a9c9b58d22f2abca5531f31f80e19"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/l1z1xhero_back.png",
+      "size": 443622,
+      "sha": "c2f58f053d4d6356c2c4331f9a078252ecaf31c0"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/letnevhero.png",
+      "size": 505846,
+      "sha": "03858468b4ba3053de8e0dcf4365d21abf777bd5"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/letnevhero_back.png",
+      "size": 427373,
+      "sha": "e71525625f00bcd4b11cc250100ea855de72ac32"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/mahacthero.png",
+      "size": 544008,
+      "sha": "9fabf0f20160451438336e7d56457ac30cc67266"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/mahacthero_back.png",
+      "size": 441479,
+      "sha": "3625db1c9aa06892be5584ee22c2817f7dceb9e0"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/mentakhero.png",
+      "size": 522297,
+      "sha": "c5e9a85816150cb86689307f38c6a450339004af"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/mentakhero_back.png",
+      "size": 414987,
+      "sha": "1ca78fb400a50bb690f6dc2c647a81d003da9510"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/muaathero.png",
+      "size": 549358,
+      "sha": "1da96af0ddde5d31e1ae3df13f28344155f6215b"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/muaathero_back.png",
+      "size": 441728,
+      "sha": "5e406b3257f9bd71e980c6ce1471aeaa08304f04"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/naaluhero.png",
+      "size": 551710,
+      "sha": "41b82f78599b9c233c681f131b9322c36703ac62"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/naazhero.png",
+      "size": 549177,
+      "sha": "3910d6a81195648b70ee5d32c8d23f74f373cda7"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/naazhero_back.png",
+      "size": 419806,
+      "sha": "28376ad531d7367cac894419b51c4eb35006f115"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/nekrohero.png",
+      "size": 600754,
+      "sha": "66503c5488824bc80eb7e61901a66a74bc51773e"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/nekrohero_back.png",
+      "size": 446177,
+      "sha": "20575599dd12c069a0f1a7324c030a94fc270577"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/nomadhero.png",
+      "size": 509623,
+      "sha": "666a932149dd5d2d3a1ee55f2bb922fa6e1c2198"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/nomadhero_back.png",
+      "size": 437761,
+      "sha": "4e269ce99458aea7a54766a08df3a97da515ae64"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/saarhero.png",
+      "size": 470943,
+      "sha": "d526ad88ddd1d9758e909a54d7a2d9719728aa62"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/saarhero_back.png",
+      "size": 457469,
+      "sha": "66798bd891a38bb4be8f4f18f591691b4b75f4e0"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/sardakkhero.png",
+      "size": 560703,
+      "sha": "e19c6a933ef8b9e2ac9664b860763c5ddad3bed5"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/sardakkhero_back.png",
+      "size": 473590,
+      "sha": "900e56a30ea4bd7eea45c3facb12996f02fc92ab"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/solhero.png",
+      "size": 528802,
+      "sha": "797ff9e0827ead0d34dd5749c8c7f853f2213bd9"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/solhero_back.png",
+      "size": 445565,
+      "sha": "5e2912dd5f137a82668460fe437fc9245a14a2d1"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/titanshero.png",
+      "size": 564090,
+      "sha": "33173edf11ce4c04b7aba4cc757fe7526171e8c6"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/titanshero_back.png",
+      "size": 397504,
+      "sha": "62a10154701e21475111d1dbdd4db1a79dd7a869"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/winnuhero.png",
+      "size": 541633,
+      "sha": "ab616fdfdd868e140a6a78321ca62196570280a7"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/winnuhero_back.png",
+      "size": 513845,
+      "sha": "ffe5212ef1b84d47a59b1041ba5c42b32adcd946"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/yssarilhero.png",
+      "size": 544634,
+      "sha": "470c2d22395cdf271324d366a0e6ffbf91e266c4"
+    },
+    {
+      "path": "hover_images/leaders/pok/heroes/yssarilhero_back.png",
+      "size": 465049,
+      "sha": "fb20e2313cb6c062beb08ba83422b154c7407dc6"
+    },
+    {
+      "path": "hover_images/leaders/te/jolnarcommander.png",
+      "size": 404811,
+      "sha": "22abbdb9e52d4350085af3e49267091c4d7ac107"
+    },
+    {
+      "path": "hover_images/leaders/te/yinagent.png",
+      "size": 493514,
+      "sha": "62fdd6c0de557a5dfd96bdd8bd354652e63c7e40"
+    },
+    {
+      "path": "hover_images/leaders/te/yinagent_back.png",
+      "size": 385272,
+      "sha": "e6961551a605602a54b3745b94de16b86b9f6691"
+    },
+    {
+      "path": "planets/abaddon.json",
+      "size": 738,
+      "sha": "a091585b179398cc4a0eae3a8b09327669a22b2b"
+    },
+    {
+      "path": "planets/accoen.json",
+      "size": 3051,
+      "sha": "586215f407ad0b485ac2765ebd06ddba9f5a49ca"
+    },
+    {
+      "path": "planets/acheron.json",
+      "size": 1009,
+      "sha": "3d7cf88078228819f3e5f1a3bb2aeb8d02243ed6"
+    },
+    {
+      "path": "planets/alioprima.json",
+      "size": 3157,
+      "sha": "4ccb274055cf7d8099fdbc39b073e8b431f74299"
+    },
+    {
+      "path": "planets/ang.json",
+      "size": 3008,
+      "sha": "81a91d79c051b239be5a002be785b324d647696a"
+    },
+    {
+      "path": "planets/archonrenk.json",
+      "size": 2927,
+      "sha": "27eebfaf651e94821f953f4b0a867d9641e3a83c"
+    },
+    {
+      "path": "planets/archontauk.json",
+      "size": 2919,
+      "sha": "79de515546c94eb7e3d2d904b7b32965c7ecc3b8"
+    },
+    {
+      "path": "planets/archonvail.json",
+      "size": 3283,
+      "sha": "a15c36469e085db27444e06381c2e7a776e880fb"
+    },
+    {
+      "path": "planets/arcturus.json",
+      "size": 3110,
+      "sha": "b400c55480dda8d2d5fc09ff61d5c752e66632d0"
+    },
+    {
+      "path": "planets/ashtroth.json",
+      "size": 734,
+      "sha": "64950444edb8670405a109f8c46d7e8964e89eb2"
+    },
+    {
+      "path": "planets/atlas.json",
+      "size": 2951,
+      "sha": "0ba56ae8a20049c01eef4145fe61ad59b48a572c"
+    },
+    {
+      "path": "planets/avar.json",
+      "size": 2925,
+      "sha": "1b3e31edec11c216fb73e135cf7a7e48f5438725"
+    },
+    {
+      "path": "planets/avark.json",
+      "size": 2745,
+      "sha": "1c90608d898825a1f7254b42e03fd885e4046e9a"
+    },
+    {
+      "path": "planets/bakal.json",
+      "size": 2834,
+      "sha": "3e1c39a24ee32d8a3d3c5324417ef0d93e9cc2dd"
+    },
+    {
+      "path": "planets/cealdri.json",
+      "size": 3109,
+      "sha": "b1eada4842991dda67676566f554be8757df36e9"
+    },
+    {
+      "path": "planets/cormund.json",
+      "size": 3024,
+      "sha": "c425a4fb61588387d9655db32d82ace6328739d3"
+    },
+    {
+      "path": "planets/elysium.json",
+      "size": 3193,
+      "sha": "1b37491da975d24347e680e73ea56ea021497a0e"
+    },
+    {
+      "path": "planets/everra.json",
+      "size": 3019,
+      "sha": "a90fbb10f67d5343542d988b42905c781cb2a964"
+    },
+    {
+      "path": "planets/hopesend.json",
+      "size": 2395,
+      "sha": "c75f4badd33abc82b91ca1081bf40832e9a1f6cd"
+    },
+    {
+      "path": "planets/ixth.json",
+      "size": 3100,
+      "sha": "203af62cfcc65feeca0416d7ba2eb9ed1ca03c8e"
+    },
+    {
+      "path": "planets/jeolir.json",
+      "size": 3257,
+      "sha": "032f578e80aeacd0e944d5f2a37840f598dfc595"
+    },
+    {
+      "path": "planets/kraag.json",
+      "size": 2971,
+      "sha": "36a560df4c477833aebca259fd1dc166bfa2c317"
+    },
+    {
+      "path": "planets/lisis.json",
+      "size": 3015,
+      "sha": "1410c48ef935263acca8339a57dc3f827686e447"
+    },
+    {
+      "path": "planets/loki.json",
+      "size": 705,
+      "sha": "e80419b83ebc18ccc384eeea9a36cb3dfd7c4f27"
+    },
+    {
+      "path": "planets/mollprimusk.json",
+      "size": 2961,
+      "sha": "4c3ecad597e823878d379e3dfbc6cc3d011f4d69"
+    },
+    {
+      "path": "planets/naazir.json",
+      "size": 3022,
+      "sha": "83a3e343acd346f362edc28f1db41479b0d74e2f"
+    },
+    {
+      "path": "planets/perimeter.json",
+      "size": 3183,
+      "sha": "6b1f94ab007641536807234ac3e043bd3afb68ee"
+    },
+    {
+      "path": "planets/primor.json",
+      "size": 3194,
+      "sha": "ccf035538446dd739afb8fdb52249c0aabd0dc32"
+    },
+    {
+      "path": "planets/rigeli.json",
+      "size": 753,
+      "sha": "534c06e595402e2ab2ba9ae77a94176a190e7623"
+    },
+    {
+      "path": "planets/rigelii.json",
+      "size": 806,
+      "sha": "840e8d800de322363f076963752f1ec5a2994204"
+    },
+    {
+      "path": "planets/rigeliii.json",
+      "size": 809,
+      "sha": "d474387dbd18ad2c94c99080dbaa13bf31c089c3"
+    },
+    {
+      "path": "planets/rokha.json",
+      "size": 3080,
+      "sha": "3db3d9f6d029abada546e1ac30f033850e71b064"
+    },
+    {
+      "path": "planets/semlore.json",
+      "size": 3125,
+      "sha": "4ab55cede1d6ad50000f22c27124d2600b48af90"
+    },
+    {
+      "path": "planets/siig.json",
+      "size": 2960,
+      "sha": "ed35e9a851bc99600efa0714efd011fee4b9cd82"
+    },
+    {
+      "path": "planets/thedark.json",
+      "size": 3145,
+      "sha": "048d7597f6a7d69a31afeebb25e7369202adf3df"
+    },
+    {
+      "path": "planets/valk.json",
+      "size": 2871,
+      "sha": "9a6a421272c8559ede67095fc00a51caad07066f"
+    },
+    {
+      "path": "planets/valkk.json",
+      "size": 2726,
+      "sha": "c3c50a0b63b8a3668ae5d8b4aeb926a419769243"
+    },
+    {
+      "path": "planets/vegamajor.json",
+      "size": 3217,
+      "sha": "be5111cc31edaf3639a1ed24c753134d798e775a"
+    },
+    {
+      "path": "planets/vegaminor.json",
+      "size": 3217,
+      "sha": "9be15ffea004ee8e56acd8a858a345f5630ea556"
+    },
+    {
+      "path": "planets/velnor.json",
+      "size": 3051,
+      "sha": "9dcec4f9236517231197500ab0b60df5ca32dd41"
+    },
+    {
+      "path": "planets/vorhal.json",
+      "size": 3072,
+      "sha": "7f1e93198993cb650cfd61d29e2fde3914b88a94"
+    },
+    {
+      "path": "planets/xanhact.json",
+      "size": 3072,
+      "sha": "5c36a35fdb03f930df2885099b1ff164236bde3a"
+    },
+    {
+      "path": "planets/ylir.json",
+      "size": 2906,
+      "sha": "3d3c2f997964a2c122da3944bf9e6e953220fcd4"
+    },
+    {
+      "path": "planets/ylirk.json",
+      "size": 2730,
+      "sha": "aa2cc7996df4027fd00d8ad8dea4ecd236d66145"
+    },
+    {
+      "path": "systems/52.json",
+      "size": 719,
+      "sha": "ff3eb2ecb7141cff31a9c78961c56f3cb8a19148"
+    },
+    {
+      "path": "systems/53.json",
+      "size": 683,
+      "sha": "757143296366d5b5f7fd270a35eb4fca2a3db440"
+    },
+    {
+      "path": "systems/54.json",
+      "size": 830,
+      "sha": "d492ea0b6a0feded00bd2ac4cb01fb9fc63b952f"
+    },
+    {
+      "path": "systems/55.json",
+      "size": 728,
+      "sha": "0d179b21e43a7e5d2ef9861abe1c620ff2a2eed7"
+    },
+    {
+      "path": "systems/56.json",
+      "size": 774,
+      "sha": "7629a2a8fa9f4fb12d9ed15aad3ed8a68ec40419"
+    },
+    {
+      "path": "systems/57.json",
+      "size": 843,
+      "sha": "0f5f3a52a53b84f2d752815510d4ca4ca761424d"
+    },
+    {
+      "path": "systems/58.json",
+      "size": 887,
+      "sha": "5a128259c4b4338a35a7cc3c09657b8d6aa8af70"
+    },
+    {
+      "path": "systems/59.json",
+      "size": 737,
+      "sha": "76fa85bc3678d4877abbdcbf7eeea0df0dacc89e"
+    },
+    {
+      "path": "systems/60.json",
+      "size": 705,
+      "sha": "76c2e3c2f53ac0cda645e99069b412926b731dd6"
+    },
+    {
+      "path": "systems/61.json",
+      "size": 564,
+      "sha": "1fc3f7f3b34de9a9d012b9adcff5cba9e60a131e"
+    },
+    {
+      "path": "systems/62.json",
+      "size": 739,
+      "sha": "41a3876e6270bf966545edb125c1078783a70ef5"
+    },
+    {
+      "path": "systems/63.json",
+      "size": 625,
+      "sha": "549e31ce88ff071d8f70b55216d745b34d5d9b84"
+    },
+    {
+      "path": "systems/64.json",
+      "size": 714,
+      "sha": "52152fe089b24822b116f1f9ff9b2a7c76a4afdb"
+    },
+    {
+      "path": "systems/65.json",
+      "size": 660,
+      "sha": "7c6ab0f65f9682b9f03987ecb6753d0a09c7f37f"
+    },
+    {
+      "path": "systems/66.json",
+      "size": 736,
+      "sha": "5e3e73dad27ee9a9e841bba497427482370b8784"
+    },
+    {
+      "path": "systems/67.json",
+      "size": 761,
+      "sha": "1ebab741c0ee413bf60603df63eb57dae53034d5"
+    },
+    {
+      "path": "systems/68.json",
+      "size": 685,
+      "sha": "f799500e2f7b4c6f80c0a22b2b8fbd310d755afe"
+    },
+    {
+      "path": "systems/69.json",
+      "size": 961,
+      "sha": "557a90672b0e83ea2d8c32983f75b1a656ccf0de"
+    },
+    {
+      "path": "systems/70.json",
+      "size": 708,
+      "sha": "a56333b2e8dc9fc1dd842b6ba1754572d7d41e61"
+    },
+    {
+      "path": "systems/71.json",
+      "size": 784,
+      "sha": "8a913fade378c4aa965d9f1f6d0e2cde051ba472"
+    },
+    {
+      "path": "systems/72.json",
+      "size": 737,
+      "sha": "15efa32b2ba49cf7c4da8708530af65024e1dd05"
+    },
+    {
+      "path": "systems/73.json",
+      "size": 792,
+      "sha": "a241b6be2a4eb2a6655e9a135350b26ec1150435"
+    },
+    {
+      "path": "systems/74.json",
+      "size": 877,
+      "sha": "74a220d16909c78f5c2aa4656f49050b28147ee9"
+    },
+    {
+      "path": "systems/75.json",
+      "size": 855,
+      "sha": "734c529a60156625bccb8f741dd00896904d3c33"
+    },
+    {
+      "path": "systems/76.json",
+      "size": 906,
+      "sha": "82afd7a7f165e4aca5497c1ccd456abaa7ed659b"
+    },
+    {
+      "path": "systems/77.json",
+      "size": 683,
+      "sha": "da8d1bfe22b58017a8f6d6a17caa391614c68a62"
+    },
+    {
+      "path": "systems/78.json",
+      "size": 683,
+      "sha": "cee73fcc39e36a96422c6ef09d8a287bfd052543"
+    },
+    {
+      "path": "systems/79.json",
+      "size": 856,
+      "sha": "f0c521537d74bbc6594d13bd0a376f8e0968eaf1"
+    },
+    {
+      "path": "systems/80.json",
+      "size": 688,
+      "sha": "34a7db4d177a41f97f7f3bafe7b748d5dec59e90"
+    },
+    {
+      "path": "systems/81.json",
+      "size": 669,
+      "sha": "10427bf34a6584819b636891d8e3c5d50dab7aeb"
+    },
+    {
+      "path": "systems/92new.json",
+      "size": 676,
+      "sha": "ccee0f87dbde297bc9a532e81a6514652bb7406e"
+    },
+    {
+      "path": "systems/93new.json",
+      "size": 679,
+      "sha": "5b7655c4011e797753a378bacda429d96c856096"
+    },
+    {
+      "path": "systems/94new.json",
+      "size": 628,
+      "sha": "c2ebaf257d2da4442e8158f825efdfa5ead57844"
+    },
+    {
+      "path": "tiles/52_Ixth.png",
+      "size": 179982,
+      "sha": "b058b9a053169d6a3f8eb85cbedbe98785af1594"
+    },
+    {
+      "path": "tiles/53_Arcturus.png",
+      "size": 184648,
+      "sha": "f2e0b04d237ebf0eee1d691de661719b46d02b1b"
+    },
+    {
+      "path": "tiles/54_Acheron.png",
+      "size": 190174,
+      "sha": "07ff305d7b8572b862544e4b1e9eac5740743206"
+    },
+    {
+      "path": "tiles/55_Elysium.png",
+      "size": 184420,
+      "sha": "7705579eee6d70df4afb1ffb5fc7a103883f8acd"
+    },
+    {
+      "path": "tiles/56_TheDark.png",
+      "size": 197643,
+      "sha": "3ac704f1c80f2301ee5e009523fd1747d9174703"
+    },
+    {
+      "path": "tiles/57_Naazir.png",
+      "size": 194836,
+      "sha": "1e6dbe52bed129fe697582f66f0512c5d6b5bc9f"
+    },
+    {
+      "path": "tiles/58_Ylir.png",
+      "size": 195070,
+      "sha": "660da1bc30cbab82152841947c660c41d6be469c"
+    },
+    {
+      "path": "tiles/59_ArchonVail.png",
+      "size": 182412,
+      "sha": "0dcb3763b3bc23060b4f1fa2311025dd2b1e4585"
+    },
+    {
+      "path": "tiles/60_Perimeter.png",
+      "size": 183614,
+      "sha": "78cb43ca3f458a0dbb1ec69e34e8c24354084d87"
+    },
+    {
+      "path": "tiles/61_Ang.png",
+      "size": 179405,
+      "sha": "37b3be5d267a9904baa21cd5655f3569f207b830"
+    },
+    {
+      "path": "tiles/62_SemLore.png",
+      "size": 185299,
+      "sha": "9cbf2e32b486b7ec1cc0ca6ad61192ef1e04a79e"
+    },
+    {
+      "path": "tiles/63_Vorhal.png",
+      "size": 180654,
+      "sha": "058fbaaf9f19ac2492473a5e3408b7dedb869b2d"
+    },
+    {
+      "path": "tiles/64_Atlas.png",
+      "size": 185961,
+      "sha": "2a9a353332148b1cd95cc5dd41457486c649a3f7"
+    },
+    {
+      "path": "tiles/65_Primor.png",
+      "size": 187064,
+      "sha": "8169b3eb9824c552b0af61ee46e209517089765a"
+    },
+    {
+      "path": "tiles/66_HopesEnd.png",
+      "size": 188575,
+      "sha": "8d5f5c4d1d3e316524177125d567c8d9d67383a5"
+    },
+    {
+      "path": "tiles/67_Cormund.png",
+      "size": 194348,
+      "sha": "ae64737ad0cb4255f5123e04f5bab2f6fdc1cd48"
+    },
+    {
+      "path": "tiles/68_Everra.png",
+      "size": 195145,
+      "sha": "b3bb8ef6bdee54795ae8a0f3b88b0f741f9a19ff"
+    },
+    {
+      "path": "tiles/69_Accoen.png",
+      "size": 188639,
+      "sha": "a04097bf5914b772302224d3923cc63f1db13fee"
+    },
+    {
+      "path": "tiles/70_Kraag.png",
+      "size": 188577,
+      "sha": "f96fbffaa9bf8d3597951a02fe884b76ec07d909"
+    },
+    {
+      "path": "tiles/71_Bakal.png",
+      "size": 192094,
+      "sha": "f2ec9836e2b22c88d8e51df60b2c32bb52e59277"
+    },
+    {
+      "path": "tiles/72_Lisis.png",
+      "size": 188848,
+      "sha": "118b68d4c0959586825aeae6d5c36811cfe23850"
+    },
+    {
+      "path": "tiles/73_Cealdri.png",
+      "size": 193064,
+      "sha": "427e5afbfd4aa98525de07439b932b185ff46c73"
+    },
+    {
+      "path": "tiles/74_Vega.png",
+      "size": 188730,
+      "sha": "ba50ad99b67b8493a9f9d28f10013f0628cd5ae6"
+    },
+    {
+      "path": "tiles/75_Abaddon.png",
+      "size": 193724,
+      "sha": "37a3bc6315cc1aa57be12de2e5815c6e1257a530"
+    },
+    {
+      "path": "tiles/76_Rigel.png",
+      "size": 188954,
+      "sha": "5887ca7a34985586396b133c3ea382db4154dbce"
+    },
+    {
+      "path": "tiles/77_Void.png",
+      "size": 173310,
+      "sha": "4174d9ae877252d26c7e4d3e4232757ee53a85f6"
+    },
+    {
+      "path": "tiles/78_Void.png",
+      "size": 174501,
+      "sha": "445c86e99feaf8ea8808de368dbe65bf61442714"
+    },
+    {
+      "path": "tiles/79_AsteroidsAlphaWH.png",
+      "size": 192555,
+      "sha": "2eeb98fe42e16b4deb4deb5bb13f1b6a216fc15a"
+    },
+    {
+      "path": "tiles/80_Supernova.png",
+      "size": 190541,
+      "sha": "c4a13e495ec618d982400c763784ef14dee3d02a"
+    },
+    {
+      "path": "tiles/81_NovaSeed.png",
+      "size": 195585,
+      "sha": "2feaf7ed88703f2b1ba66842bcc27ec5a0241c1b"
+    },
+    {
+      "path": "tiles/92new_ArchonRenKeleres.png",
+      "size": 193656,
+      "sha": "9b3ca93e2034f0e5a81e2e7c1979db493452a1c9"
+    },
+    {
+      "path": "tiles/93new_YlirKeleres.png",
+      "size": 194131,
+      "sha": "1a78e9ebb762c0557fd44eb3ee245f65b935893c"
+    },
+    {
+      "path": "tiles/94new_MollPrimusKeleres.png",
+      "size": 188904,
+      "sha": "7d8ab4d1dd29afa264ad934ed3a4eb7b2ca4d533"
+    },
+    {
+      "path": "units/bld_ca.png",
+      "size": 7034,
+      "sha": "a422dbd4e56ada43f16d0735a8ecee1c32f741ed"
+    },
+    {
+      "path": "units/bld_cv.png",
+      "size": 7916,
+      "sha": "31d6b3180433fc525841b5640db3c1efb84ba9af"
+    },
+    {
+      "path": "units/bld_dd.png",
+      "size": 5715,
+      "sha": "2f9e14e993f70bfd674ab436019ac34cdf374170"
+    },
+    {
+      "path": "units/bld_dn.png",
+      "size": 9107,
+      "sha": "b96bd9535dac781ca15fee2d70432554142bbdc4"
+    },
+    {
+      "path": "units/bld_ff.png",
+      "size": 3493,
+      "sha": "e067e29ef7a81dfcc27d37aa4282ec195a87bfff"
+    },
+    {
+      "path": "units/bld_fs.png",
+      "size": 9549,
+      "sha": "2b8d12406a81164cc6c82d750accd8b95bb676da"
+    },
+    {
+      "path": "units/bld_gf.png",
+      "size": 4142,
+      "sha": "7706d5bd1cbf5d00e4bee87323bfd2ad7bf24144"
+    },
+    {
+      "path": "units/bld_mf.png",
+      "size": 4721,
+      "sha": "b7065a147ac85fbf035f07a093d494ecef21de68"
+    },
+    {
+      "path": "units/bld_pd.png",
+      "size": 3446,
+      "sha": "92b0faa78e81e62fa2a29bcaf3c9056d6c986643"
+    },
+    {
+      "path": "units/bld_sd.png",
+      "size": 4849,
+      "sha": "d9fe4a55833842f26edd70bfb75e35df2d094a2b"
+    },
+    {
+      "path": "units/bld_ws.png",
+      "size": 7108,
+      "sha": "5feca430b32d472a17a0bc60311875739363dec3"
+    },
+    {
+      "path": "units/blk_mf.png",
+      "size": 6783,
+      "sha": "f13418c311a1b0cd8ddab912832a5fa01ec4881b"
+    },
+    {
+      "path": "units/blu_mf.png",
+      "size": 6858,
+      "sha": "5242eee93ba6e8b21038236c248f5c790aa691b2"
+    },
+    {
+      "path": "units/eme_ca.png",
+      "size": 7463,
+      "sha": "1dae2e413e02ee2a6a58b78ab3837f1dff391b25"
+    },
+    {
+      "path": "units/eme_cv.png",
+      "size": 8452,
+      "sha": "2abc5d3af837033f1fab1a98b181f2e9a9058c01"
+    },
+    {
+      "path": "units/eme_dd.png",
+      "size": 6180,
+      "sha": "ba63e18c1a7e6b318de620fe37d65a83f3821613"
+    },
+    {
+      "path": "units/eme_dn.png",
+      "size": 9742,
+      "sha": "104607a3bc6a4270a46a381d7dfe1210b1f435ef"
+    },
+    {
+      "path": "units/eme_ff.png",
+      "size": 3593,
+      "sha": "cada3f6fe4113783e0a44a677f60af97cecc337e"
+    },
+    {
+      "path": "units/eme_fs.png",
+      "size": 10237,
+      "sha": "4be98a34dcdbfcbdb37dbbcb27105663c9aa36d0"
+    },
+    {
+      "path": "units/eme_gf.png",
+      "size": 4214,
+      "sha": "3992d4cf2a292c7f769fadf1de1a32c9ff13578b"
+    },
+    {
+      "path": "units/eme_mf.png",
+      "size": 4957,
+      "sha": "ffe7eac6e50652c2fc906d82341ac6989591b137"
+    },
+    {
+      "path": "units/eme_pd.png",
+      "size": 3514,
+      "sha": "2860e132ce3ce10b3b77429f1d81c9d82b83e0d0"
+    },
+    {
+      "path": "units/eme_sd.png",
+      "size": 5057,
+      "sha": "50491d036033fae4e8ac54814b4d0d799e2783f3"
+    },
+    {
+      "path": "units/eme_ws.png",
+      "size": 7540,
+      "sha": "864531c6aab9465b00ece14b94c5f49bf31d032d"
+    },
+    {
+      "path": "units/gld_mf.png",
+      "size": 5384,
+      "sha": "c8cbc4ecff4f182ff5e4939965cefbabcd3043ef"
+    },
+    {
+      "path": "units/grn_mf.png",
+      "size": 6895,
+      "sha": "fd3b27457ef76bcaffe5ae8a7e14bafd37983434"
+    },
+    {
+      "path": "units/mgm_mf.png",
+      "size": 8564,
+      "sha": "9d2ae61620684cfd52ee8bee889722fbc804fbbd"
+    },
+    {
+      "path": "units/nvy_ca.png",
+      "size": 7658,
+      "sha": "ae067134db3ebc09b164b688a6b1f6468bd3ba94"
+    },
+    {
+      "path": "units/nvy_cv.png",
+      "size": 8770,
+      "sha": "d24c6a38a0f96ef1f422dd8ddb092574514f1520"
+    },
+    {
+      "path": "units/nvy_dd.png",
+      "size": 6343,
+      "sha": "4a14f60ac33b1fbbba5c1abff9d068b3ef36c8a0"
+    },
+    {
+      "path": "units/nvy_dn.png",
+      "size": 9950,
+      "sha": "1d252b0114993169dc89f1ef9d0c66fde49f4fd6"
+    },
+    {
+      "path": "units/nvy_ff.png",
+      "size": 3579,
+      "sha": "93cdff4668625745eb36793ef9906f7bf7b5ef65"
+    },
+    {
+      "path": "units/nvy_fs.png",
+      "size": 10594,
+      "sha": "d295de5de72d838137ebb6dbf235a48b5f265884"
+    },
+    {
+      "path": "units/nvy_gf.png",
+      "size": 4265,
+      "sha": "4697781620da6b178e416ba02858522f4e16b2a8"
+    },
+    {
+      "path": "units/nvy_mf.png",
+      "size": 5033,
+      "sha": "53efaf2e98307bc8367338fc380fefbf4b0a2875"
+    },
+    {
+      "path": "units/nvy_pd.png",
+      "size": 3617,
+      "sha": "3a6145542946a03379065edd9340c9cfca4ba42b"
+    },
+    {
+      "path": "units/nvy_sd.png",
+      "size": 5228,
+      "sha": "8491e7c826fa6afb1edb92a01577ec000d13149c"
+    },
+    {
+      "path": "units/nvy_ws.png",
+      "size": 7716,
+      "sha": "b3e612d24693ec21642ccd923b19dbd99cb74032"
+    },
+    {
+      "path": "units/org_ca.png",
+      "size": 9341,
+      "sha": "e3e5c0c1b274255e3943ed21b4786744efbac68f"
+    },
+    {
+      "path": "units/org_cv.png",
+      "size": 10624,
+      "sha": "b4bc3824a19d13a3ef16eb1d3d0490c76e4d90c6"
+    },
+    {
+      "path": "units/org_dd.png",
+      "size": 8145,
+      "sha": "8dda9310609f4b3a2170f0318075291edbd07875"
+    },
+    {
+      "path": "units/org_dn.png",
+      "size": 11960,
+      "sha": "984c0c860fa7cf295580bb3096390148fa00d405"
+    },
+    {
+      "path": "units/org_ff.png",
+      "size": 5231,
+      "sha": "51e2aaae831a921eea9f885952f8a6fcea7d1288"
+    },
+    {
+      "path": "units/org_fs.png",
+      "size": 13006,
+      "sha": "e10bd02a3885e9b5ec6b86fffb4b21fa78f186a6"
+    },
+    {
+      "path": "units/org_gf.png",
+      "size": 5871,
+      "sha": "da32d6a290888ea0012556ccda9d76a594b96cfe"
+    },
+    {
+      "path": "units/org_mf.png",
+      "size": 6914,
+      "sha": "3706bb39956a1af240071fac0262699026e71523"
+    },
+    {
+      "path": "units/org_pd.png",
+      "size": 5244,
+      "sha": "789bea0f51f08161db9bb8882c74f4306feb134e"
+    },
+    {
+      "path": "units/org_sd.png",
+      "size": 6808,
+      "sha": "495482c1b539ee027dbe02852a4836f6bc112442"
+    },
+    {
+      "path": "units/org_ws.png",
+      "size": 9793,
+      "sha": "e5ca594a9d63c61610aff5aeae0ebcfb0b2bb49c"
+    },
+    {
+      "path": "units/pnk_ca.png",
+      "size": 9464,
+      "sha": "7261178c416fce9a4b18bc8bbe598b83a92e9143"
+    },
+    {
+      "path": "units/pnk_cv.png",
+      "size": 10653,
+      "sha": "93ee01d148c01c5d9f66aa060cfab452a93cf09a"
+    },
+    {
+      "path": "units/pnk_dd.png",
+      "size": 8273,
+      "sha": "8036ae638fc5cb074c42e995d360f6b474a10b5e"
+    },
+    {
+      "path": "units/pnk_dn.png",
+      "size": 12156,
+      "sha": "3aa262a95a084bc6dd0a72b57e8d11b7a731967b"
+    },
+    {
+      "path": "units/pnk_ff.png",
+      "size": 5324,
+      "sha": "7a6b9bf7cf34cdf513d071eadc49be459bc05683"
+    },
+    {
+      "path": "units/pnk_fs.png",
+      "size": 13340,
+      "sha": "34741fcbf19fcc815c73e9971c3560f18f63a509"
+    },
+    {
+      "path": "units/pnk_gf.png",
+      "size": 5871,
+      "sha": "60005d84b7eb66f11842bd63050808fae554fc26"
+    },
+    {
+      "path": "units/pnk_mf.png",
+      "size": 7033,
+      "sha": "9c6feffd59597a3e3dafa0dafcc55d6756ef8ac4"
+    },
+    {
+      "path": "units/pnk_pd.png",
+      "size": 5224,
+      "sha": "3ab71511e44ea1790886f928e749175815b3281e"
+    },
+    {
+      "path": "units/pnk_sd.png",
+      "size": 6909,
+      "sha": "7ba2dfe0efb6ba21aa691eda238fd9ba3223756c"
+    },
+    {
+      "path": "units/pnk_ws.png",
+      "size": 10067,
+      "sha": "27b02a5084831cf06ee183871ce4579b1e33ac73"
+    },
+    {
+      "path": "units/ppl_mf.png",
+      "size": 6889,
+      "sha": "62c1680214f83ee1095cf5906496ca8399667c20"
+    },
+    {
+      "path": "units/red_ca.png",
+      "size": 9402,
+      "sha": "a4e4891d5273560ca374a3064cfd25f1db4c1543"
+    },
+    {
+      "path": "units/red_cv.png",
+      "size": 10582,
+      "sha": "888ab3de705c54aa5b453d6aed3d1057da3cb409"
+    },
+    {
+      "path": "units/red_dd.png",
+      "size": 8166,
+      "sha": "da87982ba4e99a1634814314ae3c506316032603"
+    },
+    {
+      "path": "units/red_dn.png",
+      "size": 11998,
+      "sha": "64d7ecf27f0662cc257bd7cda54fef1cdd2afdf9"
+    },
+    {
+      "path": "units/red_ff.png",
+      "size": 5214,
+      "sha": "e0142404752b579c5574ae056dddeb89994daa5d"
+    },
+    {
+      "path": "units/red_fs.png",
+      "size": 13203,
+      "sha": "8acab4c213d42f0f9ac81b1e9c4b19a532f16be8"
+    },
+    {
+      "path": "units/red_gf.png",
+      "size": 5862,
+      "sha": "defd4ed4814515dfc78ac45aafd9d323ffbb94b1"
+    },
+    {
+      "path": "units/red_mf.png",
+      "size": 6799,
+      "sha": "af313604b4a6750acfbea1aebcc8477c0c25ca90"
+    },
+    {
+      "path": "units/red_pd.png",
+      "size": 5206,
+      "sha": "30afba5f352b743472760a5b66f9c1bbc5a95c82"
+    },
+    {
+      "path": "units/red_sd.png",
+      "size": 6782,
+      "sha": "3830cbda4b335a4d539e427df49c30d7b78b64d3"
+    },
+    {
+      "path": "units/red_ws.png",
+      "size": 9924,
+      "sha": "53ede2d00ae269ddbc68d2746a5b1c72c9837a8f"
+    },
+    {
+      "path": "units/ylw_mf.png",
+      "size": 6929,
+      "sha": "a6e90b107f8706778097214190f5b7395739730c"
     }
   ]
 }

@@ -10,17 +10,19 @@ from collections import deque
 from itertools import combinations
 from math import ceil
 
-from movement import MovementError, capital_ship
+from movement import MovementError, Snapshot, capital_ship
 from ai_combat import win_probability
 from ai_planner import (SHIP_VALUE,
                         best_activation as plan_best_activation, plan_landings)
-from ai_economy import build_plan, command_targets, technology_values
+from ai_economy import MODEL_LIMITS, build_plan, command_targets, technology_values
 from ai_actions import (loss_value, plan_bombardment, play_useful_card,
-                        resolve_card_choice, war_effort_plan)
+                        refit_plan, resolve_card_choice, war_effort_plan)
 from ai_strategy import construction_choice, diplomacy_value, warfare_value
 from action_cards import canonical_action_card
 from player import command_tokens_in_reinforcements
-from technology import available_technologies, missing_prerequisites
+from technology import (available_technologies, can_use_specialty_planet,
+                        missing_prerequisites, production_allowed,
+                        unit_upgrade_kind)
 from units import Region, UNIT_TYPES, unit_profile
 
 
@@ -31,11 +33,13 @@ TECH_PRIORITY = {
     'amd': 50, 'da': 52, 'asc': 58, 'td': 53, 'ie': 57,
     'pds2': 45, 'sd2': 48, 'ws': 52, 'gls': 42,
     'qdn': 63, 'pm': 56, 'ers': 55, 'scc': 48, 'l4': 42,
-    'dxa': 35, 'md_base': 42, 'x89_base': 40,
+    'dxa': 35, 'md': 42, 'x89c4': 40,
+    'det': 30, 'sr': 49, 'pa': 46, 'bs': 43,
+    'aida': 57, 'sar': 41, 'sdn': 44, 'pi': 43,
 }
 LOSS_ORDER = {'fighter': 0, 'destroyer': 2, 'cruiser': 3,
               'carrier': 5, 'dreadnought': 6, 'flagship': 8, 'warsun': 10,
-              'infantry': 0}
+              'infantry': 0, 'mech': 3}
 STRATEGY_NAMES = {1: 'Leadership', 2: 'Diplomacy', 3: 'Politics',
                   4: 'Construction', 5: 'Trade', 6: 'Warfare',
                   7: 'Technology', 8: 'Imperial'}
@@ -94,6 +98,7 @@ class GameAI:
         self.activation_flash_duration = 0.0
         self.thinking = False
         self.last_error = None
+        self.hero_secondary_queue: deque[tuple[str, int]] = deque()
 
     def is_bot(self, player):
         return bool(player and player.faction in self.bot_factions)
@@ -101,6 +106,29 @@ class GameAI:
     def human_faction(self):
         return next((p.faction for p in self.window.turn_order.players
                      if p.faction not in self.bot_factions), None)
+
+    def _planet_values(self, player, card):
+        exploration = getattr(self.window, 'exploration', None)
+        resources, influence = (exploration.planet_values(card.planet)
+                                if exploration else
+                                (card.planet.resources, card.planet.influence))
+        participants = getattr(self.window.turn_order, 'players', (player,))
+        if any(getattr(card.planet, 'planet_id', None) in
+               getattr(participant, 'hero_attachments', ())
+               for participant in participants):
+            resources += 3
+            influence += 3
+        return resources, influence
+
+    def _available_values(self, player):
+        ready = [card for card in player.planets if not card.exhausted]
+        return (sum(self._planet_values(player, card)[0] for card in ready),
+                sum(self._planet_values(player, card)[1] for card in ready))
+
+    def _specialties(self, card):
+        exploration = getattr(self.window, 'exploration', None)
+        return (exploration.planet_specialties(card.planet) if exploration else
+                card.planet.tech_specialties)
 
     def update(self, delta_time):
         if self.paused:
@@ -149,9 +177,56 @@ class GameAI:
     def step(self):
         w = self.window
         turn = w.turn_order
+        exploration = getattr(w, 'exploration', None)
+        if exploration is not None and exploration.secret_objectives.pending_returns:
+            pending_returns = exploration.secret_objectives.pending_returns
+            for faction in sorted(pending_returns):
+                owner = exploration.players[faction]
+                if self.is_bot(owner):
+                    hand = exploration.secret_objectives.hands[faction]
+                    catalog = exploration.secret_objectives.catalog
+                    alias = min(hand, key=lambda item: (
+                        catalog[item].points, catalog[item].phase != 'Action', item))
+                    exploration.secret_objectives.return_unscored(faction, alias)
+                    w.movement.resolve_exploration_queue()
+                    advance = getattr(w, 'advance_hero_frontier', None)
+                    if advance:
+                        advance()
+                    self.report(owner, 'Returned an excess secret objective.', .2)
+                return
+        if exploration is not None and exploration.pending:
+            pending = exploration.pending
+            owner = exploration.players[pending.faction]
+            if self.is_bot(owner):
+                choice = self._exploration_choice(owner, pending)
+                w.movement.resolve_exploration_choice(choice)
+                advance = getattr(w, 'advance_hero_frontier', None)
+                if advance:
+                    advance()
+                self.report(owner, 'Resolved exploration.', .2)
+            return
+        if exploration is not None and exploration.freelancer_offer:
+            owner = exploration.players[exploration.freelancer_offer[0]]
+            if self.is_bot(owner):
+                self._resolve_freelancers(owner)
+            return
         if w.action_cards.pending:
             resolve_card_choice(self)
             return
+        over_limit = next((candidate for candidate in turn.players
+                           if self.is_bot(candidate) and candidate.faction != 'yssaril' and
+                           len(candidate.action_cards) > 7), None)
+        if over_limit is not None:
+            # A Codex relic or leader can add cards beyond the normal draw cap.
+            discard_index = self._discard_excess_card(over_limit)
+            w.action_cards.discard.append(over_limit.action_cards.pop(discard_index))
+            panel = getattr(w, 'relic_action_panel', None)
+            if panel and panel.open and panel.alias == 'hand_discard' and \
+                    panel.owner_faction == over_limit.faction and len(over_limit.action_cards) <= 7:
+                panel.close()
+            self.report(over_limit, 'Discarded an excess action card.', .2)
+            return
+        player = turn.active_player
         if w.transaction.session:
             return
         if turn.strategy_selection:
@@ -175,20 +250,38 @@ class GameAI:
                     finished = turn.finish_player_command_allocation()
                     if finished and turn.strategy_enabled:
                         turn.begin_strategy_phase()
+                        patronage = getattr(w, 'apply_council_patronage', None)
+                        if patronage:
+                            patronage()
                         w.strategy_view = True
                     w.player_panel.active = w.player_panel.players.index(turn.active_player)
                     w.frame_player_systems(turn.active_player)
             return
         if w.movement.session:
             self.resolve_movement()
+            advance = getattr(w, 'advance_hero_frontier', None)
+            if advance:
+                advance()
             return
         if w.strategy.session:
             if self.is_bot(w.strategy.player):
                 self.resolve_strategy()
                 w.sync_strategy_actor()
             return
-        player = turn.active_player
+        if self.hero_secondary_queue:
+            faction, card = self.hero_secondary_queue[0]
+            if player and player.faction == faction:
+                w.strategy.start_hero_secondary(player, card)
+                self.hero_secondary_queue.popleft()
+                self.report(player, f'Naaz hero offered {STRATEGY_NAMES[card]} secondary.', .2)
+                return
+            self.hero_secondary_queue.clear()
         if not self.is_bot(player):
+            return
+        if player.pending_commands:
+            pool = self.command_pool(player)
+            player.allocate_command(pool)
+            self.report(player, f'Allocated a gained command token to {pool}.', .2)
             return
         if not turn.can_take_action:
             self.report(player, 'Ended the turn.', .35)
@@ -206,13 +299,22 @@ class GameAI:
 
         best_card = max(cards, key=lambda card: (play_value(card), -card)) if cards else None
         reinforcement = war_effort_plan(self, player)
+        refitting = refit_plan(self, player)
         if self.opening_expansion(player, move):
             self.start_activation(player, move)
+        elif self._play_component_action(player):
+            return
         elif reinforcement and reinforcement[0] >= max(
                 move[0] if move else 0, play_value(best_card) if best_card else 0):
             w.action_cards.play(player, reinforcement[1])
             resolve_card_choice(self)
             self.report(player, 'Played War Effort to reinforce the fleet.', .8)
+        elif refitting and refitting[0] >= max(
+                move[0] if move else 0, play_value(best_card) if best_card else 0):
+            w.action_cards.play(player, refitting[1])
+            while w.action_cards.pending:
+                resolve_card_choice(self)
+            self.report(player, 'Played Refit Troops to strengthen the frontier.', .8)
         elif best_card and (not move or play_value(best_card) >= move[0] - 3):
             w.strategy.start(best_card)
             self.report(player, f'Played {STRATEGY_NAMES[best_card]}.')
@@ -228,6 +330,224 @@ class GameAI:
                         'Passed for the rest of the round.', .65)
             w.pass_turn()
 
+    @staticmethod
+    def _discard_excess_card(player):
+        priorities = {'flank_speed': 8, 'morale_boost': 7,
+                      'direct_hit': 7, 'skilled_retreat': 6,
+                      'war_effort': 5, 'refit': 5}
+        return min(range(len(player.action_cards)), key=lambda index: (
+            priorities.get(canonical_action_card(player.action_cards[index]), 2),
+            canonical_action_card(player.action_cards[index]), index))
+
+    def _exploration_choice(self, player, pending):
+        exploration = self.window.exploration
+        choices = pending.choices
+        if not choices:
+            return None
+        if pending.offered_aliases:
+            def card_value(alias):
+                card = exploration.catalog[alias]
+                score = {'attach': 8, 'fragment': 6}.get(card.resolution, 4)
+                if alias.startswith(('mo', 'vfs', 'ms', 'lf')):
+                    score += 2
+                return score, alias
+            return max(choices, key=card_value)
+        priorities = {
+            'use_mech': 12, 'place_mech_commodity': 11,
+            'place_mech_trade_good': 10, 'place_infantry': 9,
+            'remove_infantry': 8, 'convert_commodities': 7,
+            'gain_commodities': 6, 'replenish_commodities': 6,
+            'gain_commodity': 5, 'draw_card_commodity': 5,
+            'draw_card_trade_good': 4, 'alpha': 3, 'beta': 2,
+            'decline': 0, 'produce_one_unit': 8,
+        }
+        return max(choices, key=lambda choice: (priorities.get(choice, 1), choice))
+
+    def _freelancer_payment(self, player, cost):
+        if cost <= 0:
+            return (), (), 0, 0.0
+        movement = self.window.movement
+        options = {0: ((), (), 0.0)}
+        for card in sorted((item for item in player.planets if not item.exhausted),
+                           key=lambda item: item.planet.planet_id):
+            planet_id = card.planet.planet_id
+            resources = movement.planet_resources(card.planet)
+            influence = movement.planet_influence(card.planet)
+            opportunity = max(resources, influence) + .15
+            for total, (paid_resources, paid_influence, burden) in tuple(options.items()):
+                for mode, points in (('resources', resources), ('influence', influence)):
+                    if points <= 0:
+                        continue
+                    new_total = total + points
+                    candidate = ((paid_resources + (planet_id,) if mode == 'resources'
+                                  else paid_resources),
+                                 (paid_influence + (planet_id,) if mode == 'influence'
+                                  else paid_influence), burden + opportunity)
+                    prior = options.get(new_total)
+                    if prior is None or (candidate[2], candidate[:2]) < (prior[2], prior[:2]):
+                        options[new_total] = candidate
+        affordable = []
+        for total, (resources, influence, burden) in options.items():
+            goods = max(0, cost - total)
+            if goods <= player.trade_goods:
+                affordable.append((burden + 1.5 * goods + .3 * max(0, total - cost),
+                                   len(resources) + len(influence), resources,
+                                   influence, goods))
+        if not affordable:
+            return None
+        score, _, resources, influence, goods = min(affordable)
+        return resources, influence, goods, score
+
+    def _resolve_freelancers(self, player):
+        exploration = self.window.exploration
+        movement = self.window.movement
+        _, position, offered_planet = exploration.freelancer_offer
+        tile = self.window.board[position]
+        friendly_ships = [unit for unit in tile.units if unit.owner == player.faction and
+                          unit.location.region == Region.SPACE and
+                          UNIT_TYPES[unit.kind]['ship']]
+        hostile_ships = [unit for unit in tile.units if unit.owner != player.faction and
+                         unit.location.region == Region.SPACE and
+                         UNIT_TYPES[unit.kind]['ship']]
+        fleet_room = len(movement._fleet_ships_at(tile, player.faction)) < \
+            movement.fleet_supply(player)
+        planets = [planet for planet in tile.planets
+                   if tile.planet_owners.get(planet.planet_id) == player.faction and
+                   not exploration.planet_is_blocked(planet.planet_id) and
+                   planet.planet_id not in exploration.destroyed_planets]
+        ground_destination = (offered_planet if any(p.planet_id == offered_planet
+                                                  for p in planets) else
+                              min((p.planet_id for p in planets), default=None))
+        garrison = sum(unit.owner == player.faction and unit.kind in ('infantry', 'mech') and
+                       unit.location.region == Region.PLANET and
+                       unit.location.planet_id == ground_destination for unit in tile.units)
+        owned_counts = {kind: sum(unit.owner == player.faction and unit.kind == kind
+                                  for system in self.window.board.values()
+                                  for unit in system.units)
+                        for kind in ('carrier', 'cruiser', 'destroyer', 'dreadnought',
+                                     'infantry', 'mech')}
+        choices = []
+        for kind in ('carrier', 'infantry', 'mech', 'dreadnought', 'cruiser', 'destroyer'):
+            if not production_allowed(player, kind) or \
+                    owned_counts[kind] >= MODEL_LIMITS.get(kind, float('inf')):
+                continue
+            ship = UNIT_TYPES[kind]['ship']
+            if ship and (hostile_ships or not fleet_room):
+                continue
+            if not ship and ground_destination is None:
+                continue
+            cost = exploration.freelancers_cost(player, movement, kind)
+            payment = self._freelancer_payment(player, cost)
+            if payment is None:
+                continue
+            preference = {
+                'carrier': 11 if not any(unit.kind == 'carrier' for unit in friendly_ships) else 5,
+                'infantry': 9 if garrison == 0 else 4,
+                'mech': 7 if garrison <= 1 else 3,
+                'dreadnought': 8, 'cruiser': 6, 'destroyer': 5,
+            }[kind]
+            value = preference - .7 * cost - .16 * payment[3]
+            if value > 0:
+                choices.append((value, -cost, kind, payment))
+        if choices:
+            _, _, kind, (resources, influence, goods, _) = max(choices)
+            snapshot = Snapshot.capture(self.window.board, player, movement.players,
+                                        self.window.action_cards, exploration)
+            exploration.produce_freelancers(
+                player, movement, kind, planet_id=ground_destination,
+                resource_planets=resources, influence_planets=influence,
+                trade_goods=goods)
+            movement.check_freelancers_limits(player, position, snapshot)
+            self.report(player, f'Freelancers produced {kind} in {tile.name}.', .35)
+        else:
+            exploration.produce_freelancers(player, movement, None)
+            self.report(player, 'Declined Freelancers production.', .2)
+            movement.resolve_exploration_queue()
+        advance = getattr(self.window, 'advance_hero_frontier', None)
+        if advance:
+            advance()
+
+    def _fragment_set(self, player):
+        exploration = self.window.exploration
+        fragments = exploration.fragments[player.faction]
+        required = 2 if player.faction == 'naaz' else 3
+        # Preserve wild fragments when a natural set exists.
+        for selected in combinations(sorted(fragments), required):
+            traits = {exploration.catalog[alias].trait for alias in selected}
+            traits.discard('frontier')
+            if len(traits) <= 1:
+                return selected
+        return None
+
+    def _play_component_action(self, player):
+        w = self.window
+        exploration = getattr(w, 'exploration', None)
+        if exploration is None or not w.turn_order.can_take_action:
+            return False
+        from leaders import leader_available
+        from leader_effects import (cabal_hero_targets, use_cabal_hero,
+                                    use_empyrean_hero, use_naaz_hero,
+                                    use_titans_hero)
+        fragment_set = self._fragment_set(player)
+        if fragment_set and exploration.relics.deck:
+            relic = exploration.purge_fragments_for_relic(
+                player.faction, fragment_set, required=len(fragment_set))
+            w.turn_order.mark_action_completed()
+            self.report(player, f'Assembled relic {relic.alias or "from empty deck"}.', .8)
+            return True
+        owned_relics = exploration.relics.owned[player.faction]
+        if 'nanoforge' in owned_relics:
+            eligible = [(self._planet_values(player, card)[0] +
+                         self._planet_values(player, card)[1], card.planet.planet_id)
+                        for card in player.planets
+                        if not card.planet.faction_homeworld and
+                        not exploration.planet_is_legendary(card.planet) and
+                        card.planet.planet_id not in exploration.destroyed_planets]
+            if eligible:
+                _, planet_id = max(eligible)
+                exploration.use_nano_forge(player, planet_id)
+                w.turn_order.mark_action_completed()
+                self.report(player, f'Attached Nano-Forge to {planet_id}.', .8)
+                return True
+        if ('dynamiscore' in owned_relics and
+                player.trade_goods < 5 and w.turn_order.round_number >= 2):
+            outcome = exploration.relics.use_dynamis_core(player)
+            w.turn_order.mark_action_completed()
+            self.report(player, outcome.events[0], .8)
+            return True
+        if player.faction == 'naaz' and leader_available(player, 'naazhero'):
+            outcome = use_naaz_hero(player, exploration)
+            w.turn_order.mark_action_completed()
+            # Free Technology and Trade/Leadership are usually useful even if
+            # one offer must be declined after its normal legality checks.
+            self.hero_secondary_queue.extend((player.faction, card) for card in (7, 5))
+            self.report(player, f'Used hero; gained relic {outcome.alias or "from empty deck"}.', 1.0)
+            return True
+        if player.faction == 'titans' and leader_available(player, 'titanshero') and \
+                any(card.planet.planet_id == 'elysium' for card in player.planets):
+            use_titans_hero(player)
+            w.turn_order.mark_action_completed()
+            self.report(player, 'Attached Ul to Elysium.', .8)
+            return True
+        if player.faction == 'empyrean' and leader_available(player, 'empyreanhero'):
+            targets = [tile for tile in w.board.values() if not tile.planets and
+                       any(unit.owner == player.faction and unit.location.region == Region.SPACE
+                           for unit in tile.units)]
+            if len(targets) >= 2:
+                tiles = use_empyrean_hero(player, exploration, w.board)
+                w.hero_frontier_queue = [(player, tile.position) for tile in tiles]
+                w.advance_hero_frontier()
+                w.turn_order.mark_action_completed()
+                self.report(player, 'Explored frontier systems with hero.', .8)
+                return True
+        if player.faction == 'cabal' and leader_available(player, 'cabalhero'):
+            if len(cabal_hero_targets(w.board, player)) >= 2:
+                results = use_cabal_hero(player, w.board, exploration.rng)
+                w.turn_order.mark_action_completed()
+                self.report(player, f'Hero threatened {len(results)} enemy ships.', 1.0)
+                return True
+        return False
+
     def command_pool(self, player):
         pools = player.command_pools
         if pools['tactical'] < 2:
@@ -242,13 +562,14 @@ class GameAI:
 
     def strategy_value(self, player, card):
         pools = player.command_pools
-        ready_resources = player.available_values[0] + player.trade_goods
+        ready_resources = self._available_values(player)[0] + player.trade_goods
         board = self.window.board
         units = [u for t in board.values() for u in t.units if u.owner == player.faction]
         docks = sum(unit.kind == 'spacedock' for unit in units)
         targets = command_targets(player, board, self.window.turn_order.round_number)
         shortage = sum(max(0, targets[key] - pools[key]) for key in pools)
-        ready_value = sum(sorted((max(c.planet.resources, .8 * c.planet.influence)
+        ready_value = sum(sorted((max(self._planet_values(player, c)[0],
+                                      .8 * self._planet_values(player, c)[1])
                                  for c in player.planets if c.exhausted), reverse=True)[:2])
         # Warfare is valuable for releasing a fleet, not merely a marker on an
         # empty system. During the draft it can fund an additional expedition.
@@ -260,14 +581,18 @@ class GameAI:
         warfare = 5 + min(14, locked * 2) + (min(7, transports * 3) if drafting else 0)
         tech_values, tech = {}, None
         if card == 7:
-            tech_values = technology_values(player, board, self.window.turn_order.round_number)
+            tech_values = technology_values(
+                player, board, self.window.turn_order.round_number,
+                exploration=getattr(self.window, 'exploration', None))
             tech = self.choose_technology(player, 0, values=tech_values)
         scores = {1: 10 + min(20, 4 * shortage) + 6 * (pools['tactical'] <= 1),
                   2: 3 + 1.8 * ready_value,
                   3: 6 + 2 * (self.window.turn_order.speaker is not player) +
                      max(0, 4 - len(player.action_cards)),
                   4: 7 + 6 * (docks == 0) + 3 * (docks == 1 and len(player.planets) >= 4),
-                  5: 11 + .9 * max(0, player.commodity_limit - player.commodities) +
+                  5: 11 + .9 * max(0, (self.window.exploration.relics.commodity_limit(player)
+                                      if getattr(self.window, 'exploration', None)
+                                      else player.commodity_limit) - player.commodities) +
                      2 * (ready_resources < 4),
                   6: warfare,
                   7: 8 + min(16, .35 * tech_values.get(tech[0], 0)) if tech else 1,
@@ -276,6 +601,14 @@ class GameAI:
             scores[7] += 9
         if player.faction == 'hacan' and card == 5:
             scores[5] += 3
+        if player.faction == 'nomad' and card == 5:
+            scores[5] += 3
+        if player.faction == 'titans' and card == 4:
+            scores[4] += 3
+        if player.faction == 'mahact' and card == 1:
+            scores[1] += 2
+        if player.faction == 'naaz' and card == 7:
+            scores[7] += 2
         if drafting and card == 2:
             scores[2] += min(7, ready_resources * .5)
         return scores[card]
@@ -332,7 +665,7 @@ class GameAI:
                            if unit.unit_id in session.selected) if source else ()
         self.activation_flash_route = next((route for route in selected_routes if route), None)
         self.window.movement_panel.reset()
-        ships = sum(session.choices[unit_id].kind not in ('fighter', 'infantry')
+        ships = sum(session.choices[unit_id].kind not in ('fighter', 'infantry', 'mech')
                     for unit_id in session.selected)
         cargo = len(session.selected) - ships
         target = session.target.name
@@ -353,10 +686,13 @@ class GameAI:
         if card == 1:
             return (command_tokens_in_reinforcements(player, self.window.board) > 0 and
                     sum(player.command_pools.values()) < sum(targets.values()) and
-                    payment_plan(player, 3, lambda item: item.planet.influence,
-                                 influence_opportunity) is not None)
+                    payment_plan(player, 3,
+                                 lambda item: self._planet_values(player, item)[1],
+                                 lambda item: .7 * self._planet_values(player, item)[0])
+                    is not None)
         if card == 2:
-            ready = sorted((max(c.planet.resources, .8 * c.planet.influence)
+            ready = sorted((max(self._planet_values(player, c)[0],
+                                .8 * self._planet_values(player, c)[1])
                             for c in ctl.readyable_planets(player)), reverse=True)[:2]
             return sum(ready) >= (4 if strategic <= 1 else 3)
         if card == 3:
@@ -377,12 +713,14 @@ class GameAI:
                             return True
             return False
         if card == 5:
-            return (player.commodity_limit - player.commodities >=
+            cap = (self.window.exploration.relics.commodity_limit(player)
+                   if getattr(self.window, 'exploration', None) else player.commodity_limit)
+            return (cap - player.commodities >=
                     (3 if strategic <= 1 else 2) or
                     player.faction in session.free_trade or player.faction == 'hacan')
         if card == 6:
             return (bool(ctl.home_docks()) and
-                    player.available_values[0] + player.trade_goods +
+                    self._available_values(player)[0] + player.trade_goods +
                     int('st' in player.technologies) >= 1)
         if card == 7:
             if player.faction == 'nekro':
@@ -403,7 +741,7 @@ class GameAI:
             ctl.decline_secondary()
         elif s.stage == 'leadership':
             reserve = command_tokens_in_reinforcements(player, w.board) - s.base_gain
-            budget = sum(c.planet.influence for c in player.planets if not c.exhausted) + player.trade_goods
+            budget = self._available_values(player)[1] + player.trade_goods
             pools = player.command_pools
             desired_total = sum(command_targets(player, w.board,
                                                 w.turn_order.round_number).values())
@@ -411,8 +749,9 @@ class GameAI:
             count = min(max(0, reserve), budget // 3,
                         max(0, desired_total - current_total))
             if count:
-                plan = payment_plan(player, count * 3, lambda c: c.planet.influence,
-                                    influence_opportunity)
+                plan = payment_plan(player, count * 3,
+                                    lambda c: self._planet_values(player, c)[1],
+                                    lambda c: .7 * self._planet_values(player, c)[0])
                 if plan:
                     s.purchases = count
                     for planet_id in plan[0]:
@@ -436,7 +775,7 @@ class GameAI:
                 ctl.continue_stage()
         elif s.stage == 'ready_planets':
             for card in sorted(ctl.readyable_planets(player),
-                               key=lambda c: (-max(c.planet.resources, c.planet.influence),
+                               key=lambda c: (-max(self._planet_values(player, c)),
                                               c.planet.planet_id))[:2]:
                 ctl.toggle_ready(card.planet.planet_id)
             ctl.confirm_ready()
@@ -482,8 +821,8 @@ class GameAI:
             docks = ctl.home_docks()
             if docks:
                 ctl.produce_at(max(docks, key=lambda item: (
-                    sum(p.resources for p in item[0].planets
-                        if p.planet_id == item[1].location.planet_id) +
+                    sum(self._planet_values(player, card)[0] for card in player.planets
+                        if card.planet.planet_id == item[1].location.planet_id) +
                     int(unit_profile(item[1]).get('productionValue') or 0),
                     item[1].unit_id))[1].unit_id)
             else:
@@ -497,6 +836,15 @@ class GameAI:
             if choice:
                 alias, specialty_ids, payment_ids, goods = choice
                 ctl.select_technology(alias)
+                tech = next(card for card in available_technologies(player)
+                            if card['alias'] == alias)
+                if (player.faction == 'cabal' and
+                        player.captured_units.get(unit_upgrade_kind(player, tech), 0) and
+                        missing_prerequisites(player, tech,
+                            [card for card in player.planets
+                             if card.planet.planet_id in specialty_ids],
+                            exploration=getattr(w, 'exploration', None))):
+                    ctl.toggle_riftmeld()
                 for planet_id in specialty_ids:
                     ctl.toggle_technology_planet(planet_id, specialty=True)
                 for planet_id in payment_ids:
@@ -513,10 +861,13 @@ class GameAI:
 
     def choose_technology(self, player, cost, *, values=None):
         cards = [c for c in player.planets if not c.exhausted]
-        specialties = [c for c in cards if c.planet.tech_specialties]
+        exploration = getattr(self.window, 'exploration', None)
+        specialties = [c for c in player.planets if can_use_specialty_planet(
+            player, c, exploration=exploration)]
         if values is None:
-            values = technology_values(player, self.window.board,
-                                       self.window.turn_order.round_number)
+            values = technology_values(
+                player, self.window.board, self.window.turn_order.round_number,
+                exploration=getattr(self.window, 'exploration', None))
         best = None
         for tech in available_technologies(player):
             if tech['alias'] in player.technologies:
@@ -524,20 +875,33 @@ class GameAI:
             for n in range(min(len(tech.get('requirements', '')), len(specialties)) + 1):
                 found = False
                 for selected in combinations(specialties, n):
-                    if missing_prerequisites(player, tech, selected):
+                    prereqs_missing = missing_prerequisites(
+                        player, tech, selected, exploration=exploration)
+                    riftmeld_kind = unit_upgrade_kind(player, tech)
+                    can_riftmeld = (player.faction == 'cabal' and riftmeld_kind and
+                                    player.captured_units.get(riftmeld_kind, 0) > 0)
+                    if prereqs_missing and not can_riftmeld:
                         continue
+                    # Psychoarchaeology uses a specialty without exhausting it;
+                    # that planet may also pay resources for this research.
                     eligible = type('PaymentPlayer', (), {
-                        'planets': [c for c in cards if c not in selected],
+                        'planets': cards if 'pa' in player.technologies else
+                                   [c for c in cards if c not in selected],
                         'trade_goods': player.trade_goods})()
-                    payment = payment_plan(eligible, cost, lambda c: c.planet.resources,
-                                           resource_opportunity)
+                    payment = payment_plan(
+                        eligible, cost, lambda c: self._planet_values(player, c)[0],
+                        lambda c: .7 * self._planet_values(player, c)[1] +
+                                  (1.5 if self._specialties(c) else 0))
                     if payment is None:
                         continue
                     alias = tech['alias']
-                    specialty_cost = sum(max(c.planet.resources, .7 * c.planet.influence)
-                                         for c in selected)
+                    specialty_cost = (0 if 'pa' in player.technologies else
+                                      sum(max(self._planet_values(player, c)[0],
+                                              .7 * self._planet_values(player, c)[1])
+                                          for c in selected))
                     score = (values.get(alias, 3) - 1.25 * specialty_cost -
-                             1.5 * payment[1])
+                             1.5 * payment[1] -
+                             (3 if prereqs_missing and can_riftmeld else 0))
                     candidate = (score, alias, tuple(c.planet.planet_id for c in selected),
                                  payment[0], payment[1])
                     if best is None or candidate > best:
@@ -712,7 +1076,8 @@ class GameAI:
             if s.capacity_faction in self.bot_factions:
                 tile = w.board[s.capacity_position]
                 choices = ctl.capacity_overflow_units(tile, s.capacity_faction)
-                selected = sorted(choices, key=lambda u: (u.kind != 'fighter', u.unit_id))
+                selected = sorted(choices, key=lambda u: (
+                    u.kind != 'fighter', u.kind != 'infantry', u.unit_id))
                 for unit in selected[:s.capacity_required]:
                     ctl.toggle_capacity_overflow_unit(unit.unit_id)
                 ctl.resolve_capacity_overflow()
@@ -731,7 +1096,7 @@ class GameAI:
         if any(not self.is_bot(p) for p in w.action_cards.participants(s)):
             return
         if s.stage == 'movement':
-            ships = sum(s.choices[unit_id].kind not in ('infantry', 'fighter')
+            ships = sum(s.choices[unit_id].kind not in ('infantry', 'mech', 'fighter')
                         for unit_id in s.selected)
             ctl.confirm()
             if ships:
@@ -753,7 +1118,7 @@ class GameAI:
             if s.landed_planets:
                 names = ', '.join(p.name for p in s.target.planets
                                   if p.planet_id in s.landed_planets)
-                self.report(s.player, f'Landed infantry on {names}.', 1.2)
+                self.report(s.player, f'Landed ground forces on {names}.', 1.2)
         elif s.stage in ('space_combat', 'ground_combat', 'combat_end', 'space_combat_won'):
             if s.combat_needs_resolution and not ctl.combat_assignments_complete(s):
                 return
@@ -785,8 +1150,10 @@ class GameAI:
         discount = int('st' in player.technologies and not s.integrated_current)
         total_cost = max(0, ceil(sum(ctl.unit_cost(k, player) * n for k, n in planned.items())) -
                          discount)
-        payment = payment_plan(player, total_cost, lambda c: c.planet.resources,
-                               resource_opportunity)
+        payment = payment_plan(
+            player, total_cost, lambda c: self._planet_values(player, c)[0],
+            lambda c: .7 * self._planet_values(player, c)[1] +
+                      (1.5 if self._specialties(c) else 0))
         if payment is None:
             ctl.skip_production()
             return

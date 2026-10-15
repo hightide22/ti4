@@ -7,7 +7,8 @@ from ai_economy import MODEL_LIMITS
 from units import Region, UNIT_TYPES, unit_profile
 
 
-UNIT_VALUE = {'infantry': .5, 'fighter': .5, 'destroyer': 1, 'cruiser': 2,
+UNIT_VALUE = {'infantry': .5, 'mech': 2, 'fighter': .5,
+              'destroyer': 1, 'cruiser': 2,
               'carrier': 3, 'dreadnought': 4, 'flagship': 8, 'warsun': 12,
               'spacedock': 4, 'pds': 2}
 
@@ -30,7 +31,8 @@ def loss_value(tile, unit, *, sustain=False, assigned=()):
         alternatives = [other for other in tile.units if other is not unit and
                         other.owner == unit.owner and other.capacity and
                         other.location.region == Region.SPACE]
-        if not alternatives and any(other.owner == unit.owner and other.kind == 'infantry'
+        if not alternatives and any(other.owner == unit.owner and
+                                    other.kind in ('infantry', 'mech')
                                     for other in tile.units):
             value += 4
     return value
@@ -48,12 +50,12 @@ def resolve_card_choice(ai):
         return True
     session = ai.window.movement.session
     effect = pending['effect']
+    player = pending['player']
     if effect in ('direct_hit', 'courageous'):
         units = {unit.unit_id: unit for unit in session.target.units}
         choice = max((key for key, _ in choices), key=lambda key: (
             loss_value(session.target, units[key]), key))
     elif effect == 'war_effort':
-        player = pending['player']
         if not reinforcement_available(ai, player, 'cruiser'):
             cards.cancel_pending()
             return True
@@ -73,6 +75,22 @@ def resolve_card_choice(ai):
             cards.cancel_pending()
             return True
         choice = min(legal)
+    elif effect == 'refit':
+        legal = [key for key, _ in choices if not str(key).startswith('__')]
+        if legal:
+            unit_tiles = {unit.unit_id: tile for tile in ai.window.board.values()
+                          for unit in tile.units if unit.unit_id in legal}
+            choice = max(legal, key=lambda key: (
+                sum(any(other.owner != player.faction and
+                        other.kind in ('infantry', 'mech')
+                        for other in neighbor.units)
+                    for neighbor in ai.window.movement.neighbors(unit_tiles[key])),
+                -len(unit_tiles[key].units), key))
+        else:
+            choice = '__finish_refit__'
+    elif effect == 'forward_supply_base':
+        choice = min((key for key, _ in choices), key=lambda faction: (
+            faction not in ai.bot_factions, faction))
     else:
         # Every eligible dock fires the same Experimental Battlestation dice.
         choice = choices[0][0]
@@ -108,6 +126,33 @@ def war_effort_plan(ai, player):
         return None
     target = max(eligible, key=lambda tile: reinforcement_value(ai, player, tile))
     return reinforcement_value(ai, player, target)[0], playable[0][0], target.position
+
+
+def refit_plan(ai, player):
+    """Use Refitting as a tactical action when mechs can defend a frontier."""
+    cards = ai.window.action_cards
+    if not hasattr(cards, 'playable'):
+        return None
+    playable = [(index, alias) for index, alias in cards.playable(player, None)
+                if canonical_action_card(alias) == 'refit']
+    if not playable:
+        return None
+    exposed = []
+    for tile in ai.window.board.values():
+        infantry = sum(unit.owner == player.faction and unit.kind == 'infantry'
+                       for unit in tile.units)
+        if not infantry:
+            continue
+        hostile = sum(unit.owner != player.faction and
+                      unit.kind in ('infantry', 'mech')
+                      for neighbor in ai.window.movement.neighbors(tile)
+                      for unit in neighbor.units)
+        if hostile:
+            exposed.append((hostile, infantry))
+    if not exposed:
+        return None
+    threat, infantry = max(exposed)
+    return min(14, 5 + 2 * threat + min(2, infantry)), playable[0][0]
 
 
 def play_useful_card(ai, session):
@@ -182,6 +227,26 @@ def play_useful_card(ai, session):
                                   unit.unit_id not in session.selected
                                   for unit in session.target.units) and reinforcement_available(
                                       ai, player, 'dreadnought') else 0
+            elif effect == 'rally':
+                score = 50 if player.command_pools['fleet'] < 4 else 25
+            elif effect == 'harness':
+                score = 12 * (player.commodity_limit - player.commodities)
+            elif effect == 'counterstroke':
+                score = 65
+            elif effect == 'forward_supply_base':
+                score = 70
+            elif effect == 'solar_flare':
+                cannons = [unit for tile in (session.target, *ctl.neighbors(session.target))
+                           for unit in tile.units if unit.owner != faction and
+                           unit_profile(unit).get('spaceCannonHitsOn')]
+                score = 15 + 10 * min(3, len(cannons)) if cannons else 0
+            elif effect == 'blitz':
+                ground = sum(unit.owner != faction and
+                             unit.kind in ('infantry', 'mech')
+                             for unit in session.target.units)
+                score = 10 + 8 * min(4, ground) if ground else 0
+            elif effect == 'war_machine':
+                score = 45 if session.production_limit >= 2 else 15
             # Movement bonus cards are used by the route planner, not spent
             # just because a timing window happens to be open.
             if score:
@@ -200,7 +265,8 @@ def play_useful_card(ai, session):
 def plan_bombardment(session):
     """Spread bombardment by marginal expected casualties, avoiding empty planets."""
     faction, tile = session.player.faction, session.target
-    defenders = {planet.planet_id: sum(unit.owner != faction and unit.kind == 'infantry' and
+    defenders = {planet.planet_id: sum(unit.owner != faction and
+                  unit.kind in ('infantry', 'mech') and
                   unit.location.region == Region.PLANET and unit.location.planet_id == planet.planet_id
                   for unit in tile.units) for planet in tile.planets}
     distributions = {planet_id: [1.0] for planet_id, count in defenders.items() if count}

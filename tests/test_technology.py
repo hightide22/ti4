@@ -23,12 +23,15 @@ class TechnologyTests(unittest.TestCase):
 
     def test_every_available_card_has_a_bundled_scan(self):
         catalog = technology_catalog()
-        self.assertEqual(len(catalog), 59)
+        self.assertEqual(len(catalog), 85)
         self.assertTrue(all(technology_image(card).is_file() for card in catalog.values()))
-        self.assertTrue(all(card['source'] == 'base' for card in catalog.values()))
-        self.assertNotIn('aida', catalog)
-        self.assertNotIn('bs', catalog)
-        self.assertEqual(len(available_technologies(self.by_faction['sol'])), 25)
+        self.assertEqual({card['source'] for card in catalog.values()},
+                         {'base', 'pok', 'codex4'})
+        self.assertIn('aida', catalog)
+        self.assertIn('bs', catalog)
+        self.assertNotIn('md_base', catalog)
+        self.assertNotIn('x89_base', catalog)
+        self.assertEqual(len(available_technologies(self.by_faction['sol'])), 33)
         for faction in ('arborec', 'saar', 'muaat', 'l1z1x', 'ghost', 'mentak',
                         'naalu', 'sardakk', 'winnu', 'xxcha', 'yin', 'yssaril'):
             player = type(self.by_faction['sol'])(faction, faction, 'blu', 3)
@@ -41,7 +44,8 @@ class TechnologyTests(unittest.TestCase):
         self.assertTrue({technology_image(card).relative_to(RESOURCES).as_posix()
                          for card in catalog.values()} <= pinned)
         definitions, _ = unit_profiles()
-        self.assertTrue(all(profile.get('source') == 'base' for profile in definitions.values()))
+        self.assertTrue(all(profile.get('source') in ('base', 'pok', 'codex3')
+                            for profile in definitions.values()))
 
     def test_research_replaces_existing_and_future_sol_carriers(self):
         sol = self.by_faction['sol']

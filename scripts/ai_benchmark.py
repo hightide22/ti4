@@ -32,6 +32,7 @@ from action_card_deck import ActionCardDeck
 from action_cards import ActionCardController
 from app import BoardWindow
 from board import load_board
+from exploration import ExplorationController
 from game_ai import GameAI
 from movement import MovementController
 from player import create_players
@@ -83,6 +84,8 @@ class HeadlessGame:
     pass_turn = BoardWindow.pass_turn
     finish_status_phase = BoardWindow.finish_status_phase
     clear_round_tokens = BoardWindow.clear_round_tokens
+    apply_council_patronage = BoardWindow.apply_council_patronage
+    advance_hero_frontier = BoardWindow.advance_hero_frontier
     frame_player_systems = staticmethod(no_display)
     frame_action_route = staticmethod(no_display)
 
@@ -98,16 +101,31 @@ class HeadlessGame:
         self.action_cards = ActionCardController(
             players, self.movement, deck=self.action_card_deck.cards,
             turn=self.turn_order, rng=random.Random(seed + 1))
+        self.exploration = ExplorationController(
+            self.board, players, rng=random.Random(seed + 2),
+            action_cards=self.action_cards)
+        self.exploration.secret_objectives.deal_starting_hands()
+        self.movement.exploration = self.exploration
+        self.movement.exploration_is_bot = lambda player: True
         self.strategy = StrategyController(self.board, self.turn_order,
-                                            self.movement, self.action_cards)
+                                            self.movement, self.action_cards,
+                                            exploration=self.exploration)
         self.technology_actions = TechnologyActions(self.board, self.movement, self.turn_order)
         self.transaction = TransactionController(self.board, players, self.turn_order, self.movement)
         self.ai = ObservedAI(self, {p.faction for p in players})
         self.system_panel = SimpleNamespace(reset=no_display)
         self.movement_panel = SimpleNamespace(reset=no_display)
+        self.leader_panel = SimpleNamespace(close=no_display)
+        self.relic_action_panel = SimpleNamespace(open=False, alias=None,
+                                                  close=no_display)
+        self.exploration_panel = SimpleNamespace(close=no_display)
         self.smoke = self.main_menu_visible = self.strategy_view = self.focus_view = False
         self.inspector_visible = True
         self.turn_history_size = 0
+        self.turn_history_action_count = 0
+        self.patronage_round = 0
+        self.hero_frontier_queue = []
+        self.apply_council_patronage()
         self.last_infantry_return_turn = None
         self.mitosis_player = self.movement_error = self.token_context = None
         self.selected_units = ()
@@ -138,6 +156,12 @@ class HeadlessGame:
                            integrated_current=movement.integrated_current,
                            selected_units=sorted(movement.selected)) if movement else None),
             card_pending=(str(self.action_cards.pending) if self.action_cards.pending else None),
+            exploration_pending=(str(self.exploration.pending)
+                                 if self.exploration.pending else None),
+            freelancer_offer=self.exploration.freelancer_offer,
+            secret_returns=dict(self.exploration.secret_objectives.pending_returns),
+            hero_frontier_queue=[(player.faction, position)
+                                 for player, position in self.hero_frontier_queue],
             error=self.movement_error,
         )
 
@@ -157,7 +181,12 @@ class HeadlessGame:
         tiles = [(tile.position, tile.planet_owners, sorted(tile.command_tokens),
                   [(u.unit_id, u.location, u.damaged) for u in tile.units])
                  for tile in self.board.values()]
-        return repr((self.state(), self.turn_order.actions_used, sessions, players, tiles))
+        exploration = (self.exploration.fragments, self.exploration.attachments,
+                       self.exploration.space_tokens, self.exploration.relics.owned,
+                       self.exploration.relics.exhausted,
+                       self.exploration.secret_objectives.hands)
+        return repr((self.state(), self.turn_order.actions_used, sessions, players,
+                     tiles, exploration))
 
     def metrics(self):
         result = {}

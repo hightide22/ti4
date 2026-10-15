@@ -15,15 +15,25 @@ from technology import (COLOR_CODES, available_technologies, is_unit_upgrade,
 from units import Region, UNIT_TYPES, unit_profile, unit_profiles
 
 
-BUILD_KINDS = ('carrier', 'infantry', 'fighter', 'destroyer', 'cruiser',
+BUILD_KINDS = ('carrier', 'infantry', 'mech', 'fighter', 'destroyer', 'cruiser',
                'dreadnought', 'flagship', 'warsun')
 MODEL_LIMITS = {'carrier': 4, 'destroyer': 8, 'cruiser': 8,
-                'dreadnought': 5, 'flagship': 1, 'warsun': 2}
+                'dreadnought': 5, 'flagship': 1, 'warsun': 2, 'mech': 4}
 
 
 def owned_units(player, board):
     return [unit for tile in board.values() for unit in tile.units
             if unit.owner == player.faction]
+
+
+def effective_yields(player, card, exploration=None):
+    resources, influence = (exploration.planet_values(card.planet)
+                            if exploration else
+                            (card.planet.resources, card.planet.influence))
+    participants = (exploration.players.values() if exploration else (player,))
+    bonus = 3 if any(card.planet.planet_id in participant.hero_attachments
+                     for participant in participants) else 0
+    return resources + bonus, influence + bonus
 
 
 def command_targets(player, board, round_number):
@@ -44,7 +54,7 @@ def command_targets(player, board, round_number):
     return {'tactical': tactical, 'fleet': fleet, 'strategic': strategic}
 
 
-def technology_values(player, board, round_number):
+def technology_values(player, board, round_number, *, exploration=None):
     """Immediate fleet/economy value, with discounted paths to useful upgrades."""
     units = owned_units(player, board)
     fleet = Counter(unit.kind for unit in units)
@@ -55,11 +65,17 @@ def technology_values(player, board, round_number):
     enemies = [unit for tile in board.values() for unit in tile.units
                if unit.owner != player.faction]
     enemy_fighters = sum(unit.kind == 'fighter' for unit in enemies)
-    enemy_ground = sum(unit.kind == 'infantry' for unit in enemies)
+    enemy_ground = sum(unit.kind in ('infantry', 'mech') for unit in enemies)
     stacks = [sum(unit.owner == player.faction and capital_ship(unit)
                   for unit in tile.units) for tile in board.values()]
-    ready_income = sum(max(c.planet.resources, c.planet.influence)
+    ready_income = sum(max(effective_yields(player, c, exploration))
                        for c in player.planets if not c.exhausted)
+    specialty_count = sum(bool(exploration.planet_specialties(card.planet)
+                               if exploration else card.planet.tech_specialties)
+                          for card in player.planets)
+    docks = fleet['spacedock']
+    frontier_count = (sum(bool(tokens) for tokens in exploration.space_tokens.values())
+                      if exploration else 0)
     long_game = max(.35, 1.15 - .12 * round_number)
     values = {
         'amd': 5 + min(8, len(units) / 2),
@@ -71,13 +87,14 @@ def technology_values(player, board, round_number):
         'fl': 3 + min(12, player.command_pools['tactical'] * 2),
         'lwd': 5 + min(13, len(enemies) / 2),
         'dxa': 2 + min(8, fleet['infantry'] / 2),
-        'md_base': 1 + 4 * fleet['pds'],
+        'md': 4 + 3 * (fleet['pds'] + docks),
         'da': 2 + 5 * sustaining,
         'asc': 3 + 14 * sum(size >= 3 for size in stacks),
         'gls': 1 + 4 * fleet['pds'],
         'td': 2 + min(12, fleet['infantry']),
         'ie': 3 + min(14, fleet['carrier'] * 3 + fleet['infantry'] / 2),
-        'x89_base': 1 + min(14, enemy_ground) * bool(fleet['dreadnought'] + fleet['warsun']),
+        'x89c4': 4 + min(14, enemy_ground) *
+                  bool(fleet['dreadnought'] + fleet['warsun']),
         'nes': 4 + 8 * sustaining,
         'ers': 5 + 3 * sum(size > 0 for size in stacks),
         'pm': 20 * long_game,
@@ -90,6 +107,17 @@ def technology_values(player, board, round_number):
         'bio': 3 + min(14, fleet['infantry']),
         'qdn': 3 + 8 * (player.trade_goods >= 3),
         'is': 5 + 8 * (ready_income >= 8),
+        # Favor PoK technologies with direct effects in this ruleset. Cards
+        # without a resolver remain low priority until their ability is live.
+        'det': 2 + min(10, frontier_count * 2),
+        'sr': 5 + min(13, docks * 4 + ready_income / 2),
+        'pa': 3 + min(18, specialty_count * 5),
+        'bs': 3 + min(14, specialty_count * 3 + fleet['spacedock']),
+        'aida': 9 + min(12, 3 * (fleet['carrier'] + fleet['destroyer'] +
+                                 fleet['dreadnought'])),
+        'sar': 0,
+        'sdn': 0,
+        'pi': 5 + min(10, sum(player.command_pools.values())),
     }
     definitions, _ = unit_profiles()
     cards = available_technologies(player)
@@ -186,11 +214,19 @@ def production_frontier(controller, tile, player):
 def build_plan(controller, session, round_number):
     """Find a useful, affordable mix with no fleet/capacity waste after building."""
     player, tile = session.player, session.target
-    budget = player.available_values[0] + player.trade_goods
+    exploration = getattr(controller, 'exploration', None)
+    budget = (sum(effective_yields(player, card, exploration)[0]
+                  for card in player.planets if not card.exhausted) +
+              player.trade_goods)
     discount = int('st' in player.technologies and not session.integrated_current)
     if session.integrated_current:
-        budget = min(budget, next(p.resources for p in tile.planets
-                                 if p.planet_id == session.integrated_current))
+        planet = next(p for p in tile.planets
+                      if p.planet_id == session.integrated_current)
+        card = next((card for card in player.planets
+                     if card.planet.planet_id == planet.planet_id), None)
+        ceiling = (effective_yields(player, card, exploration)[0] if card else
+                   exploration.planet_values(planet)[0] if exploration else planet.resources)
+        budget = min(budget, ceiling)
     if budget + discount <= 0 or session.production_limit <= 0:
         return Counter()
     local_units = [unit for unit in tile.units if unit.owner == player.faction]
@@ -205,7 +241,7 @@ def build_plan(controller, session, round_number):
         enemies.extend(u for other in objective_systems for u in other.units
                        if u.owner != player.faction)
     hostile_ships = [u for u in enemies if UNIT_TYPES[u.kind]['ship']]
-    hostile_ground = sum(u.kind == 'infantry' for u in enemies)
+    hostile_ground = sum(u.kind in ('infantry', 'mech') for u in enemies)
     hostile_fighters = sum(u.kind == 'fighter' for u in hostile_ships)
     enemy_power = sum((11 - min(11, unit_profile(u).get('combatHitsOn') or 11)) /
                       10 * (unit_profile(u).get('combatDieCount') or 1) +
@@ -220,7 +256,7 @@ def build_plan(controller, session, round_number):
     capital_count = sum(capital_ship(u) for u in local_units if u.location.region == Region.SPACE)
     base_capacity = controller._capacity_value(tile, player.faction)
     cargo = controller._capacity_units(tile, player.faction)
-    transported_ground = sum(u.kind == 'infantry' for u in cargo)
+    transported_ground = sum(u.kind in ('infantry', 'mech') for u in cargo)
     fighters = sum(u.kind == 'fighter' for u in cargo)
     transported_fighters = sum(u.kind == 'fighter' and u.location.region == Region.TRANSPORT
                               for u in cargo)
@@ -230,7 +266,7 @@ def build_plan(controller, session, round_number):
                  bool(unit_profile(unit).get('productionValue')) for unit in local_units)
     available = [kind for kind in BUILD_KINDS if production_allowed(player, kind)
                  and not (ships_blocked and UNIT_TYPES[kind]['ship'])
-                 and (kind != 'infantry' or allow_ground)]
+                 and (kind not in ('infantry', 'mech') or allow_ground)]
     # Enough to cover nearby planets and one defended invasion, with diminishing
     # value beyond that. Grounded garrisons never consume transport capacity.
     planets_per_landing = max((sum(other.planet_owners.get(p.planet_id) != player.faction
@@ -254,10 +290,11 @@ def build_plan(controller, session, round_number):
         if player.faction == 'arborec' and total['infantry'] > letani:
             return False
         capitals = capital_count + sum(n for k, n in total.items()
-                                       if k not in ('infantry', 'fighter'))
+                                       if k not in ('infantry', 'mech', 'fighter'))
         capacity = base_capacity + sum(profiles[k].get('capacityValue', 0) * n
                                        for k, n in total.items())
-        ground = transported_ground + (total['infantry'] if ground_in_space else 0)
+        ground = transported_ground + (
+            total['infantry'] + total['mech'] if ground_in_space else 0)
         if ground > capacity:
             return False
         excess = max(0, ground + max(0, fighters + total['fighter'] - dock_slots) - capacity)
@@ -271,10 +308,12 @@ def build_plan(controller, session, round_number):
         count = local + Counter(added)
         capacity = base_capacity + sum(profiles[k].get('capacityValue', 0) * n
                                        for k, n in added.items())
-        troops = count['infantry']
+        troops = count['infantry'] + count['mech']
         reserve = max(0, troops - garrison_goal)
         lift = min(invasion_goal, capacity, reserve)
         ground_value = 3.1 * min(troops, garrison_goal) + invasion_weight * lift
+        ground_value += min(count['mech'], max(0, hostile_ground)) * (
+            2.5 + 2.0 * .85 ** (supply_distance - 1))
         if player.faction == 'arborec':
             ground_value += 2 * min(troops, 6)
         # Several transports create separate expeditions, but only while there

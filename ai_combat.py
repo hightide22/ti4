@@ -11,7 +11,7 @@ from random import Random
 from units import unit_profile
 
 
-LOSS_VALUE = {'fighter': 0, 'infantry': 0, 'destroyer': 2, 'cruiser': 3,
+LOSS_VALUE = {'fighter': 0, 'infantry': 0, 'mech': 3, 'destroyer': 2, 'cruiser': 3,
               'carrier': 5, 'dreadnought': 6, 'flagship': 8, 'warsun': 10}
 TRIALS = 192
 MAX_ROUNDS = 12
@@ -85,7 +85,7 @@ def _estimate(attacker_specs, defender_specs, space, cannon_specs, require_trans
     transport_index = 7 if linked_transport else 6
     if require_transport and not any(spec[transport_index] for spec in attacker_specs):
         return 0.0
-    if not defender_specs and not cannon_specs:
+    if not defender_specs and not cannon_specs and not magen:
         return 1.0
     if not attacker_specs:
         return 0.0
@@ -97,6 +97,8 @@ def _estimate(attacker_specs, defender_specs, space, cannon_specs, require_trans
         for threshold, dice, graviton in cannon_specs:
             _take_hits(attackers, sum(rng.random() >= (threshold - 1) * .1
                                       for _ in range(dice)), nonfighters=graviton)
+        if magen:
+            _take_hits(attackers, 1)
         if space:
             # Both triggers are determined before either casualty is removed.
             attack_assault = ('asc' in attacker_tech and
@@ -123,7 +125,7 @@ def _estimate(attacker_specs, defender_specs, space, cannon_specs, require_trans
                                  if 'da' in attacker_tech else ())
             damaged_defenders = ([spec for spec in defenders if spec[3] == 1 and spec[9]]
                                  if 'da' in defender_tech else ())
-            attack_hits = 0 if magen and round_number == 0 else _roll_hits(attackers, rng)
+            attack_hits = _roll_hits(attackers, rng)
             defense_hits = _roll_hits(defenders, rng)
             _take_hits(defenders, attack_hits)
             _take_hits(attackers, defense_hits)
@@ -138,12 +140,14 @@ def _estimate(attacker_specs, defender_specs, space, cannon_specs, require_trans
 
 
 def win_probability(attackers, defenders, players, *, space=True, cannons=(),
-                    require_transport=False, cargo_carriers=None):
+                    require_transport=False, cargo_carriers=None,
+                    defender_faction=None, magen_structures=False):
     """Estimate survival and victory, optionally requiring a loaded carrier to live.
 
     ``cargo_carriers`` contains IDs of ships carrying the required ground
     forces.  When omitted, the older capacity-only transport check applies.
     """
+    cannons = tuple(cannons)
     technologies = {player.faction: player.technologies for player in players}
     carrier_ids = set(cargo_carriers) if cargo_carriers is not None else None
     attacker_specs = tuple(sorted(
@@ -153,7 +157,10 @@ def win_probability(attackers, defenders, players, *, space=True, cannons=(),
     defender_specs = tuple(sorted(_spec(unit, technologies.get(unit.owner, ()))
                                   for unit in defenders))
     attacker_tech = technologies.get(attackers[0].owner, ()) if attackers else ()
-    defender_tech = technologies.get(defenders[0].owner, ()) if defenders else ()
+    defender_faction = (defender_faction or
+                        (defenders[0].owner if defenders else
+                         cannons[0].owner if cannons else None))
+    defender_tech = technologies.get(defender_faction, ())
     plasma_used = set()
     cannon_specs = []
     for cannon in cannons:
@@ -168,11 +175,9 @@ def win_probability(attackers, defenders, players, *, space=True, cannons=(),
                              int(profile.get('spaceCannonDieCount') or 1) + plasma,
                              'gls' in cannon_tech))
     relevant = {'asc', 'da'}
-    defender_player = next((player for player in players if defenders and
-                            player.faction == defenders[0].owner), None)
-    magen = (not space and 'md_base' in defender_tech and
-             'md_base' not in getattr(defender_player, 'exhausted_technologies', ()) and any(
-                 unit_profile(cannon).get('planetaryShield') for cannon in cannons))
+    magen = (not space and 'md' in defender_tech and
+             (magen_structures or any(unit.kind in ('pds', 'spacedock')
+                                      for unit in cannons)))
     return _estimate(attacker_specs, defender_specs, space, tuple(sorted(cannon_specs)),
                      require_transport, carrier_ids is not None,
                      tuple(sorted(relevant & set(attacker_tech))),

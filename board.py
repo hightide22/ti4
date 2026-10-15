@@ -57,6 +57,7 @@ class Tile:
     units: list[Unit] = field(default_factory=list)
     command_tokens: set[str] = field(default_factory=set)
     planet_owners: dict[str, str] = field(default_factory=dict)
+    sleeper_tokens: set[str] = field(default_factory=set)
     custodians_present: bool = False
 
     def __post_init__(self):
@@ -111,8 +112,12 @@ class EmptySpaceTile(Tile):
 class TileCatalog:
     def __init__(self, by_number: dict[int, TileDefinition]):
         self.by_number = by_number
+        self.by_system_id = {definition.system_id: definition
+                             for definition in by_number.values()}
 
     def __getitem__(self, number: int | str) -> TileDefinition:
+        if isinstance(number, str) and number in self.by_system_id:
+            return self.by_system_id[number]
         return self.by_number[int(number)]
 
     @classmethod
@@ -122,9 +127,14 @@ class TileCatalog:
         for path in sorted((resources / "systems").glob("*.json")):
             system = json.loads(path.read_text(encoding="utf-8"))
             system_id = str(system.get("id", ""))
-            if not system_id.isdecimal() or (sources is not None and system.get("source") not in sources):
+            if sources is not None and system.get("source") not in sources:
                 continue
-            number = int(system_id)
+            if system_id.isdecimal():
+                number = int(system_id)
+            elif system.get('source') == 'codex3' and system_id in ('92new', '93new', '94new'):
+                number = int(system_id[:2])
+            else:
+                continue
             if number in by_number:
                 raise ValueError(f"Duplicate tile number: {number}")
             image_path = resources / "tiles" / system["imagePath"]
@@ -150,7 +160,7 @@ class TileCatalog:
         return self.create(entry["id"], (entry["q"], entry["r"]), entry.get("player"), entry.get("color", (100, 207, 224)))
 
 
-TILES = TileCatalog.from_resources(sources={"base"})
+TILES = TileCatalog.from_resources(sources={"base", "pok", "codex3"})
 
 
 class Board(Mapping[Position, Tile]):
@@ -211,8 +221,8 @@ def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
                factions: tuple[str, ...] | list[str] | None = None) -> tuple[dict, Board]:
     config = json.loads(Path(map_path).read_text(encoding="utf-8"))
     if factions is not None:
-        faction_data = {f['alias']: f for f in json.loads(
-            (RESOURCES / 'data/factions/base.json').read_text(encoding='utf-8'))}
+        from factions import faction_catalog, validate_faction_selection
+        faction_data = faction_catalog()
         slot_positions = config.get('player_slots')
         if slot_positions:
             by_position = {(entry['q'], entry['r']): entry for entry in config['tiles']}
@@ -223,6 +233,7 @@ def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
             raise ValueError(f"This map requires exactly {len(slots)} factions")
         if len(set(factions)) != len(factions):
             raise ValueError('Each player must choose a different faction')
+        validate_faction_selection(factions)
         colors = {
             'sol': (106, 183, 255), 'jolnar': (185, 148, 248),
             'letnev': (219, 111, 132), 'hacan': (244, 183, 87),
@@ -233,6 +244,11 @@ def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
             'sardakk': (218, 86, 86), 'winnu': (194, 132, 255),
             'xxcha': (94, 183, 132), 'yin': (178, 131, 216),
             'yssaril': (115, 207, 144),
+            'argent': (220, 160, 78), 'cabal': (173, 82, 158),
+            'empyrean': (104, 122, 177), 'mahact': (180, 131, 212),
+            'naaz': (148, 204, 122), 'nomad': (117, 171, 226),
+            'titans': (187, 166, 107), 'keleresm': (167, 187, 211),
+            'keleresx': (167, 187, 211), 'keleresa': (167, 187, 211),
         }
         for entry, alias in zip(slots, factions):
             faction = faction_data.get(alias)

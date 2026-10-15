@@ -230,8 +230,9 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(session.stage, 'production')
         self.assertEqual(session.production_limit,
                          sum(value for _, value in self.controller.production_sites(session)))
-        with self.assertRaises(MovementError):
-            self.controller.adjust_production('mech', 1)
+        self.controller.adjust_production('mech', 1)
+        self.assertEqual(session.production_choices['mech'], 1)
+        self.controller.adjust_production('mech', -1)
         production_planet_id = session.production_sites[0][0]
         production_planet = next(planet for planet in self.home.planets
                                  if planet.planet_id == production_planet_id)

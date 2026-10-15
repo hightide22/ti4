@@ -65,6 +65,26 @@ class TacticalPlanningQualityTests(unittest.TestCase):
             defenders = [unit for unit in target.units if unit.location.planet_id == planet.planet_id]
             self.assertGreaterEqual(win_probability(attackers, defenders, self.players, space=False), .8)
 
+    def test_mech_takes_defended_planet_while_infantry_claims_empty_one(self):
+        target = TILES.create(30, (1, 0))
+        defended, empty = target.planets
+        target.planet_owners[defended.planet_id] = self.enemy.faction
+        self.infantry(target, 1, self.enemy.faction, defended.planet_id)
+        infantry = self.infantry(self.home, 1)[0]
+        mech = self.unit(self.home, 'mech', planet=self.home.planets[0].planet_id)
+        assignments = plan_landings(self.ai, target, self.player, [infantry, mech])
+        self.assertEqual(assignments[mech.unit_id], defended.planet_id)
+        self.assertEqual(assignments[infantry.unit_id], empty.planet_id)
+
+    def test_codex_magen_ground_hit_is_not_first_round_suppression(self):
+        self.enemy.technologies |= {'md'}
+        attacker = self.infantry(self.home, 1)[0]
+        self.assertEqual(win_probability([attacker], [], self.players,
+                                         space=False), 1)
+        self.assertEqual(win_probability([attacker], [], self.players,
+                                         space=False, defender_faction='hacan',
+                                         magen_structures=True), 0)
+
     def test_home_is_not_abandoned_to_a_legal_neighboring_invasion(self):
         self.unit(self.home, 'carrier')
         self.unit(self.home, 'fighter')

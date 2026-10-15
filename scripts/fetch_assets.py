@@ -1,4 +1,4 @@
-"""Restore pinned AsyncTI4 resources required by the current base-game build."""
+"""Restore pinned AsyncTI4 resources required by the current game build."""
 from __future__ import annotations
 
 import argparse

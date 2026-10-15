@@ -88,11 +88,11 @@ class UnitTests(unittest.TestCase):
             else:
                 self.assertEqual(placements[-1].badge_count, count)
 
-    def test_expansion_mech_is_not_a_playable_unit(self):
-        self.assertNotIn('mech', UNIT_TYPES)
-        with self.assertRaisesRegex(ValueError, 'Unknown unit'):
-            Unit('expansion-mech', 'mech', 'sol', 'blu',
-                 UnitLocation(Region.PLANET, planet_id=self.homes[1].planets[0].planet_id))
+    def test_expansion_mech_is_a_playable_ground_force(self):
+        self.assertIn('mech', UNIT_TYPES)
+        unit = Unit('expansion-mech', 'mech', 'sol', 'blu',
+                    UnitLocation(Region.PLANET, planet_id=self.homes[1].planets[0].planet_id))
+        self.assertFalse(UNIT_TYPES[unit.kind]['ship'])
 
     def test_inventory_separates_planet_garrisons(self):
         tile = self.homes[16]

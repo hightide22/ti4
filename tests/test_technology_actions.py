@@ -1,5 +1,4 @@
 import unittest
-from unittest.mock import patch
 
 from board import load_board
 from movement import MovementController, Session, Snapshot
@@ -21,19 +20,12 @@ class TechnologyActionTests(unittest.TestCase):
                          if any(unit.owner == 'sol' and unit.kind == 'spacedock'
                                 for unit in tile.units))
 
-    def test_x89_destroys_all_infantry_on_selected_planet(self):
-        self.sol.technologies |= {'x89_base'}
-        self.home.units.append(Unit('test-bombarder', 'dreadnought', 'sol',
-                                    self.sol.color_code, UnitLocation(Region.SPACE)))
-        enemy = self.players[1]
-        self.home.units.append(Unit('test-enemy-infantry', 'infantry', enemy.faction,
-                                    enemy.color_code, UnitLocation(Region.PLANET, planet_id='jord')))
-        self.assertIn('jord', {key for key, _ in self.actions.targets(self.sol, 'x89_base')})
-        with patch('movement.random.randint', return_value=1):
-            self.actions.use(self.sol, 'x89_base', 'jord')
-        self.assertFalse(any(unit.kind == 'infantry' and unit.location.planet_id == 'jord'
-                             for unit in self.home.units))
-        self.assertIn('x89_base', self.sol.exhausted_technologies)
+    def test_codex_x89_is_not_a_separate_action(self):
+        self.sol.technologies |= {'x89c4'}
+        self.assertEqual(self.actions.targets(self.sol, 'x89c4'), [])
+        with self.assertRaisesRegex(ValueError, 'unavailable'):
+            self.actions.use(self.sol, 'x89c4', 'jord')
+        self.assertNotIn('x89c4', self.sol.exhausted_technologies)
 
     def test_production_biomes_pays_strategy_token_and_gives_goods(self):
         hacan = next(p for p in self.players if p.faction == 'hacan')
@@ -63,6 +55,26 @@ class TechnologyActionTests(unittest.TestCase):
         self.assertIn('td', self.sol.exhausted_technologies)
         self.movement.undo()
         self.assertIn(infantry, self.home.units)
+
+    def test_transit_diodes_can_move_a_mech(self):
+        self.sol.technologies |= {'td'}
+        destination = next(tile for tile in self.board.values()
+                           if tile is not self.home and tile.planets)
+        planet = destination.planets[0]
+        destination.planet_owners[planet.planet_id] = 'sol'
+        self.sol.planets.append(PlanetCard(planet))
+        mech = Unit('test-transit-mech', 'mech', 'sol', self.sol.color_code,
+                    UnitLocation(Region.PLANET, planet_id='jord'))
+        self.home.units.append(mech)
+        self.assertIn(mech.unit_id, {key for key, _ in self.actions.transit_units(self.sol)})
+        self.actions.select_transit_unit(self.sol, mech.unit_id)
+        self.actions.place_transit_unit(self.sol, planet.planet_id)
+        self.actions.finish_transit(self.sol)
+        self.assertIn(mech, destination.units)
+        self.assertEqual(mech.location.planet_id, planet.planet_id)
+        self.movement.undo()
+        self.assertIn(mech, self.home.units)
+        self.assertEqual(mech.location.planet_id, 'jord')
 
     def test_integrated_economy_production_is_capped_by_captured_planet_resources(self):
         self.sol.technologies |= {'ie'}

@@ -9,7 +9,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe app.py
 ```
 
-Controls: left-click selects a system; right/middle drag pans; mouse wheel zooms; F fits the whole board. The map follows the official TI4 Learn to Play three-player layout on page 22, with Sol, Hacan and Jol-Nar occupying the three home-system placeholders. Factions can be changed in maps/three_player.json.
+Controls: left-click selects a system; right/middle drag pans; mouse wheel zooms; F fits the whole board. The three- and four-player layouts include Prophecy of Kings systems and can be changed in `maps/`.
 
 Validation:
 
@@ -18,6 +18,7 @@ Validation:
 .\.venv\Scripts\python.exe app.py --smoke-test
 .\.venv\Scripts\python.exe app.py --technology-smoke-test
 .\.venv\Scripts\python.exe scripts/round_draft_smoke.py
+.\.venv\Scripts\python.exe scripts/expansion_ui_smoke.py
 ```
 
 Run reproducible AI matches without opening a window:
@@ -29,7 +30,7 @@ Run reproducible AI matches without opening a window:
 
 The benchmark drives every seat through the real action controllers and the application's turn/status-phase orchestration. It seeds dice, card draws, generated unit IDs and Python hash ordering; only presentation delays are bypassed. Each report includes completed rounds, expansion, controlled resources, fleet composition, research, action targets and estimated battle odds, plus decision latency and the complete event trace. A controller error, repeated no-op decision, step limit or time limit fails the run and records the exact phase. Use identical seeds to compare revisions. These matches check autonomous play and regressions; they do not establish a win rate against humans. GUI smoke tests remain necessary for rendering and interaction changes.
 
-The board opens in a maximized desktop window with its normal title bar and window controls. Fleet layouts are computed in the background so the board appears without waiting for every starting system to finish arranging its units. Players can activate systems and move ships and carried units. Assets are loaded from assets/source/asyncti4/src/main/resources. The source bundle includes other editions, but gameplay catalogs and maps expose base-game content only.
+The board opens in a maximized desktop window with its normal title bar and window controls. Fleet layouts are computed in the background so the board appears without waiting for every starting system to finish arranging its units. Players can activate systems and move ships and carried units. Assets are loaded from `assets/source/asyncti4/src/main/resources`. The game includes the seven Prophecy of Kings factions, its exploration and relic decks, leaders, technologies and systems, plus Council Keleres and selected Codex replacement cards.
 
 At the new-game screen, choose the three- or four-player map and the factions in each seat. Check **PLAY AGAINST AI** and click your faction row; the other seats become computer opponents. Their draft, command allocation, strategy actions and secondaries, technology research, movement, invasions, combat hit assignment and production proceed automatically. Their choices use board position, available resources, transport capacity, fleet supply and enemy strength. On the opening turn, a bot with a reachable neutral planet, a transport and infantry expands before playing a strategy card or activating its home dock for production. A contested human planet receives 65% of the opponent-pressure weight and a bot-owned planet 35%; neutral expansion remains valuable. Before attacking, the bot estimates its chance of winning with the ships it can actually move, including fighters, sustain damage, anti-fighter barrage, hostile PDS fire and survival of a transport for an invasion. It also checks ground-combat odds for occupied planets and declines attacks below an 80% estimated win chance. These estimates do not consume game dice.
 
@@ -55,7 +56,7 @@ Each entry specifies `id`, `q`, `r`, and optionally `player` and `color`. Images
 
 ## Component catalog
 
-`TILES.by_number` stores base-game tile definitions by integer number. `TILES[18]` describes Mecatol Rex; `TILES.create(18, (0, 0))` creates a placed tile object. Definitions and planets are shared component descriptions, while each placed tile has independent coordinates, player and sprite. The catalog selects `HomeSystemTile`, `PlanetaryTile`, `AnomalyTile`, or `EmptySpaceTile`, all derived from `Tile`.
+`TILES.by_number` stores base-game and Prophecy of Kings tile definitions by integer number. `TILES[18]` describes Mecatol Rex; `TILES.create(18, (0, 0))` creates a placed tile object. Definitions and planets are shared component descriptions, while each placed tile has independent coordinates, player and sprite. The catalog selects `HomeSystemTile`, `PlanetaryTile`, `AnomalyTile`, or `EmptySpaceTile`, all derived from `Tile`.
 
 Each `Planet` has `name`, `planet_type`, `resources`, `influence`, `tech_specialties` and faction homeworld fields. Ownership is tracked per placed tile so shared component definitions remain unchanged.
 
@@ -99,7 +100,7 @@ A strategic action holds the current turn until the owner finishes the entire pr
 
 ## Action cards
 
-The combat and movement shortlist contains 18 base-game action cards. Politics draws two cards for its owner and lets other players spend a Strategy token to draw up to two. Each player also draws one at the end of a round, up to the seven-card hand limit. The **CARDS** button glows whenever any player's hand has a card available in the current timing window; playable scans also glow with **PLAY NOW**. The hand supports movement bonuses, combat rolls and rerolls, hit cancellation, retreat, Space Cannon, bombardment, system movement, unit placement and combat reactions. The card list and timing windows are in [docs/action_cards.md](docs/action_cards.md).
+The action-card deck is a curated selection of base-game, Prophecy of Kings and Codex cards focused on combat, movement and economy. Politics draws two cards for its owner and lets other players spend a Strategy token to draw up to two. Each player also draws one at the end of a round, up to the seven-card hand limit. The **CARDS** button glows whenever any player's hand has a card available in the current timing window; playable cards also glow with **PLAY NOW**. The card list and timing windows are in [docs/action_cards.md](docs/action_cards.md).
 
 Leadership uses explicit payment: choose the extra token count, click ready planets for influence, and choose trade goods with +/- controls. The dialog shows paid influence versus required influence. Nothing selects payment automatically, and commodities cannot pay. New tokens must be distributed before the next secondary offer. The combined command-sheet, board, and unallocated-token count is capped at 16. Leadership's secondary has no strategy-token cost.
 
@@ -113,7 +114,13 @@ Open **TECHNOLOGY** in the system inspector to view the faction's unit sheet and
 
 Strategy card 7 opens the same dialog for research. Its owner researches one technology for free and may research a second for 6 resources. Other players may spend a strategy token and 4 resources for one technology; Jol-Nar may use Brilliant to resolve the primary effect instead. Select a card, meet its colored prerequisites with owned technologies or ready specialty planets, and click planet cards below the dialog to pay resources. Trade goods may cover resource cost. The dialog distinguishes resource payment from specialty use.
 
-Researched base-game action technologies expose their targets in the card detail: X-89 Bacterial Weapon, Transit Diodes and Production Biomes. Quantum Datahub Node offers a strategy-card exchange at the end of drafting. Base-game production discounts and unit-profile abilities apply to tactical production, movement and combat. Agenda effects await that game phase.
+Researched action technologies expose their targets in the card detail: X-89 Bacterial Weapon, Transit Diodes and Production Biomes. Quantum Datahub Node offers a strategy-card exchange at the end of drafting. Production discounts and unit-profile abilities apply to tactical production, movement and combat. The research catalog and currently playable Prophecy of Kings effects are described in [docs/expansion_technologies.md](docs/expansion_technologies.md). Agenda effects await that game phase.
+
+## Prophecy of Kings features
+
+Planet and frontier exploration, attachments, fragments and relics use the expansion decks. Leader cards appear in the player dashboard; supported agent, commander and hero effects can be activated at their timing windows. Legendary planets have their own abilities. The [exploration guide](docs/exploration.md) describes payment and secret-objective draws.
+
+This is still a playable subset of Twilight Imperium rather than a complete rules implementation. Agenda and general objective-scoring phases are absent, so hero unlocks can be recorded manually. Some leader, relic and faction-technology text is displayed for reference without its full effect. The action-card deck is intentionally curated, and newer cards without bundled scans use a text card frame.
 
 Strategy and roster artwork and reference data are included in the pinned asset manifest. The GUI scenario verifies central drafting at 1440×900 and 1120×720, manual influence payment, token allocation, immediate secondary offers, free Trade recipients, Warfare production, and player details:
 

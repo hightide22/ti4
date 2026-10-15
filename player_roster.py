@@ -10,7 +10,10 @@ from board import RESOURCES
 from player import command_tokens_in_reinforcements
 from player_panel import Control
 from strategy_panel import strategy_image
-from action_cards import ACTION_CARD_DEFS
+from action_cards import ActionCardController
+from factions import faction_catalog
+from leaders import leader_catalog
+from technology import technology_catalog
 
 
 @lru_cache(maxsize=1)
@@ -19,9 +22,11 @@ def player_reference():
         return json.loads((RESOURCES / path).read_text(encoding='utf-8'))
     cards = {card['alias']: card['name'] for card in read('data/action_cards/action_cards.json')
              if card.get('source') == 'base'}
-    return ({f['alias']: f for f in read('data/factions/base.json')},
-            {a['id']: a for a in read('data/abilities/base.json')},
-            {t['alias']: t for t in read('data/technologies/pok.json') if t.get('source') == 'base'}, cards)
+    abilities = {}
+    for filename in ('base.json', 'pok.json', 'other.json'):
+        abilities.update({ability['id']: ability
+                          for ability in read(f'data/abilities/{filename}')})
+    return faction_catalog(), abilities, technology_catalog(), cards
 
 
 class PlayerRoster:
@@ -133,12 +138,25 @@ class PlayerRoster:
             lines.append((f'{tech.get("name", tech_id)}: {tech.get("text", "")}', INK))
         if not player.technologies:
             lines.append(('None', INK))
+        if player.leaders:
+            lines.append(('LEADERS', MUTED))
+            for leader_id, state in player.leaders.items():
+                definition = leader_catalog()[leader_id]
+                status = ('Purged' if state.purged else 'Locked' if not state.unlocked else
+                          'Exhausted' if state.exhausted else 'Ready')
+                lines.append((f'{definition["type"].title()} · {definition["name"]} · {status}',
+                              GOLD if state.unlocked and not state.purged else MUTED))
+                if state.unlocked:
+                    lines.append((f'{definition.get("abilityWindow", "")} '
+                                  f'{definition.get("abilityText", "")}'.strip(), INK))
+                elif definition.get('unlockCondition'):
+                    lines.append((f'Unlock: {definition["unlockCondition"]}', MUTED))
         card_limit = 'unlimited' if player.faction == 'yssaril' else '7'
         lines.append((f'ACTION CARDS · {len(player.action_cards)}/{card_limit}', MUTED))
         if w.ai.is_bot(player):
             lines.append(('Hidden until played', INK))
         else:
-            names = [ACTION_CARD_DEFS.get(alias, {}).get('name', alias)
+            names = [ActionCardController.name_for(alias)
                      for alias in player.action_cards]
             lines.append((', '.join(names) if names else 'None', INK))
         return lines

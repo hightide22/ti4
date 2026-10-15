@@ -93,7 +93,7 @@ class SetupTests(unittest.TestCase):
                     self.assertTrue(mobile_ship(dock))
                     self.assertFalse(capital_ship(dock))
 
-    def test_every_base_faction_starts_with_technologies_in_the_base_catalog(self):
+    def test_every_base_faction_starts_with_current_codex_technologies(self):
         faction_data = json.loads(
             (ROOT / 'assets/source/asyncti4/src/main/resources/data/factions/base.json')
             .read_text(encoding='utf-8'))
@@ -111,9 +111,7 @@ class SetupTests(unittest.TestCase):
                 declared = set(data.get('startingTech') or ())
                 options = set(data.get('startingTechOptions') or ())
                 if declared:
-                    self.assertEqual(player.technologies,
-                                     frozenset({'md_base' if tech == 'md' else tech
-                                                for tech in declared}))
+                    self.assertEqual(player.technologies, frozenset(declared))
                 elif options:
                     self.assertEqual(len(player.technologies),
                                      int(data.get('startingTechAmount') or 0))
@@ -125,7 +123,7 @@ class SetupTests(unittest.TestCase):
 
                 for alias in player.technologies:
                     self.assertIn(alias, catalog)
-                    self.assertEqual(catalog[alias].get('source'), 'base')
+                    self.assertIn(catalog[alias].get('source'), ('base', 'pok', 'codex1', 'codex4'))
                     self.assertIn(catalog[alias].get('faction'), (None, faction))
 
     def test_ghost_home_system_routes_to_the_galaxy_through_the_gate(self):

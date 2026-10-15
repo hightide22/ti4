@@ -8,7 +8,7 @@ from ui_theme import (PANEL, CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELECTED, R
 from units import UNIT_TYPES, Region, unit_profile
 from technology import production_allowed
 
-PRODUCTION_ORDER = ('infantry', 'fighter', 'destroyer', 'cruiser', 'carrier', 'dreadnought',
+PRODUCTION_ORDER = ('infantry', 'mech', 'fighter', 'destroyer', 'cruiser', 'carrier', 'dreadnought',
                     'flagship', 'warsun')
 
 
@@ -196,6 +196,13 @@ class MovementPanel:
                    card_x, card_y, 133, 27, primary=bool(playable_cards), size=9)
             self.buttons.append((('action_cards',), card_x, card_x + 133,
                                  card_y, card_y + 27))
+        if (session.stage == 'movement' and session.player.faction == 'titans' and
+                target.sleeper_tokens):
+            awaken_x, awaken_y = x, window.height - 136
+            button(window, 'awaken_sleepers', 'AWAKEN SLEEPERS', awaken_x, awaken_y,
+                   width, 28, primary=True, size=9)
+            self.buttons.append((('awaken_sleepers',), awaken_x,
+                                 awaken_x + width, awaken_y, awaken_y + 28))
         if session.stage in ('space_cannon_action', 'space_cannon_response',
                              'space_cannon_direct_hit', 'invasion_start'):
             if session.stage == 'space_cannon_action':
@@ -264,6 +271,20 @@ class MovementPanel:
             if notices:
                 y -= 12
             if session.stage == 'movement':
+                scanlink = window.movement.scanlink_planets()
+                if scanlink:
+                    window.text('scanlink_title', 'SCANLINK DRONE NETWORK · EXPLORE 1 PLANET',
+                                x, y, 10, GOLD, width)
+                    y -= 24
+                    for planet_id in scanlink:
+                        planet = next(planet for planet in session.target.planets
+                                      if planet.planet_id == planet_id)
+                        button(window, ('scanlink', planet_id), planet.name,
+                               x, y - 31, width, 29, size=9)
+                        self.hits.append((('scanlink', planet_id), x, x + width,
+                                          y - 31, y - 2))
+                        y -= 35
+                    y -= 13
                 window.text('move_sources', f'SOURCES FOR THIS ACTIVATION · {len(session.sources)}', x, y, 11, ACCENT)
                 y -= 28
                 if ('scc' in session.player.technologies and
@@ -384,7 +405,7 @@ class MovementPanel:
                 window.text('landing_title', 'COMMIT GROUND FORCES', x, y, 11, ACCENT)
                 y -= 28
                 if not forces:
-                    window.text('landing_empty', 'No transported infantry can land.', x, y - 10, 11, MUTED, width)
+                    window.text('landing_empty', 'No transported ground forces can land.', x, y - 10, 11, MUTED, width)
                     y -= 38
                 for unit in forces:
                     planet_id = session.landings.get(unit.unit_id)
@@ -465,7 +486,7 @@ class MovementPanel:
                     y -= 18
                 window.text('production_capacity',
                             f'Cost cap: {amount(selected_cost)}/'
-                            f'{amount(next(planet.resources for planet in session.target.planets if planet.planet_id == session.integrated_current))}'
+                            f'{amount(window.movement.planet_resources(next(planet for planet in session.target.planets if planet.planet_id == session.integrated_current)))}'
                             if session.integrated_current else
                             f'Production limit: {produced}/{session.production_limit}',
                             x, y, 10, MUTED)
@@ -475,6 +496,71 @@ class MovementPanel:
                             x, y, 10, INK)
                 meter(x, y - 12, width, paid, selected_cost, GOLD)
                 y -= 27
+                if ('aida' in session.player.technologies and
+                        'aida' not in session.player.exhausted_technologies and
+                        not session.integrated_current):
+                    from technology import is_unit_upgrade, technology_catalog
+                    upgrades = sum(is_unit_upgrade(technology_catalog()[alias])
+                                   for alias in session.player.technologies
+                                   if alias in technology_catalog())
+                    if upgrades:
+                        label = (f'AI Development Algorithm · save {upgrades} resources' +
+                                 (' · SELECTED' if session.aida_production_discount else ''))
+                        button(window, 'aida_discount', label, x, y - 30, width, 29,
+                               selected=session.aida_production_discount, size=9)
+                        self.hits.append((('aida_discount',), x, x + width,
+                                          y - 30, y - 1))
+                        y -= 40
+                sar_planets = window.movement.self_assembly_planets()
+                if sar_planets:
+                    window.text('sar_title', 'SELF-ASSEMBLY ROUTINES · FREE MECH AFTER PRODUCTION',
+                                x, y, 9, GOLD, width)
+                    y -= 20
+                    for planet_id in sar_planets:
+                        planet = next(planet for planet in session.target.planets
+                                      if planet.planet_id == planet_id)
+                        button(window, ('sar_planet', planet_id), planet.name,
+                               x, y - 29, width, 27,
+                               selected=session.self_assembly_planet == planet_id,
+                               size=9)
+                        self.hits.append((('sar_planet', planet_id), x, x + width,
+                                          y - 29, y - 2))
+                        y -= 33
+                    if session.self_assembly_planet:
+                        button(window, 'sar_none', 'DO NOT PLACE MECH',
+                               x, y - 29, width, 27, size=9)
+                        self.hits.append((('sar_planet', None), x, x + width,
+                                          y - 29, y - 2))
+                        y -= 33
+                    y -= 8
+                if session.player.faction == 'cabal':
+                    available_captives = [kind for kind in PRODUCTION_ORDER
+                                          if session.production_choices.get(kind, 0) and
+                                          session.player.captured_units.get(kind, 0)]
+                    if available_captives:
+                        window.text('amalgamation_title',
+                                    'AMALGAMATION · SPEND CAPTURED UNITS INSTEAD OF COST',
+                                    x, y, 9, GOLD, width)
+                        y -= 19
+                        for kind in available_captives:
+                            maximum = min(session.production_choices[kind],
+                                          session.player.captured_units[kind])
+                            current = session.amalgamation_choices.get(kind, 0)
+                            surface(x, x + width, y - 34, y, SELECTED if current else CARD)
+                            window.text(('amalgamation_name', kind),
+                                        f'{UNIT_TYPES[kind]["name"]}  {current}/{maximum}',
+                                        x + 9, y - 22, 10, INK, width - 85)
+                            for delta, left in ((-1, x + width - 76),
+                                                (1, x + width - 38)):
+                                enabled = current > 0 if delta < 0 else current < maximum
+                                button(window, ('amalgamation_button', kind, delta),
+                                       '+' if delta > 0 else '−', left, y - 31, 32, 28,
+                                       enabled=enabled, size=10)
+                                if enabled:
+                                    self.hits.append((('amalgamation', kind, delta),
+                                                      left, left + 32, y - 31, y - 3))
+                            y -= 39
+                        y -= 8
                 surface(x, x + width, y - 40, y, SELECTED)
                 window.text('production_trade_goods',
                             f'Trade goods  {session.trade_goods_to_spend} / {session.player.trade_goods}',
@@ -577,7 +663,7 @@ class MovementPanel:
             if session.integrated_current:
                 planet = next(planet for planet in session.target.planets
                               if planet.planet_id == session.integrated_current)
-                can_produce = can_produce and window.movement.production_cost(session) <= planet.resources
+                can_produce = can_produce and window.movement.production_cost(session) <= window.movement.planet_resources(planet)
             label = 'Produce units' if can_produce else 'Add payment' if session.production_choices else 'Choose units'
             actions = (('produce', label, x, split - 6, SELECTED),
                        ('skip_production', 'Skip production', split, x + width, CARD))

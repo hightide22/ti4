@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from movement import Snapshot, UndoEntry
-from units import Region, UNIT_TYPES, UnitLocation, unit_profile
+from units import Region, UNIT_TYPES, UnitLocation
 
 
 @dataclass
@@ -29,7 +29,7 @@ class TechnologyActions:
         moved = self.transit.moved_ids if self.transit else set()
         return [(unit.unit_id, f'Tile {tile.system_id} · {unit.kind.title()}')
                 for tile in self.board.values() for unit in tile.units
-                if unit.owner == player.faction and unit.kind == 'infantry'
+                if unit.owner == player.faction and unit.kind in ('infantry', 'mech')
                 and unit.unit_id not in moved]
 
     def transit_planets(self, player):
@@ -46,7 +46,8 @@ class TechnologyActions:
             raise ValueError('This ground force cannot use Transit Diodes.')
         if self.transit is None:
             self.transit = TransitResolution(player, Snapshot.capture(
-                self.board, player, self.turn.players))
+                self.board, player, self.turn.players,
+                exploration=self.movement.exploration))
         if len(self.transit.moved_ids) >= 4:
             raise ValueError('Transit Diodes can move at most 4 ground forces.')
         self.transit.selected_unit = unit_id
@@ -81,23 +82,55 @@ class TechnologyActions:
 
     def targets(self, player, alias):
         if self.transit or alias not in player.technologies or \
-                alias in player.exhausted_technologies:
+                (alias != 'pa' and alias in player.exhausted_technologies):
             return []
         if (self.turn.active_player is not player or self.turn.strategy_selection or
                 self.turn.command_allocation or self.turn.strategy_resolution or
                 self.movement.session):
             return []
+        if alias == 'pa':
+            exploration = self.movement.exploration
+            return [(card.planet.planet_id, card.planet.name) for card in player.planets
+                    if (exploration.planet_specialties(card.planet) if exploration else
+                        card.planet.tech_specialties) and not card.exhausted and any(
+                        tile.planet_owners.get(card.planet.planet_id) == player.faction
+                        for tile in self.board.values())]
+        if alias == 'bs' and self.turn.action_used:
+            exploration = self.movement.exploration
+            planets = [(f'planet:{card.planet.planet_id}', f'Ready {card.planet.name}')
+                       for card in player.planets if card.exhausted and
+                       (exploration.planet_specialties(card.planet) if exploration else
+                        card.planet.tech_specialties)]
+            techs = [(f'tech:{key}', f'Ready {key}') for key in sorted(
+                player.exhausted_technologies & player.technologies - {'bs'})]
+            return planets + techs
+        if alias == 'pi' and self.turn.action_used:
+            current = tuple(player.command_pools[key]
+                            for key in ('tactical', 'fleet', 'strategic'))
+            total = sum(current)
+            min_fleet = max((sum(unit.owner == player.faction and
+                                 unit.location.region == Region.SPACE and
+                                 UNIT_TYPES[unit.kind]['ship'] and unit.kind != 'fighter'
+                                 for unit in tile.units) for tile in self.board.values()), default=0)
+            allocations = ((tactical, fleet, total - tactical - fleet)
+                           for tactical in range(total + 1)
+                           for fleet in range(total - tactical + 1))
+            alternatives = sorted((allocation for allocation in allocations
+                                   if allocation != current and allocation[1] >= min_fleet),
+                                  key=lambda allocation: (sum(abs(new - old) for new, old
+                                                              in zip(allocation, current)), allocation))
+            return [(f'{tactical}:{fleet}:{strategic}',
+                     f'Tactic {tactical} · Fleet {fleet} · Strategy {strategic}')
+                    for tactical, fleet, strategic in alternatives]
         if not self.turn.can_take_action:
             return []
-        if alias == 'x89_base':
-            return [(planet.planet_id, f'Tile {tile.system_id} · {planet.name}')
-                    for tile in self.board.values() if any(
-                        unit.owner == player.faction and unit.location.region == Region.SPACE and
-                        UNIT_TYPES[unit.kind]['ship'] and unit_profile(unit).get('bombardHitsOn')
-                        for unit in tile.units)
-                    for planet in tile.planets if any(
-                        unit.kind == 'infantry' and unit.location.region == Region.PLANET and
-                        unit.location.planet_id == planet.planet_id for unit in tile.units)]
+        if alias == 'sr':
+            return [(unit.unit_id, f'Tile {tile.system_id} · Space Dock')
+                    for tile in self.board.values() for unit in tile.units
+                    if unit.owner == player.faction and unit.kind == 'spacedock' and
+                    not any(other.owner != player.faction and
+                            other.location.region == Region.SPACE and
+                            UNIT_TYPES[other.kind]['ship'] for other in tile.units)]
         if alias == 'pm' and player.command_pools['strategic']:
             return [(other.faction, f'{other.name} · give 2 trade goods')
                     for other in self.turn.players if other is not player]
@@ -106,15 +139,42 @@ class TechnologyActions:
     def use(self, player, alias, target_id):
         if target_id not in {key for key, _ in self.targets(player, alias)}:
             raise ValueError('This technology or target is unavailable.')
-        snapshot = Snapshot.capture(self.board, player, self.turn.players)
-        if alias == 'x89_base':
-            tile = next(tile for tile in self.board.values()
-                        if any(planet.planet_id == target_id for planet in tile.planets))
-            for unit in list(tile.units):
-                if (unit.kind == 'infantry' and unit.location.region == Region.PLANET and
-                        unit.location.planet_id == target_id):
-                    self.movement.destroy_unit(tile, unit)
-        elif alias == 'pm':
+        snapshot = Snapshot.capture(self.board, player, self.turn.players,
+                                    exploration=self.movement.exploration)
+        if alias == 'pa':
+            card = next(card for card in player.planets if card.planet.planet_id == target_id)
+            card.exhausted = True
+            player.trade_goods += 1
+            self.movement.resolve_pillage(player)
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            return
+        if alias == 'bs':
+            category, _, key = target_id.partition(':')
+            if category == 'planet':
+                next(card for card in player.planets if card.planet.planet_id == key).exhausted = False
+            else:
+                player.exhausted_technologies.remove(key)
+            player.exhausted_technologies.add('bs')
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            return
+        if alias == 'pi':
+            tactical, fleet, strategic = (int(value) for value in target_id.split(':'))
+            player.command_pools.update(tactical=tactical, fleet=fleet,
+                                        strategic=strategic)
+            player.exhausted_technologies.add('pi')
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            return
+        if alias == 'sr':
+            tile, dock = next((tile, unit) for tile in self.board.values()
+                              for unit in tile.units if unit.unit_id == target_id)
+            session = self.movement.start_strategy_production(player, tile, dock)
+            session.sling_relay = True
+            session.production_sites = [(dock.location.planet_id, 1)]
+            session.production_limit = 1
+            player.exhausted_technologies.add('sr')
+            self.turn.mark_action_completed()
+            return
+        if alias == 'pm':
             other = next(other for other in self.turn.players
                          if other.faction == target_id)
             player.command_pools['strategic'] -= 1

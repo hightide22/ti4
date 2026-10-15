@@ -6,7 +6,8 @@ import textwrap
 import arcade
 
 from technology import (available_technologies, is_unit_upgrade, missing_prerequisites,
-                        technology_catalog, technology_image, unit_stats, unit_upgrade)
+                        technology_catalog, technology_image, unit_stats,
+                        unit_upgrade, unit_upgrade_kind)
 from units import UNIT_TYPES
 from player import command_tokens_in_reinforcements
 
@@ -263,6 +264,17 @@ class TechnologyPanel:
                     specialties = [card for card in player.planets
                                    if card.planet.planet_id in s.technology_planets]
                     shortfall = missing_prerequisites(player, selected_tech, specialties)
+                    riftmeld_kind = (unit_upgrade_kind(player, selected_tech)
+                                     if player.faction == 'cabal' and selected else None)
+                    can_riftmeld = bool(riftmeld_kind and
+                                        player.captured_units.get(riftmeld_kind, 0))
+                    if can_riftmeld:
+                        self._button(w, ('riftmeld',),
+                                     f'RIFTMELD · RETURN CAPTURED {riftmeld_kind.upper()}',
+                                     right, bottom + 68, right_width, 31,
+                                     selected=s.riftmeld_kind == riftmeld_kind)
+                    if s.riftmeld_kind == riftmeld_kind and can_riftmeld:
+                        shortfall = 0
                     w.text('tech_missing', f'Unmet prerequisites: {shortfall}', right,
                            bottom + 109, 10, GREEN if shortfall == 0 else GOLD)
                 else:
@@ -303,7 +315,7 @@ class TechnologyPanel:
             elif state and state.moved_ids:
                 self._button(w, ('transit_finish',), 'FINISH TRANSIT', right,
                              bottom + 10, right_width, 30)
-        elif selected_tech and selected_tech['alias'] in ('x89_base', 'pm'):
+        elif selected_tech and selected_tech['alias'] in ('pa', 'bs', 'pi', 'sr', 'pm'):
             alias = selected_tech['alias']
             targets = w.technology_actions.targets(player, alias)
             w.text('tech_action_heading', 'AVAILABLE USES', right, bottom + 232, 10, ACCENT)

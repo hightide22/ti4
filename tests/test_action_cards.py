@@ -27,7 +27,7 @@ class ActionCardTests(unittest.TestCase):
 
         self.assertEqual({canonical_action_card(alias) for alias in deck.cards},
                          set(ACTION_CARD_DEFS))
-        self.assertNotIn('f_conscription', deck.cards)
+        self.assertIn('f_conscription', deck.cards)
 
     def test_war_effort_is_an_action_and_places_a_cruiser_in_a_friendly_fleet(self):
         turns = TurnOrder([self.sol], strategy_enabled=False)

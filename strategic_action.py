@@ -3,8 +3,9 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from player import command_tokens_in_reinforcements
-from technology import (available_technologies, missing_prerequisites,
-                        research_technology, upgrade_profile)
+from technology import (ai_development_skip_required, available_technologies,
+                        can_use_specialty_planet, missing_prerequisites,
+                        research_technology, unit_upgrade_kind, upgrade_profile)
 from units import Unit, UnitLocation, Region
 
 
@@ -33,13 +34,64 @@ class StrategyResolution:
     pending_system: tuple[int, int] | None = None
     drawn_cards: list[str] = field(default_factory=list)
     propagation_resume: bool = False
+    hero_secondary: bool = False
+    riftmeld_kind: str | None = None
 
 
 class StrategyController:
-    def __init__(self, board, turn, movement, action_cards=None):
+    def __init__(self, board, turn, movement, action_cards=None, exploration=None):
         self.board, self.turn, self.movement = board, turn, movement
         self.action_cards = action_cards
+        self.exploration = exploration
         self.session = None
+        self.hero_secondary_choices: dict[tuple[str, int], set[int]] = {}
+
+    def commodity_limit(self, player):
+        return (self.exploration.relics.commodity_limit(player)
+                if self.exploration else player.commodity_limit)
+
+    def _spend_strategy_token(self, player, cost=1):
+        if cost < 0 or player.command_pools['strategic'] < cost:
+            raise ValueError('A strategy token is required.')
+        player.command_pools['strategic'] -= cost
+        if cost and player.faction == 'muaat':
+            from leaders import leader_available
+            if leader_available(player, 'muaatcommander'):
+                player.trade_goods += cost
+                self.movement.resolve_pillage(player)
+
+    def start_hero_secondary(self, player, card):
+        """Offer one free Naaz hero secondary after its component action.
+
+        The caller has already drawn the relic, purged the hero, and completed
+        that component action. Each of the two offers is resolved separately.
+        """
+        if (self.session or self.movement.session or self.turn.strategy_selection or
+                self.turn.command_allocation or player is not self.turn.active_player or
+                player.faction != 'naaz' or
+                not player.leaders.get('naazhero') or
+                not player.leaders['naazhero'].purged or card not in range(1, 8)):
+            raise ValueError('Naaz hero secondary is unavailable.')
+        key = (player.faction, self.turn.turn_serial)
+        chosen = self.hero_secondary_choices.setdefault(key, set())
+        if card in chosen or len(chosen) >= 2:
+            raise ValueError('Choose up to two different strategy cards.')
+        chosen.add(card)
+        session = StrategyResolution(card, player, player, [], primary=False,
+                                     stage='offer', hero_secondary=True)
+        self.session = self.turn.strategy_resolution = session
+        return session
+
+    def planet_values(self, card):
+        """Use attachments and persistent hero effects for strategy payments."""
+        resources, influence = (self.exploration.planet_values(card.planet)
+                                if self.exploration else
+                                (card.planet.resources, card.planet.influence))
+        if any(card.planet.planet_id in player.hero_attachments
+               for player in self.turn.players):
+            resources += 3
+            influence += 3
+        return resources, influence
 
     @property
     def player(self):
@@ -73,7 +125,7 @@ class StrategyController:
             raise ValueError('Allocate all new command tokens first.')
         if (s.card == 2 and s.stage != 'offer' and s.player.faction == 'xxcha'):
             self.movement.peace_accords(s.player)
-        if not s.primary:
+        if not s.primary and not s.hero_secondary:
             self.turn.strategy_secondary_used[s.player.faction].add(s.card)
         if s.remaining:
             s.primary = False
@@ -83,6 +135,7 @@ class StrategyController:
             s.payment_planets.clear()
             s.technology_planets.clear()
             s.technology_selected = None
+            s.riftmeld_kind = None
             s.technology_count = 0
             s.technology_brilliant = False
             s.ready_planets.clear()
@@ -91,11 +144,12 @@ class StrategyController:
             s.pending_system = None
         else:
             self.session = self.turn.strategy_resolution = None
-            self.turn.mark_action_completed()
+            if not s.hero_secondary:
+                self.turn.mark_action_completed()
 
     def secondary_cost(self):
         s = self.session
-        return 0 if (s.card == 1 or
+        return 0 if (s.hero_secondary or s.card == 1 or
                      (s.card == 5 and (s.player.faction == 'hacan' or s.player.faction in s.free_trade))) else 1
 
     def secondary_unavailable(self):
@@ -129,7 +183,7 @@ class StrategyController:
         # Construction puts its strategy token on the board when placing a structure;
         # Warfare pays when the player chooses a dock.
         if s.card not in (4, 6):
-            s.player.command_pools['strategic'] -= self.secondary_cost()
+            self._spend_strategy_token(s.player, self.secondary_cost())
         s.stage = {1: 'leadership', 2: 'ready_planets', 3: 'action_cards',
                    4: 'construction', 5: 'trade_secondary', 6: 'production_site',
                    7: 'technology'}[s.card]
@@ -139,7 +193,7 @@ class StrategyController:
             s.drawn_cards = self.action_cards.draw(s.player, 2)
             self._participant_done()
         if s.card == 5:
-            s.player.commodities = s.player.commodity_limit
+            s.player.commodities = self.commodity_limit(s.player)
             self._participant_done()
 
     def decline_secondary(self):
@@ -149,7 +203,7 @@ class StrategyController:
 
     def payment(self):
         s = self.session
-        return s.trade_goods + sum(c.planet.influence for c in s.player.planets
+        return s.trade_goods + sum(self.planet_values(c)[1] for c in s.player.planets
                                   if c.planet.planet_id in s.payment_planets)
 
     def toggle_payment(self, planet_id):
@@ -205,7 +259,7 @@ class StrategyController:
 
     def technology_payment(self):
         s = self.session
-        return s.trade_goods + sum(card.planet.resources for card in s.player.planets
+        return s.trade_goods + sum(self.planet_values(card)[0] for card in s.player.planets
                                    if card.planet.planet_id in s.payment_planets)
 
     def select_technology(self, alias):
@@ -217,6 +271,19 @@ class StrategyController:
             raise ValueError('This technology is unavailable or already researched.')
         s.technology_selected = alias
         s.technology_planets.clear()
+        s.riftmeld_kind = None
+
+    def toggle_riftmeld(self):
+        """Cabal may return one captured matching unit to ignore all prerequisites."""
+        s = self.session
+        if not s or s.stage != 'technology' or not s.technology_selected:
+            raise ValueError('Choose a unit upgrade technology first.')
+        from technology import technology_catalog
+        kind = unit_upgrade_kind(s.player, technology_catalog()[s.technology_selected])
+        if s.player.faction != 'cabal' or not kind or \
+                s.player.captured_units.get(kind, 0) < 1:
+            raise ValueError('Riftmeld needs one captured unit of the upgraded type.')
+        s.riftmeld_kind = None if s.riftmeld_kind else kind
 
     def toggle_technology_planet(self, planet_id, specialty=False):
         s = self.session
@@ -230,9 +297,12 @@ class StrategyController:
         if planet_id in selected:
             selected.remove(planet_id)
             return
-        if planet_id in other or card.exhausted:
+        psychoarchaeology = 'pa' in s.player.technologies
+        if (planet_id in other and not psychoarchaeology) or \
+                (card.exhausted and not (specialty and psychoarchaeology)):
             raise ValueError('This planet is exhausted or already committed.')
-        if specialty and not card.planet.tech_specialties:
+        if specialty and not can_use_specialty_planet(
+                s.player, card, exploration=self.exploration):
             raise ValueError('This planet has no technology specialty.')
         selected.add(planet_id)
 
@@ -246,22 +316,38 @@ class StrategyController:
             raise ValueError('This technology is unavailable or already researched.')
         cards = {card.planet.planet_id: card for card in s.player.planets}
         specialties = [cards[planet_id] for planet_id in s.technology_planets]
-        if missing_prerequisites(s.player, tech, specialties):
+        riftmeld = (s.riftmeld_kind is not None and s.player.faction == 'cabal' and
+                    s.riftmeld_kind == unit_upgrade_kind(s.player, tech) and
+                    s.player.captured_units.get(s.riftmeld_kind, 0) > 0)
+        if missing_prerequisites(s.player, tech, specialties,
+                                 exploration=self.exploration) and not riftmeld:
             raise ValueError('Technology prerequisites are not satisfied.')
-        if any(card.exhausted for card in specialties):
-            raise ValueError('A selected specialty planet is exhausted.')
+        if s.riftmeld_kind and not riftmeld:
+            raise ValueError('Riftmeld requires a captured unit of this type.')
+        if any(not can_use_specialty_planet(s.player, card,
+                                           exploration=self.exploration)
+               for card in specialties):
+            raise ValueError('A selected technology specialty is unavailable.')
         if any(cards[planet_id].exhausted for planet_id in s.payment_planets):
             raise ValueError('A payment planet is exhausted.')
         if s.trade_goods > s.player.trade_goods or self.technology_payment() < self.technology_cost():
             raise ValueError('Choose enough ready resources or trade goods.')
+        if riftmeld:
+            from pok_factions import cabal_return_captured
+            cabal_return_captured(s.player, s.riftmeld_kind)
         s.player.trade_goods -= s.trade_goods
         for planet_id in s.payment_planets:
             cards[planet_id].exhausted = True
-        for planet_id in s.technology_planets:
-            cards[planet_id].exhausted = True
+        if 'pa' not in s.player.technologies:
+            for planet_id in s.technology_planets:
+                cards[planet_id].exhausted = True
+        if not riftmeld and ai_development_skip_required(
+                s.player, tech, specialties, exploration=self.exploration):
+            s.player.exhausted_technologies.add('aida')
         research_technology(s.player, s.technology_selected, self.board)
         s.technology_count += 1
         s.technology_selected = None
+        s.riftmeld_kind = None
         s.technology_planets.clear()
         s.payment_planets.clear()
         s.trade_goods = 0
@@ -317,11 +403,8 @@ class StrategyController:
                         continue
                     player.command_pools[pool] -= 1
                 tile.command_tokens.add(player.faction)
-            for card in s.player.planets:
-                if tile.planet_owners.get(card.planet.planet_id) == s.player.faction:
-                    card.exhausted = False
             s.selected_system = position
-            self._participant_done()
+            s.stage = 'ready_planets'
         elif s.stage == 'warfare_system':
             if s.player.faction not in tile.command_tokens:
                 raise ValueError('Choose a system containing your command token.')
@@ -425,7 +508,7 @@ class StrategyController:
     def confirm_trade(self):
         s = self.session
         s.player.trade_goods += 3
-        s.player.commodities = s.player.commodity_limit
+        s.player.commodities = self.commodity_limit(s.player)
         self.movement.resolve_pillage(s.player)
         self._participant_done()
 
@@ -436,10 +519,8 @@ class StrategyController:
                 not any(card.planet.planet_id == planet_id for card in self.buildable_planets()):
             raise ValueError('Choose an eligible planet in the selected system.')
         kind = s.structure
-        if not s.primary:
-            if not s.player.command_pools['strategic']:
-                raise ValueError('A strategy token is required.')
-            s.player.command_pools['strategic'] -= 1
+        if not s.primary and not s.hero_secondary:
+            self._spend_strategy_token(s.player)
             tile.command_tokens.add(s.player.faction)
         # Saar's Floating Factory is placed in the system's space area even
         # though Construction selects one of the Saar player's planets there.
@@ -466,9 +547,8 @@ class StrategyController:
     def produce_at(self, unit_id):
         s = self.session
         tile, dock = next((t, u) for t, u in self.home_docks() if u.unit_id == unit_id)
-        if not s.player.command_pools['strategic']:
-            raise ValueError('A strategy token is required.')
-        s.player.command_pools['strategic'] -= 1
+        if not s.hero_secondary:
+            self._spend_strategy_token(s.player)
         self.movement.start_strategy_production(s.player, tile, dock)
         s.stage = 'production'
 

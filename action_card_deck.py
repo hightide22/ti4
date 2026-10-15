@@ -1,4 +1,4 @@
-"""Focused base-game combat and movement action-card draw pile."""
+"""Curated combat and economy cards from base, PoK, and Codex I."""
 import json
 import random
 
@@ -10,7 +10,8 @@ class ActionCardDeck:
     def __init__(self, rng=None):
         cards = json.loads((RESOURCES / 'data/action_cards/action_cards.json').read_text(encoding='utf-8'))
         self.cards = [card['alias'] for card in cards
-                      if card.get('source') == 'base' and card['alias'] in CARD_EFFECT_ALIASES]
+                      if card.get('source') in ('base', 'pok', 'codex1') and
+                      card['alias'] in CARD_EFFECT_ALIASES]
         (rng or random).shuffle(self.cards)
 
     def draw(self):

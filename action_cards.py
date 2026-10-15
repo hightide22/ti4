@@ -1,11 +1,12 @@
-"""Base-game action cards and their timing windows."""
+"""Playable base-game, Prophecy of Kings, and Codex action cards."""
 from __future__ import annotations
 
 import random
+from uuid import uuid4
 
 from player import command_tokens_in_reinforcements
 from units import Region, UNIT_TYPES, Unit, UnitLocation, unit_profile
-from technology import upgrade_profile
+from technology import copy_technology, technology_catalog, upgrade_profile
 
 
 ACTION_CARD_DEFS = {
@@ -81,6 +82,56 @@ ACTION_CARD_DEFS = {
         'name': 'War Effort', 'window': 'As an action',
         'effect': 'Place one cruiser from your reinforcements in a system with your ships.', 'implemented': True,
     },
+    'rally': {
+        'name': 'Rally', 'window': 'After you activate a system that contains another player’s ships',
+        'effect': 'Place 2 command tokens from reinforcements in your fleet pool.', 'implemented': True,
+    },
+    'harness': {
+        'name': 'Harness Energy', 'window': 'After you activate an anomaly',
+        'effect': 'Replenish your commodities.', 'implemented': True,
+    },
+    'counterstroke': {
+        'name': 'Counterstroke', 'window': 'After another player activates a system with your command token',
+        'effect': 'Return that token to your tactic pool.', 'implemented': True,
+    },
+    'forward_supply_base': {
+        'name': 'Forward Supply Base', 'window': 'After another player activates a system with your units',
+        'effect': 'Gain 3 trade goods, then choose another player to gain 1.', 'implemented': True,
+    },
+    'blitz': {
+        'name': 'Blitz', 'window': 'At the start of an invasion',
+        'effect': 'Your non-fighter ships without Bombardment gain Bombardment 6 this invasion.',
+        'implemented': True,
+    },
+    'solar_flare': {
+        'name': 'Solar Flare', 'window': 'After you activate a system',
+        'effect': 'Other players cannot use Space Cannon against your ships during movement.',
+        'implemented': True,
+    },
+    'war_machine': {
+        'name': 'War Machine', 'window': 'When one or more of your units use Production',
+        'effect': '+4 total Production value and −1 combined cost of produced units.',
+        'implemented': True,
+    },
+    'refit': {
+        'name': 'Refit Troops', 'window': 'As an action',
+        'effect': 'Replace 1 or 2 infantry on the board with mechs from your reinforcements.',
+        'implemented': True,
+    },
+    'plagiarize': {
+        'name': 'Plagiarize', 'window': 'As an action',
+        'effect': 'Spend 5 influence to gain a non-faction technology owned by a neighbor.',
+        'implemented': True,
+    },
+    'master_plan': {
+        'name': 'Master Plan', 'window': 'After you perform an action',
+        'effect': 'Perform an additional action this turn.', 'implemented': True,
+    },
+    'fighter_conscription': {
+        'name': 'Fighter Conscription', 'window': 'As an action',
+        'effect': 'Place one fighter in each eligible system without enemy ships.',
+        'implemented': True,
+    },
 }
 
 
@@ -103,6 +154,13 @@ CARD_EFFECT_ALIASES = {
     'intercept': 'intercept',
     **{alias: 'maneuvering_jets' for alias in ('maneuvering_jets', 'mjets1', 'mjets2', 'mjets3', 'mjets4')},
     'salvage': 'salvage', 'upgrade': 'upgrade', 'war_effort': 'war_effort',
+    'rally': 'rally', 'harness': 'harness', 'counterstroke': 'counterstroke',
+    'fsb': 'forward_supply_base', 'blitz': 'blitz', 'solar_flare': 'solar_flare',
+    **{alias: 'war_machine' for alias in ('war_machine1', 'war_machine2',
+                                         'war_machine3', 'war_machine4')},
+    'refit': 'refit',
+    'plagiarize': 'plagiarize', 'master_plan': 'master_plan',
+    'f_conscription': 'fighter_conscription',
 }
 
 
@@ -121,6 +179,7 @@ class ActionCardController:
             self.rng.shuffle(self.deck)
         self.discard: list[str] = []
         self.pending: dict | None = None
+        self._master_plan_waiting: tuple[int, int] | None = None
         self.movement.action_cards = self
 
     @staticmethod
@@ -131,6 +190,9 @@ class ActionCardController:
             's_retreat3', 's_retreat4', 'bunker', 'courageous', 'dh1', 'dh2', 'dh3', 'dh4',
             'disable', 'experimental', 'fire_team', 'silence_space', 'intercept',
             'mjets1', 'mjets2', 'mjets3', 'mjets4', 'salvage', 'upgrade', 'war_effort',
+            'rally', 'harness', 'counterstroke', 'fsb', 'blitz', 'solar_flare',
+            'war_machine1', 'war_machine2', 'war_machine3', 'war_machine4', 'refit',
+            'plagiarize', 'master_plan', 'f_conscription',
         ]
 
     def snapshot(self):
@@ -143,6 +205,7 @@ class ActionCardController:
     def restore(self, state):
         self.deck[:], self.discard[:] = state
         self.pending = None
+        self._master_plan_waiting = None
 
     def draw(self, player, count=1):
         drawn = []
@@ -193,6 +256,10 @@ class ActionCardController:
     def has_reinforcement(self, player):
         return command_tokens_in_reinforcements(player, self.movement.board) > 0
 
+    def _mechs_in_play(self, player):
+        return sum(unit.owner == player.faction and unit.kind == 'mech'
+                   for tile in self.movement.board.values() for unit in tile.units)
+
     @staticmethod
     def _combat_start(session):
         return (session.stage in ('space_combat', 'ground_combat') and
@@ -222,6 +289,56 @@ class ActionCardController:
                     break
         return result
 
+    def plagiarize_targets(self, player):
+        """Technology aliases held by players with units or planets in adjacent systems."""
+        occupied = [tile for tile in self.movement.board.values()
+                    if player.faction in tile.planet_owners.values() or
+                    any(unit.owner == player.faction for unit in tile.units)]
+        adjacent = {neighbor.position for tile in occupied
+                    for neighbor in (tile, *self.movement.neighbors(tile, player.faction))}
+        neighbors = {owner for tile in self.movement.board.values()
+                     if tile.position in adjacent
+                     for owner in (*tile.planet_owners.values(),
+                                   *(unit.owner for unit in tile.units))
+                     if owner != player.faction}
+        catalog = technology_catalog()
+        return sorted({alias for other in self.players if other.faction in neighbors
+                       for alias in other.technologies
+                       if alias not in player.technologies and alias in catalog and
+                       not catalog[alias].get('faction')},
+                      key=lambda alias: catalog[alias]['name'])
+
+    def _plagiarize_influence(self, player, selected):
+        return sum(self.movement.planet_influence(card.planet)
+                   for card in player.planets if card.planet.planet_id in selected and
+                   not card.exhausted)
+
+    def fighter_conscription_systems(self, player):
+        return [tile for tile in self.movement.board.values()
+                if any(unit.owner == player.faction and
+                       (unit.kind == 'spacedock' or
+                        (unit.location.region == Region.SPACE and unit.capacity > 0))
+                       for unit in tile.units) and
+                not any(unit.owner != player.faction and
+                        unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']
+                        for unit in tile.units)]
+
+    def _next_fighter_conscription_overflow(self):
+        pending = self.pending
+        player = pending['player']
+        for position in pending['positions']:
+            tile = self.movement.board[position]
+            if self.movement.capacity_overflow(tile, player.faction):
+                pending['overflow_position'] = position
+                pending['overflow_kind'] = 'capacity'
+                return
+            if (len(self.movement._fleet_ships_at(tile, player.faction)) >
+                    self.movement.fleet_supply(player)):
+                pending['overflow_position'] = position
+                pending['overflow_kind'] = 'fleet'
+                return
+        self.pending = None
+
     def can_play(self, faction, alias, session=None):
         effect = canonical_action_card(alias)
         if effect not in ACTION_CARD_DEFS:
@@ -231,11 +348,30 @@ class ActionCardController:
             return False
         session = session or self.movement.session
         if not session:
-            if effect != 'war_effort' or self.turn is None or self.turn.active_player is not player:
+            if effect not in ('war_effort', 'refit', 'plagiarize', 'master_plan',
+                              'fighter_conscription') or self.turn is None or \
+                    self.turn.active_player is not player:
                 return False
             if (self.turn.strategy_selection or self.turn.command_allocation or
-                    self.turn.strategy_resolution or not self.turn.can_take_action):
+                    self.turn.strategy_resolution):
                 return False
+            if effect == 'master_plan':
+                return (self.turn.action_used and self.turn.actions_used > 0 and
+                        self._master_plan_waiting !=
+                        (self.turn.turn_serial, self.turn.actions_used))
+            if not self.turn.can_take_action:
+                return False
+            if effect == 'plagiarize':
+                available = self._plagiarize_influence(
+                    player, {card.planet.planet_id for card in player.planets})
+                return bool(self.plagiarize_targets(player) and
+                            available + player.trade_goods >= 5)
+            if effect == 'fighter_conscription':
+                return bool(self.fighter_conscription_systems(player))
+            if effect == 'refit':
+                return (self._mechs_in_play(player) < 4 and any(
+                    unit.owner == faction and unit.kind == 'infantry'
+                    for tile in self.movement.board.values() for unit in tile.units))
             return any(unit.owner == faction and unit.location.region == Region.SPACE and
                        UNIT_TYPES[unit.kind]['ship'] for tile in self.movement.board.values()
                        for unit in tile.units)
@@ -249,6 +385,12 @@ class ActionCardController:
                     return False
             elif effect == 'direct_hit':
                 if not session.pending_direct_hits.get(faction):
+                    return False
+            elif effect in ('forward_supply_base', 'counterstroke'):
+                if effect == 'forward_supply_base' and not any(
+                        unit.owner == faction for unit in session.target.units):
+                    return False
+                if effect == 'counterstroke' and faction not in session.target.command_tokens:
                     return False
             elif effect == 'experimental_battlestation':
                 if not self.eligible_docks(player, session):
@@ -264,6 +406,32 @@ class ActionCardController:
         if effect == 'flank_speed':
             return (faction == session.player.faction and session.stage == 'movement' and
                     not session.strategic_production)
+        if effect == 'rally':
+            return (faction == session.player.faction and session.stage == 'movement' and
+                    not session.strategic_production and self.has_reinforcement(player) and
+                    any(unit.owner != faction and unit.location.region == Region.SPACE and
+                        UNIT_TYPES[unit.kind]['ship'] for unit in session.target.units))
+        if effect == 'harness':
+            return (faction == session.player.faction and session.stage == 'movement' and
+                    bool(session.target.anomalies) and player.commodities < player.commodity_limit)
+        if effect == 'counterstroke':
+            return (faction != session.player.faction and session.stage == 'movement' and
+                    faction in session.target.command_tokens)
+        if effect == 'forward_supply_base':
+            return (faction != session.player.faction and session.stage == 'movement' and
+                    any(unit.owner == faction for unit in session.target.units))
+        if effect == 'solar_flare':
+            return (faction == session.player.faction and session.stage == 'movement' and
+                    not session.strategic_production)
+        if effect == 'blitz':
+            return (faction == session.player.faction and session.stage == 'invasion_start' and
+                    any(unit.owner == faction and unit.location.region == Region.SPACE and
+                        UNIT_TYPES[unit.kind]['ship'] and unit.kind != 'fighter' and
+                        not unit_profile(unit).get('bombardHitsOn')
+                        for unit in session.target.units))
+        if effect == 'war_machine':
+            return (faction == session.player.faction and session.stage == 'production' and
+                    bool(session.production_sites))
         if effect == 'morale_boost':
             return combat_start
         if effect == 'fighter_prototype':
@@ -339,13 +507,21 @@ class ActionCardController:
         return (faction, effect, 'choice')
 
     def window_key(self, faction, effect, session):
+        if effect in ('rally', 'harness', 'counterstroke', 'forward_supply_base',
+                      'solar_flare'):
+            return (faction, effect, session.target.position, 'activation')
+        if effect == 'war_machine':
+            return (faction, effect, session.target.position, 'production')
+        if effect == 'blitz':
+            return (faction, effect, session.target.position, 'invasion')
         if effect == 'flank_speed':
             return (faction, effect, session.target.position, 'activation')
         if effect == 'in_the_silence_of_space':
             return (faction, effect, session.target.position, 'activation')
         if effect == 'upgrade':
             return (faction, effect, session.target.position, 'activation')
-        if effect in ('war_effort',):
+        if effect in ('war_effort', 'refit', 'plagiarize', 'master_plan',
+                      'fighter_conscription'):
             return (faction, effect, 'action')
         if effect in ('bunker', 'disable'):
             return (faction, effect, session.target.position, 'invasion')
@@ -407,6 +583,65 @@ class ActionCardController:
         session = self.movement.session
         player = pending['player']
         effect = pending['effect']
+        if effect == 'plagiarize':
+            if 'technology' not in pending:
+                targets = self.plagiarize_targets(player)
+                page = min(pending.get('page', 0), max(0, (len(targets) - 1) // 10))
+                pending['page'] = page
+                choices = [(('technology', alias), technology_catalog()[alias]['name'])
+                           for alias in targets[page * 10:(page + 1) * 10]]
+                if page:
+                    choices.append((('page', -1), 'Previous technologies'))
+                if (page + 1) * 10 < len(targets):
+                    choices.append((('page', 1), 'More technologies'))
+                return choices
+            selected = pending.setdefault('planets', set())
+            ready = [card for card in player.planets if not card.exhausted]
+            page = min(pending.get('page', 0), max(0, (len(ready) - 1) // 10))
+            pending['page'] = page
+            visible = ready[page * 10:(page + 1) * 10]
+            total = self._plagiarize_influence(player, selected) + pending.get('goods', 0)
+            choices = []
+            if total >= 5:
+                choices.append((('confirm',), f'Gain technology · pay {total} influence'))
+            choices.extend((('planet', card.planet.planet_id),
+                            f'{card.planet.name} · {self.movement.planet_influence(card.planet)} influence')
+                           for card in visible if card.planet.planet_id not in selected)
+            if (page + 1) * 10 < len(ready):
+                choices.append((('page', 1), 'More planets'))
+            if pending.get('goods', 0) < player.trade_goods:
+                choices.append((('goods', 1), f'Add trade good · {pending.get("goods", 0)}/{player.trade_goods}'))
+            choices.extend((('planet', card.planet.planet_id),
+                            f'Undo {card.planet.name} · selected')
+                           for card in visible if card.planet.planet_id in selected)
+            if page:
+                choices.append((('page', -1), 'Previous planets'))
+            if pending.get('goods', 0):
+                choices.append((('goods', -1), 'Remove trade good'))
+            return choices
+        if effect == 'fighter_conscription':
+            tile = self.movement.board[pending['overflow_position']]
+            units = (self.movement.capacity_overflow_units(tile, player.faction)
+                     if pending['overflow_kind'] == 'capacity' else
+                     self.movement._fleet_ships_at(tile, player.faction))
+            return [(unit.unit_id,
+                     f'Tile {tile.system_id} · destroy {UNIT_TYPES[unit.kind]["name"]} {unit.unit_id[-6:]}')
+                    for unit in units]
+        if effect == 'refit':
+            selected = set(pending.get('selected', ()))
+            choices = [(unit.unit_id, f'Tile {tile.system_id} · Infantry {unit.unit_id[-6:]}')
+                       for tile in self.movement.board.values() for unit in tile.units
+                       if unit.owner == player.faction and unit.kind == 'infantry' and
+                       unit.unit_id not in selected]
+            page_size = 12
+            page = min(pending.get('page', 0), max(0, (len(choices) - 1) // page_size))
+            pending['page'] = page
+            visible = choices[page * page_size:(page + 1) * page_size]
+            if page:
+                visible.append(('__previous_refit__', '← Previous infantry'))
+            if (page + 1) * page_size < len(choices):
+                visible.append(('__next_refit__', 'More infantry →'))
+            return ([('__finish_refit__', 'Finish with one mech')] if selected else []) + visible
         if effect in ('war_effort',):
             return [(tile.position, f'Tile {tile.system_id} · {tile.name}')
                     for tile in self.movement.board.values() if any(
@@ -418,6 +653,8 @@ class ActionCardController:
         if effect == 'experimental_battlestation':
             return [(unit.unit_id, f'Tile {tile.system_id} · Space Dock')
                     for tile, unit in self.eligible_docks(player, session)]
+        if effect == 'forward_supply_base':
+            return [(other.faction, other.name) for other in self.players if other is not player]
         if effect == 'upgrade':
             return [(unit.unit_id, f'{UNIT_TYPES[unit.kind]["name"]} · {unit.unit_id[-6:]}')
                     for unit in session.target.units if unit.owner == player.faction and
@@ -437,7 +674,10 @@ class ActionCardController:
         return self._pending_choices()
 
     def cancel_pending(self):
+        if self.pending and self.pending.get('mandatory'):
+            return False
         self.pending = None
+        return True
 
     def resolve_pending(self, choice):
         pending = self.pending
@@ -448,9 +688,78 @@ class ActionCardController:
         session = self.movement.session
         if choice not in {value for value, _ in self._pending_choices()}:
             raise ValueError('This action-card choice is no longer available.')
+        if effect == 'plagiarize':
+            if choice[0] == 'page':
+                pending['page'] += choice[1]
+                return
+            if choice[0] == 'technology':
+                pending['technology'] = choice[1]
+                pending['page'] = 0
+                return
+            if choice[0] == 'planet':
+                selected = pending.setdefault('planets', set())
+                if choice[1] in selected:
+                    selected.remove(choice[1])
+                else:
+                    selected.add(choice[1])
+                return
+            if choice[0] == 'goods':
+                pending['goods'] = pending.get('goods', 0) + choice[1]
+                return
+            if choice[0] == 'confirm':
+                if (pending['technology'] not in self.plagiarize_targets(player) or
+                        pending.get('goods', 0) > player.trade_goods or
+                        self._plagiarize_influence(player, pending['planets']) +
+                        pending.get('goods', 0) < 5):
+                    raise ValueError('The technology or influence payment is no longer available.')
+                copy_technology(player, pending['technology'], self.movement.board)
+                for card in player.planets:
+                    if card.planet.planet_id in pending['planets']:
+                        card.exhausted = True
+                player.trade_goods -= pending.get('goods', 0)
+                self._consume(player, player.action_cards.index(pending['alias']),
+                              pending['alias'], pending['window'], session)
+                self.pending = None
+                return
+        if effect == 'fighter_conscription':
+            tile = self.movement.board[pending['overflow_position']]
+            unit = next(unit for unit in tile.units if unit.unit_id == choice)
+            self.movement.destroy_unit(tile, unit)
+            self._next_fighter_conscription_overflow()
+            return
         if effect == 'war_effort':
             tile = self.movement.board[choice]
             self._place_ship(tile, player, 'cruiser', f'war-effort-{player.faction}')
+            self._consume(player, player.action_cards.index(pending['alias']), pending['alias'],
+                          pending['window'], session)
+            self.pending = None
+            return
+        if effect == 'refit':
+            selected = pending.setdefault('selected', [])
+            if choice in ('__previous_refit__', '__next_refit__'):
+                pending['page'] = pending.get('page', 0) + (1 if choice == '__next_refit__' else -1)
+                return
+            if choice != '__finish_refit__':
+                selected.append(choice)
+            if (choice != '__finish_refit__' and len(selected) < 2 and
+                    len(selected) < 4 - self._mechs_in_play(player)):
+                return
+            for unit_id in selected:
+                tile, infantry = next((tile, unit) for tile in self.movement.board.values()
+                                      for unit in tile.units if unit.unit_id == unit_id)
+                tile.units.remove(infantry)
+                tile.units.append(Unit(f'{player.faction}-refit-{uuid4().hex}', 'mech',
+                                       player.faction, player.color_code, infantry.location))
+            self._consume(player, player.action_cards.index(pending['alias']),
+                          pending['alias'], pending['window'], session)
+            self.pending = None
+            return
+        if effect == 'forward_supply_base':
+            beneficiary = next(other for other in self.players if other.faction == choice)
+            player.trade_goods += 3
+            beneficiary.trade_goods += 1
+            self.movement.resolve_pillage(player)
+            self.movement.resolve_pillage(beneficiary)
             self._consume(player, player.action_cards.index(pending['alias']), pending['alias'],
                           pending['window'], session)
             self.pending = None
@@ -526,10 +835,27 @@ class ActionCardController:
             raise ValueError('This action card cannot be played in the current timing window.')
         window = self.window_key(player.faction, effect, session) if session else ('action', effect)
 
-        if effect in ('war_effort', 'in_the_silence_of_space', 'experimental_battlestation',
+        if effect in ('war_effort', 'refit', 'plagiarize', 'forward_supply_base', 'in_the_silence_of_space',
+                      'experimental_battlestation',
                       'direct_hit', 'upgrade'):
             self.pending = {'player': player, 'effect': effect, 'alias': alias,
                             'window': window}
+            return ACTION_CARD_DEFS[effect]
+        if effect == 'master_plan':
+            player.action_cards.pop(hand_index)
+            self.discard.append(alias)
+            self.turn.actions_used -= 1
+            self._master_plan_waiting = (self.turn.turn_serial, self.turn.actions_used)
+            return ACTION_CARD_DEFS[effect]
+        if effect == 'fighter_conscription':
+            systems = self.fighter_conscription_systems(player)
+            for tile in systems:
+                self._place_ship(tile, player, 'fighter', f'fighter-conscription-{player.faction}')
+            self._consume(player, hand_index, alias, window, session)
+            self.pending = {'player': player, 'effect': effect, 'alias': alias,
+                            'mandatory': True,
+                            'positions': [tile.position for tile in systems]}
+            self._next_fighter_conscription_overflow()
             return ACTION_CARD_DEFS[effect]
         if effect == 'courageous':
             trigger = session.pending_courageous[player.faction].pop(0)
@@ -551,6 +877,21 @@ class ActionCardController:
 
         if effect == 'flank_speed':
             self.movement.apply_flank_speed(session)
+        elif effect == 'rally':
+            player.command_pools['fleet'] += min(
+                2, command_tokens_in_reinforcements(player, self.movement.board))
+        elif effect == 'harness':
+            player.commodities = player.commodity_limit
+        elif effect == 'counterstroke':
+            session.target.command_tokens.remove(player.faction)
+            player.command_pools['tactical'] += 1
+        elif effect == 'solar_flare':
+            session.solar_flare = True
+        elif effect == 'blitz':
+            session.blitz_factions = getattr(session, 'blitz_factions', set()) | {player.faction}
+        elif effect == 'war_machine':
+            session.production_limit += 4
+            session.war_machine_discount = getattr(session, 'war_machine_discount', 0) + 1
         elif effect == 'morale_boost':
             session.combat_modifiers[player.faction] = session.combat_modifiers.get(player.faction, 0) + 1
         elif effect == 'fighter_prototype':
