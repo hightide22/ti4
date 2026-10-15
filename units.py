@@ -15,6 +15,7 @@ from board import RESOURCES, Tile
 
 class Region(str, Enum):
     SPACE = "space"
+    SPACE_AREA = "space_area"
     PLANET = "planet"
     TRANSPORT = "transport"
 
@@ -68,7 +69,10 @@ class Unit:
                            self.profile_id == 'naaz_mech_space')
         floating_factory = self.kind == 'spacedock' and self.owner == 'saar' and \
             self.location.region == Region.SPACE
-        if not ship and self.location.region == Region.SPACE and not (floating_factory or naaz_space_mech):
+        dmz_ground_forces = (self.location.region == Region.SPACE_AREA and
+                             self.kind in {'infantry', 'mech'})
+        if (not ship and self.location.region in (Region.SPACE, Region.SPACE_AREA) and
+                not (floating_factory or naaz_space_mech or dmz_ground_forces)):
             raise ValueError("Ground units must be on a planet or a transport")
         if self.kind in {"pds", "spacedock"} and self.location.region != Region.PLANET and not floating_factory:
             raise ValueError("Structures must be on a planet")
@@ -419,7 +423,7 @@ def system_inventory(tile):
     fleet, cargo = defaultdict(list), defaultdict(list)
     planets = {planet.planet_id: defaultdict(list) for planet in tile.planets}
     for unit in tile.units:
-        if unit.location.region == Region.SPACE:
+        if unit.location.region in (Region.SPACE, Region.SPACE_AREA):
             fleet[unit.kind].append(unit)
         elif unit.location.region == Region.PLANET:
             planets[unit.location.planet_id][unit.kind].append(unit)

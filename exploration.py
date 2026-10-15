@@ -391,7 +391,7 @@ class ExplorationController:
                     if unit.kind in {'pds', 'spacedock'}:
                         tile.units.remove(unit)
                     elif unit.kind in {'infantry', 'mech'}:
-                        unit.location = UnitLocation(Region.SPACE)
+                        unit.location = UnitLocation(Region.SPACE_AREA)
                 events.append({'type': 'demilitarized_zone', 'planet_id': planet_id})
             return events + [{'type': 'attachment', 'planet_id': planet_id, 'alias': alias}]
         if alias in {'gw', 'gamma'}:

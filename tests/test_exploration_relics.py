@@ -14,7 +14,7 @@ except ModuleNotFoundError as exc:
     ExplorationPanel = None
 from player import PlanetCard, PlayerState
 from relics import RelicController, relic_catalog
-from units import Region, Unit, UnitLocation
+from units import Region, Unit, UnitLocation, layout_units, system_inventory
 
 
 def setup(planet_tile=30):
@@ -302,6 +302,32 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertTrue(player.planets[0].exhausted)
         self.assertIsNone(engine.pending)
         self.assertIn('exp1', engine.discards['hazardous'])
+
+    def test_demilitarized_zone_moves_ground_forces_to_space_area(self):
+        board, tile, player = setup()
+        planet = tile.planets[0]
+        infantry = Unit('dmz-infantry', 'infantry', 'sol', 'blu',
+                        UnitLocation(Region.PLANET, planet.planet_id))
+        mech = Unit('dmz-mech', 'mech', 'sol', 'blu',
+                    UnitLocation(Region.PLANET, planet.planet_id))
+        structure = Unit('dmz-pds', 'pds', 'sol', 'blu',
+                         UnitLocation(Region.PLANET, planet.planet_id))
+        tile.units.extend((infantry, mech, structure))
+        engine = ExplorationController(board, [player], decks={
+            'cultural': ['dmz'], 'hazardous': [], 'industrial': [], 'frontier': []},
+            relic_deck=[])
+
+        outcome = engine.explore_planet(player, tile, planet.planet_id)
+
+        self.assertTrue(outcome.resolved)
+        self.assertEqual(Region.SPACE_AREA, infantry.location.region)
+        self.assertEqual(Region.SPACE_AREA, mech.location.region)
+        self.assertNotIn(structure, tile.units)
+        placements = layout_units(tile, detailed=True)
+        self.assertEqual({'dmz-infantry', 'dmz-mech'},
+                         {unit.unit_id for placement in placements for unit in placement.units})
+        self.assertEqual({'infantry', 'mech'},
+                         set(system_inventory(tile)['fleet']))
 
     def test_frontier_token_is_consumed_and_card_discarded(self):
         number = next(number for number, definition in TILES.by_number.items()
