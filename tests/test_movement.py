@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from board import load_board
-from movement import MovementController, MovementError
+from movement import MovementController, MovementError, Session, Snapshot
 from player import PlanetCard, create_players
 from technology import research_technology
 from units import Region, Unit, UnitLocation
@@ -91,6 +91,57 @@ class MovementTests(unittest.TestCase):
         self.assertNotIn(planet.planet_id, target.planet_owners)
         self.assertEqual(self.player.planets, original_cards)
         self.assertEqual(self.home.units, original_units)
+
+    def test_mecatol_custodians_block_landing_when_six_ready_influence_is_unavailable(self):
+        mecatol = next(tile for tile in self.board.values() if tile.number == 18)
+        infantry = Unit('mecatol-transported-infantry', 'infantry', self.player.faction,
+                        self.player.color_code,
+                        UnitLocation(Region.TRANSPORT, carrier_id='mecatol-carrier'))
+        carrier = Unit('mecatol-carrier', 'carrier', self.player.faction,
+                       self.player.color_code, UnitLocation(Region.SPACE))
+        mecatol.units.extend((carrier, infantry))
+        session = Session(self.player, mecatol, {}, Snapshot.capture(self.board, self.player, self.players),
+                          stage='invasion', landings={infantry.unit_id: 'mr'})
+        self.controller.session = session
+
+        self.controller.establish_control()
+
+        self.assertEqual(infantry.location,
+                         UnitLocation(Region.TRANSPORT, carrier_id=carrier.unit_id))
+        self.assertNotIn('mr', mecatol.planet_owners)
+        self.assertTrue(mecatol.custodians_present)
+        self.assertTrue(session.custodian_payment_failed)
+        self.assertIn('needs 6 ready influence', session.outcome)
+        self.assertIn('remained aboard their ships', session.outcome)
+
+    def test_mecatol_custodians_are_paid_before_ground_forces_land(self):
+        mecatol = next(tile for tile in self.board.values() if tile.number == 18)
+        owned = {card.planet.planet_id for card in self.player.planets}
+        candidates = [(tile, planet) for tile in self.board.values() if tile is not mecatol
+                     for planet in tile.planets if planet.planet_id not in owned and
+                     planet.planet_id not in tile.planet_owners]
+        for tile, planet in candidates:
+            tile.planet_owners[planet.planet_id] = self.player.faction
+            self.player.planets.append(PlanetCard(planet))
+            if sum(card.planet.influence for card in self.player.planets) >= 6:
+                break
+        infantry = Unit('paid-mecatol-infantry', 'infantry', self.player.faction,
+                        self.player.color_code,
+                        UnitLocation(Region.TRANSPORT, carrier_id='paid-mecatol-carrier'))
+        carrier = Unit('paid-mecatol-carrier', 'carrier', self.player.faction,
+                       self.player.color_code, UnitLocation(Region.SPACE))
+        mecatol.units.extend((carrier, infantry))
+        session = Session(self.player, mecatol, {}, Snapshot.capture(self.board, self.player, self.players),
+                          stage='invasion', landings={infantry.unit_id: 'mr'})
+        self.controller.session = session
+
+        self.controller.establish_control()
+
+        self.assertFalse(mecatol.custodians_present)
+        self.assertEqual(mecatol.planet_owners['mr'], self.player.faction)
+        self.assertEqual(infantry.location,
+                         UnitLocation(Region.PLANET, planet_id='mr'))
+        self.assertIn('spent 6 influence', session.outcome)
 
     def test_active_system_can_load_infantry_to_move_between_its_planets(self):
         target = next(tile for tile in self.controller.neighbors(self.home)

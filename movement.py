@@ -2984,6 +2984,17 @@ class MovementController:
             raise MovementError('Invasion is not active')
         session.invasion_checkpoint = SessionCheckpoint.capture(self, session, 'invasion')
         target, player = session.target, session.player
+        mecatol_landings = [unit for unit in self.landing_forces(session)
+                            if session.landings.get(unit.unit_id) == 'mr']
+        if target.custodians_present and mecatol_landings:
+            if self.pay_custodians(session):
+                target.custodians_present = False
+            else:
+                for unit in mecatol_landings:
+                    session.landings[unit.unit_id] = None
+                session.custodian_payment_failed = True
+                session.custodian_payment_log.append(
+                    'Ground forces assigned to Mecatol Rex remained aboard their ships.')
         landed_planets = []
         for unit in self.landing_forces(session):
             planet_id = session.landings.get(unit.unit_id)
@@ -3012,6 +3023,8 @@ class MovementController:
                 session.ground_planets.append(planet_id)
         if not landed_planets:
             session.outcome = 'No ground forces landed. No planets changed control.'
+            if session.custodian_payment_log:
+                session.outcome += ' ' + ' '.join(session.custodian_payment_log)
             self.prepare_production(session)
         elif session.ground_planets:
             self.start_ground_combat(session, session.ground_planets[0])
