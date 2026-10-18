@@ -11,8 +11,10 @@ import textwrap
 import arcade
 
 from leaders import leader_available, leader_catalog
+from leader_effects import arborec_agent_replacements, xxcha_agent_remove_options
 from ui_theme import (ACCENT, BORDER, CARD, GOLD, INK, MUTED, PANEL,
                       SELECTED, button, modal, surface)
+from units import Region, UNIT_TYPES
 
 
 ROLE_ORDER = {'agent': 0, 'commander': 1, 'hero': 2}
@@ -24,6 +26,7 @@ MANUAL_ACTION_HEROES = frozenset({
     'cabalhero', 'empyreanhero', 'keleresheroharka', 'naazhero',
     'nomadhero', 'titanshero',
 })
+MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'l1z1xagent', 'xxchaagent'})
 
 
 class LeaderPanel:
@@ -47,11 +50,26 @@ class LeaderPanel:
         self.scroll_max = 0.0
         self.target_page = 0
         self.available_actions: frozenset[str] = frozenset()
+        self.agent_mode: str | None = None
+        self.agent_ship_id: str | None = None
+        self.agent_planet_id: str | None = None
 
     def close(self) -> None:
         self.open = False
         self.hits.clear()
         self.bounds = None
+        self.cancel_agent_action()
+
+    def begin_agent_action(self, leader_id: str) -> None:
+        self.agent_mode = leader_id
+        self.agent_ship_id = None
+        self.agent_planet_id = None
+        self.target_page = 0
+
+    def cancel_agent_action(self) -> None:
+        self.agent_mode = None
+        self.agent_ship_id = None
+        self.agent_planet_id = None
 
     def select(self, leader_id: str, player) -> bool:
         if leader_id not in player.leaders:
@@ -73,8 +91,23 @@ class LeaderPanel:
             self.close()
         elif action[0] == 'select':
             self.select(action[1], player)
+        elif action[0] == 'use' and action[1] in MANUAL_ACTION_AGENTS and len(action) == 2:
+            self.begin_agent_action(action[1])
+            return None
         elif action[0] == 'target_page':
             self.target_page = max(0, self.target_page + action[1])
+        elif action[0] == 'agent_ship_select':
+            self.agent_ship_id = action[1]
+            self.target_page = 0
+        elif action[0] == 'agent_planet_select':
+            self.agent_planet_id = action[1]
+            self.target_page = 0
+        elif action[0] == 'agent_back':
+            self.agent_ship_id = None
+            self.agent_planet_id = None
+            self.target_page = 0
+        elif action[0] == 'agent_cancel':
+            self.cancel_agent_action()
         return action
 
     def drag_header(self, x: float, y: float) -> bool:
@@ -251,6 +284,10 @@ class LeaderPanel:
                       max_lines=(3 if naaz_targets else
                                  max(3, int((ability_top - bottom - 118) / 18))))
 
+        if self.agent_mode == alias:
+            self._draw_agent_choices(window, player, board, movement, x, bottom, width)
+            return
+
         if not player.leaders[alias].unlocked:
             unlock = data.get('unlockCondition') or 'Score 3 objectives to unlock a hero.'
             surface(x, x + width, bottom + 25, bottom + 82, CARD)
@@ -283,6 +320,139 @@ class LeaderPanel:
                         leader_available(player, alias) else
                         'Ready again during the next status phase.',
                         x, bottom + 34, 9, MUTED, max_width=width)
+
+    def _draw_agent_choices(self, window, player, board, movement, x, bottom, width):
+        alias = self.agent_mode
+        window.text(('leader_agent_choice_title', alias), 'CHOOSE THE EFFECT TARGET',
+                    x, bottom + 174, 10, ACCENT)
+        page_size = 4
+        pages = 1
+        if alias == 'l1z1xagent':
+            session = movement.session
+            targets = ([unit for unit in session.target.units
+                        if unit.owner == session.player.faction and
+                        unit.kind == 'infantry' and
+                        unit.location.region in (Region.PLANET, Region.TRANSPORT)]
+                       if session and session.player is player else [])
+            targets.sort(key=lambda unit: (unit.location.region.value,
+                                           unit.location.planet_id or '',
+                                           unit.unit_id))
+            pages = max(1, (len(targets) + page_size - 1) // page_size)
+            self.target_page = min(self.target_page, pages - 1)
+            visible = targets[self.target_page * page_size:
+                              (self.target_page + 1) * page_size]
+            for index, unit in enumerate(visible):
+                location = (unit.location.planet_id or 'TRANSPORT'
+                            if unit.location.region == Region.PLANET else 'IN SPACE')
+                by = bottom + 138 - index * 31
+                button(window, ('agent_infantry_target', unit.unit_id),
+                       f'{location} · INFANTRY', x, by, width, 27, size=8)
+                self.hits.append((('use', alias, unit.unit_id), x, x + width,
+                                  by, by + 27))
+        elif alias == 'arborecagent':
+            if self.agent_ship_id is None:
+                targets = [(tile, unit) for tile in board.values() for unit in tile.units
+                           if unit.location.region == Region.SPACE and
+                           UNIT_TYPES[unit.kind]['ship'] and unit.kind != 'fighter']
+                targets.sort(key=lambda row: (row[0].number, row[1].owner,
+                                              row[1].kind, row[1].unit_id))
+                pages = max(1, (len(targets) + page_size - 1) // page_size)
+                self.target_page = min(self.target_page, pages - 1)
+                visible = targets[self.target_page * page_size:
+                                  (self.target_page + 1) * page_size]
+                for index, (tile, ship) in enumerate(visible):
+                    by = bottom + 138 - index * 31
+                    label = (f'TILE {tile.number} · {ship.owner.upper()} · '
+                             f'{UNIT_TYPES[ship.kind]["name"]}')
+                    button(window, ('agent_ship_target', ship.unit_id), label,
+                           x, by, width, 27, size=8)
+                    self.hits.append((('agent_ship_select', ship.unit_id),
+                                      x, x + width, by, by + 27))
+            else:
+                ship = next((unit for tile in board.values() for unit in tile.units
+                             if unit.unit_id == self.agent_ship_id), None)
+                target = next((candidate for candidate in window.player_panel.players
+                               if ship and candidate.faction == ship.owner), None)
+                if ship is None or target is None:
+                    self.agent_ship_id = None
+                    return
+                tile = next(tile for tile in board.values() if ship in tile.units)
+                window.text(('leader_agent_ship', ship.unit_id),
+                            f'{ship.owner.upper()} · {UNIT_TYPES[ship.kind]["name"]} · TILE {tile.number}',
+                            x, bottom + 151, 9, GOLD, max_width=width)
+                choices = arborec_agent_replacements(target, ship, board)
+                for index, kind in enumerate(choices[:4]):
+                    by = bottom + 116 - index * 30
+                    label = f'REPLACE WITH {UNIT_TYPES[kind]["name"].upper()}'
+                    button(window, ('agent_ship_replacement', kind), label,
+                           x, by, width, 26, size=8)
+                    self.hits.append((('use', alias,
+                                       ('arborec', ship.owner, ship.unit_id, kind)),
+                                      x, x + width, by, by + 26))
+                button(window, 'leader_agent_back', 'BACK TO SHIPS', x,
+                       bottom + 20, min(145, width), 25, size=8)
+                self.hits.append((('agent_back',), x, x + min(145, width),
+                                  bottom + 20, bottom + 45))
+        elif alias == 'xxchaagent':
+            cards = [card for card in player.planets if card.exhausted]
+            pages = max(1, (len(cards) + page_size - 1) // page_size)
+            self.target_page = min(self.target_page, pages - 1)
+            visible = cards[self.target_page * page_size:
+                            (self.target_page + 1) * page_size]
+            if self.agent_planet_id is None:
+                for index, card in enumerate(visible):
+                    by = bottom + 138 - index * 31
+                    button(window, ('agent_planet_target', card.planet.planet_id),
+                           f'READY · {card.planet.name.upper()}', x, by,
+                           width, 27, size=8)
+                    self.hits.append((('agent_planet_select', card.planet.planet_id),
+                                      x, x + width, by, by + 27))
+            else:
+                planet_id = self.agent_planet_id
+                button(window, 'agent_ready_only', 'READY PLANET ONLY', x,
+                       bottom + 132, width, 27, size=8)
+                self.hits.append((('use', alias, ('xxcha', planet_id, None)),
+                                  x, x + width, bottom + 132, bottom + 159))
+                options = xxcha_agent_remove_options(player, board, planet_id)
+                for index, unit in enumerate(options[:3]):
+                    by = bottom + 98 - index * 30
+                    label = f'READY + REMOVE {unit.owner.upper()} INFANTRY'
+                    button(window, ('agent_remove_infantry', unit.unit_id), label,
+                           x, by, width, 26, size=8)
+                    self.hits.append((('use', alias,
+                                       ('xxcha', planet_id, unit.unit_id)),
+                                      x, x + width, by, by + 26))
+                button(window, 'leader_agent_back', 'BACK TO PLANETS', x,
+                       bottom + 20, min(145, width), 25, size=8)
+                self.hits.append((('agent_back',), x, x + min(145, width),
+                                  bottom + 20, bottom + 45))
+
+        if alias == 'arborecagent' and self.agent_ship_id is not None or \
+                alias == 'xxchaagent' and self.agent_planet_id is not None:
+            button(window, 'leader_agent_cancel', 'CANCEL', x + width - 96,
+                   bottom + 20, 96, 25, size=8)
+            self.hits.append((('agent_cancel',), x + width - 96,
+                              x + width, bottom + 20, bottom + 45))
+        elif pages > 1:
+            by = bottom + 20
+            for direction, label, bx in ((-1, '‹', x), (1, '›', x + width - 34)):
+                if 0 <= self.target_page + direction < pages:
+                    button(window, ('leader_agent_page', direction), label,
+                           bx, by, 30, 25, size=11)
+                    self.hits.append((('target_page', direction), bx, bx + 30,
+                                      by, by + 25))
+            window.text('leader_agent_target_page',
+                        f'{self.target_page + 1}/{pages}', x + width / 2 - 12,
+                        by + 7, 8, MUTED)
+            button(window, 'leader_agent_cancel', 'CANCEL', x + width - 96,
+                   bottom + 20, 96, 25, size=8)
+            self.hits.append((('agent_cancel',), x + width - 96,
+                              x + width, bottom + 20, bottom + 45))
+        else:
+            button(window, 'leader_agent_cancel', 'CANCEL', x + width - 96,
+                   bottom + 20, 96, 25, size=8)
+            self.hits.append((('agent_cancel',), x + width - 96,
+                              x + width, bottom + 20, bottom + 45))
 
     def _draw_naaz_targets(self, window, alias, targets, x, bottom, width):
         page_size = 3

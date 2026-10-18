@@ -1132,6 +1132,16 @@ class GameAI:
                 if own and opposing and win_probability(
                         own, opposing, ctl.players) < .25:
                     ctl.announce_retreat()
+            if not s.combat_needs_resolution and s.stage in ('space_combat', 'ground_combat'):
+                for faction in s.combat_factions:
+                    if faction not in self.bot_factions:
+                        continue
+                    options = ctl.combat_agent_die_options(faction)
+                    if options:
+                        unit, _alias = min(options, key=lambda option: (
+                            ctl.combat_threshold(faction, unit_profile(option[0])),
+                            option[0].unit_id))
+                        ctl.use_combat_agent_die(faction, unit.unit_id)
             ctl.advance_combat()
             if s.combat_needs_resolution and s.combat_rolls:
                 results = ', '.join(f'{faction.upper()} {sum(bool(roll["hit"]) for roll in rolls)} hits'

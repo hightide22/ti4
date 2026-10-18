@@ -11,7 +11,16 @@ from uuid import uuid4
 
 from leaders import exhaust_leader, leader_available, purge_leader
 from player import command_tokens_in_reinforcements
-from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles
+from units import (Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles,
+                   unit_profile)
+from technology import upgrade_profile
+
+
+UNIT_SUPPLY_LIMITS = {
+    'fighter': 10, 'infantry': 12, 'mech': 4, 'pds': 6, 'spacedock': 3,
+    'carrier': 4, 'cruiser': 8, 'destroyer': 8, 'dreadnought': 5,
+    'flagship': 1, 'warsun': 2,
+}
 
 
 def _require_agent(owner, leader_id):
@@ -104,6 +113,141 @@ def use_naaz_agent(owner, beneficiary, exploration, tile, planet_id,
                                         auto_resolve=auto_resolve)
     exhaust_leader(owner, 'naazagent')
     return result
+
+
+def use_l1z1x_agent(owner, beneficiary, tile, infantry_id, board):
+    """Replace one infantry in the newly activated system with a mech.
+
+    Transported infantry can be replaced only when its carrier has enough
+    remaining capacity for the heavier mech.
+    """
+    _require_agent(owner, 'l1z1xagent')
+    if owner.faction != 'l1z1x' or tile.position not in board:
+        raise ValueError('I48S requires an active L1Z1X agent and an activated system')
+    infantry = next((unit for unit in tile.units if unit.unit_id == infantry_id), None)
+    if (infantry is None or infantry.owner != beneficiary.faction or
+            infantry.kind != 'infantry' or infantry.location.region not in
+            (Region.PLANET, Region.TRANSPORT)):
+        raise ValueError('Choose one of the active player’s infantry in this system')
+    mechs = [unit for system in board.values()
+             for unit in system.units if unit.owner == beneficiary.faction and
+             unit.kind == 'mech']
+    if len(mechs) >= 4:
+        raise ValueError('No mechs remain in that player’s reinforcements')
+    if infantry.location.region == Region.TRANSPORT:
+        carrier = next((unit for unit in tile.units
+                        if unit.unit_id == infantry.location.carrier_id and
+                        unit.owner == beneficiary.faction), None)
+        if carrier is None:
+            raise ValueError('The infantry’s transport is no longer in the system')
+        cargo = [unit for unit in tile.units
+                 if unit.location.region == Region.TRANSPORT and
+                 unit.location.carrier_id == carrier.unit_id]
+        used = sum(int(unit_profile(unit).get('capacityUsed') or 1)
+                   for unit in cargo)
+        mech_capacity = int(unit_profile(Unit(
+            'l1z1x-agent-capacity-check', 'mech', beneficiary.faction,
+            beneficiary.color_code, infantry.location)).get('capacityUsed') or 1)
+        if used - int(unit_profile(infantry).get('capacityUsed') or 1) + mech_capacity > carrier.capacity:
+            raise ValueError('That transport has no room for the replacement mech')
+    replacement = Unit(f'{beneficiary.faction}-agent-mech-{infantry_id}',
+                       'mech', beneficiary.faction, beneficiary.color_code,
+                       infantry.location,
+                       profile_id=next((profile_id for profile_id in
+                           unit_profiles()[1][beneficiary.faction].get('units', ())
+                           if unit_profiles()[0].get(profile_id, {}).get('baseType') == 'mech'
+                           and unit_profiles()[0][profile_id].get('requiredTechId') in
+                               beneficiary.technologies), None))
+    exhaust_leader(owner, 'l1z1xagent')
+    tile.units.remove(infantry)
+    tile.units.append(replacement)
+    return replacement
+
+
+def arborec_agent_replacements(target, ship, board):
+    """Legal non-fighter ship types from a player's reinforcements."""
+    definitions, factions = unit_profiles()
+    old_cost = float(unit_profile(ship).get('cost') or 0)
+    kinds = {definitions[profile_id]['baseType']
+             for profile_id in factions.get(target.faction, {}).get('units', ())
+             if profile_id in definitions and
+             definitions[profile_id].get('baseType') in UNIT_TYPES and
+             UNIT_TYPES[definitions[profile_id]['baseType']]['ship'] and
+             definitions[profile_id]['baseType'] != 'fighter' and
+             float(definitions[profile_id].get('cost') or 0) <= old_cost + 2}
+    counts = {kind: sum(unit.owner == target.faction and unit.kind == kind
+                        for tile in board.values() for unit in tile.units)
+              for kind in kinds}
+    if ship.owner == target.faction and ship.kind in counts:
+        counts[ship.kind] -= 1
+    return tuple(sorted(kind for kind in kinds
+                        if counts[kind] < UNIT_SUPPLY_LIMITS[kind]))
+
+
+def use_arborec_agent(owner, target, board, ship_id, replacement_kind):
+    """Replace a player's non-fighter ship with one of its legal reinforcements."""
+    _require_agent(owner, 'arborecagent')
+    if owner.faction != 'arborec':
+        raise ValueError('Letani Ospha belongs to the Arborec')
+    system, ship = next(((tile, unit) for tile in board.values() for unit in tile.units
+                        if unit.unit_id == ship_id), (None, None))
+    if (system is None or ship.owner != target.faction or ship.kind == 'fighter' or
+            ship.location.region != Region.SPACE or not UNIT_TYPES[ship.kind]['ship']):
+        raise ValueError('Choose a player’s non-fighter ship in space')
+    if replacement_kind not in arborec_agent_replacements(target, ship, board):
+        raise ValueError('That replacement ship is unavailable or costs too much')
+    new_profile = upgrade_profile(target, replacement_kind)
+    replacement = Unit(f'{target.faction}-arborec-agent-{uuid4().hex}',
+                       replacement_kind, target.faction, target.color_code,
+                       UnitLocation(Region.SPACE),
+                       profile_id=(new_profile or {}).get('id'))
+    cargo = [unit for unit in system.units
+             if unit.location.region == Region.TRANSPORT and
+             unit.location.carrier_id == ship.unit_id]
+    cargo_used = sum(int(unit_profile(unit).get('capacityUsed') or 1)
+                     for unit in cargo)
+    if cargo_used > replacement.capacity:
+        raise ValueError('The replacement ship does not have enough capacity for its cargo')
+    exhaust_leader(owner, 'arborecagent')
+    system.units.remove(ship)
+    system.units.append(replacement)
+    for unit in cargo:
+        unit.location = UnitLocation(Region.TRANSPORT, carrier_id=replacement.unit_id)
+    return replacement
+
+
+def xxcha_agent_remove_options(owner, board, planet_id):
+    """Infantry that can be removed when readying an adjacent planet."""
+    tile = next((tile for tile in board.values()
+                 if any(planet.planet_id == planet_id for planet in tile.planets)), None)
+    if tile is None or not any(
+            neighbor.planet_owners.get(planet.planet_id) == owner.faction
+            for neighbor in board.neighbors(tile.position) for planet in neighbor.planets):
+        return ()
+    return tuple(unit for unit in tile.units if unit.kind == 'infantry' and
+                 unit.location.region == Region.PLANET and
+                 unit.location.planet_id == planet_id)
+
+
+def use_xxcha_agent(owner, board, planet_id, *, remove_infantry_id=None):
+    """Ready a controlled planet; optionally return adjacent-system infantry."""
+    _require_agent(owner, 'xxchaagent')
+    card = next((card for card in owner.planets
+                 if card.planet.planet_id == planet_id), None)
+    if card is None or not card.exhausted:
+        raise ValueError('Choose one of your exhausted planets')
+    infantry = None
+    if remove_infantry_id is not None:
+        infantry = next((unit for unit in xxcha_agent_remove_options(owner, board, planet_id)
+                         if unit.unit_id == remove_infantry_id), None)
+        if infantry is None:
+            raise ValueError('That infantry cannot be removed by this agent')
+    exhaust_leader(owner, 'xxchaagent')
+    card.exhausted = False
+    if infantry is not None:
+        tile = next(tile for tile in board.values() if infantry in tile.units)
+        tile.units.remove(infantry)
+    return infantry
 
 
 def use_nomad_artuno(owner, gained_from_supply: int):

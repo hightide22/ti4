@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from board import ROOT, load_board
 from exploration import ExplorationController
+from leaders import leader_available
 from movement import MovementController, MovementError, Session, Snapshot
 from player import PlanetCard, create_players
 from units import Region, Unit, UnitLocation, layout_units, unit_profile
@@ -72,6 +73,62 @@ class PokMovementEffectsTests(unittest.TestCase):
         self.assertFalse(session.combat_rolls[sol.faction][0]['hit'])
         with self.assertRaises(MovementError):
             movement.use_supercharge('naaz')
+
+    def test_letnev_agent_adds_one_die_to_the_selected_ship(self):
+        board, players, movement = game('letnev')
+        letnev, sol = players[:2]
+        target = next(tile for tile in board.values() if not tile.units)
+        carrier = Unit('letnev-agent-carrier', 'carrier', 'letnev', letnev.color_code,
+                       UnitLocation(Region.SPACE))
+        dreadnought = Unit('letnev-agent-dreadnought', 'dreadnought', 'letnev',
+                           letnev.color_code, UnitLocation(Region.SPACE))
+        enemy = Unit('sol-agent-opponent', 'carrier', 'sol', sol.color_code,
+                     UnitLocation(Region.SPACE))
+        target.units.extend((carrier, dreadnought, enemy))
+        session = Session(letnev, target, {}, Snapshot.capture(board, letnev, players))
+        session.stage = 'space_combat'
+        session.combat_factions = ('letnev', 'sol')
+        movement.session = session
+
+        movement.use_combat_agent_die('letnev', dreadnought.unit_id)
+        with patch('movement.random.randint', return_value=5):
+            movement.advance_combat()
+
+        rolls = session.combat_rolls['letnev']
+        self.assertEqual(3, len(rolls))
+        bonus = [roll for roll in rolls if roll.get('bonus_source') == 'letnevagent']
+        self.assertEqual(1, len(bonus))
+        self.assertEqual(dreadnought.unit_id, bonus[0]['unit_id'])
+        self.assertFalse(leader_available(letnev, 'letnevagent'))
+
+    def test_sol_agent_adds_one_die_to_the_selected_ground_force(self):
+        board, players, movement = game('sol')
+        sol, jolnar = players[:2]
+        target = next(tile for tile in board.values() if tile.planets)
+        planet_id = target.planets[0].planet_id
+        infantry = [Unit(f'sol-agent-infantry-{index}', 'infantry', 'sol', sol.color_code,
+                          UnitLocation(Region.PLANET, planet_id)) for index in range(2)]
+        enemy = Unit('jolnar-agent-opponent', 'infantry', 'jolnar', jolnar.color_code,
+                     UnitLocation(Region.PLANET, planet_id))
+        target.units.extend((*infantry, enemy))
+        session = Session(sol, target, {}, Snapshot.capture(board, sol, players))
+        session.stage = 'ground_combat'
+        session.combat_type = 'ground'
+        session.combat_planet_id = planet_id
+        session.combat_factions = ('sol', 'jolnar')
+        movement.session = session
+
+        movement.use_combat_agent_die('sol', infantry[1].unit_id)
+        with patch('movement.random.randint', return_value=1):
+            movement.advance_combat()
+
+        rolls = session.combat_rolls['sol']
+        self.assertEqual(3, len(rolls))
+        self.assertEqual(1, sum(roll.get('bonus_source') == 'solagent' for roll in rolls))
+        self.assertEqual(infantry[1].unit_id,
+                         next(roll['unit_id'] for roll in rolls
+                              if roll.get('bonus_source') == 'solagent'))
+        self.assertFalse(leader_available(sol, 'solagent'))
 
     def test_scanlink_explores_planet_once_and_undo_restores_fragment(self):
         board, players, movement = game()

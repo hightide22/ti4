@@ -268,6 +268,8 @@ class Session:
     combat_round: int = 0
     combat_factions: tuple[str, ...] = ()
     combat_rolls: dict[str, list[dict]] = field(default_factory=dict)
+    combat_bonus_dice: dict[str, int] = field(default_factory=dict)
+    combat_bonus_sources: dict[str, str] = field(default_factory=dict)
     combat_hits: dict[str, int] = field(default_factory=dict)
     combat_assignments: dict[str, list[str]] = field(default_factory=dict)
     munitions_ready: set[str] = field(default_factory=set)
@@ -1532,11 +1534,13 @@ class MovementController:
                         unit.location.region == Region.SPACE for unit in session.target.units)):
                 continue
             shooter = self.faction_player(cannon.owner)
-            extra = int(bool(shooter and 'ps' in shooter.technologies and
-                             cannon.owner not in plasma_used))
-            if extra:
+            plasma_bonus = bool(shooter and 'ps' in shooter.technologies and
+                                cannon.owner not in plasma_used)
+            extra = int(plasma_bonus)
+            if plasma_bonus:
                 plasma_used.add(cannon.owner)
-            extra += int(cannon.unit_id == argent_cannon)
+            argent_bonus = cannon.unit_id == argent_cannon
+            extra += int(argent_bonus)
             dice = [self.roll_d10(session) for _ in range(int(profile.get('spaceCannonDieCount') or 1) + extra)]
             hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
             graviton = bool(shooter and 'gls' in shooter.technologies and
@@ -1551,7 +1555,9 @@ class MovementController:
             session.cannon_log.append(
                 f'{cannon.owner.upper()} {cannon.kind.title()} in tile {source.system_id} '
                 f'targeting {target_faction.upper()} '
-                f'({profile["spaceCannonHitsOn"]}+): {results} → {hits} hit(s)')
+                f'({profile["spaceCannonHitsOn"]}+): {results} → {hits} hit(s)' +
+                (' · Plasma Scoring +1 die' if plasma_bonus else '') +
+                (' · Argent commander +1 die' if argent_bonus else ''))
             for _ in range(hits):
                 candidates = [unit for unit in target_ships if unit in session.target.units]
                 if not candidates:
@@ -1693,11 +1699,14 @@ class MovementController:
                 profile = unit_profile(ship)
                 if not profile.get('afbHitsOn'):
                     continue
-                for _ in range(int(profile.get('afbDieCount') or 1) +
-                               int(ship.unit_id == argent_barrage)):
+                base_dice = int(profile.get('afbDieCount') or 1)
+                argent_bonus = ship.unit_id == argent_barrage
+                for die_index in range(base_dice + int(argent_bonus)):
                     value = self.roll_d10(session)
                     rolls.append({'unit_id': ship.unit_id, 'kind': ship.kind, 'value': value,
-                                  'hit': value >= int(profile['afbHitsOn'])})
+                                  'hit': value >= int(profile['afbHitsOn']),
+                                  'bonus_source': ('argentcommander' if
+                                      argent_bonus and die_index >= base_dice else None)})
             session.afb_rolls[faction] = rolls
         for faction in factions:
             rolls = session.afb_rolls[faction]
@@ -1735,7 +1744,9 @@ class MovementController:
                     self.destroy_unit(session.target, infantry, session, (faction,))
             session.afb_log.append(
                 f'{faction.upper()} anti-fighter barrage: {sum(r["hit"] for r in rolls)} hit(s); '
-                f'{destroyed} fighter(s) destroyed')
+                f'{destroyed} fighter(s) destroyed' +
+                (' · Argent commander +1 die' if any(
+                    roll.get('bonus_source') == 'argentcommander' for roll in rolls) else ''))
         session.afb_resolved = True
 
     def retreat_options(self, session, faction):
@@ -1919,7 +1930,9 @@ class MovementController:
             profile = unit_profile(ship)
             threshold = int(profile.get('bombardHitsOn') or 6)
             rolls = []
-            extra = int(plasma_available) + int(ship.unit_id == argent_bomber)
+            plasma_bonus = plasma_available
+            argent_bonus = ship.unit_id == argent_bomber
+            extra = int(plasma_bonus) + int(argent_bonus)
             plasma_available = False
             for _ in range(int(profile.get('bombardDieCount') or 1) + extra):
                 natural_value = self.roll_d10(session)
@@ -1956,7 +1969,9 @@ class MovementController:
                                      for roll in rolls)
             session.bombard_log.append(
                 f'{ship.kind.title()} bombarded {planet.name} ({threshold}+): '
-                f'{dice_results} → {destroyed} hit(s) assigned.')
+                f'{dice_results} → {destroyed} hit(s) assigned.' +
+                (' · Plasma Scoring +1 die' if plasma_bonus else '') +
+                (' · Argent commander +1 die' if argent_bonus else ''))
         session.bombardment_resolved = True
         self.begin_invasion(session)
 
@@ -2287,6 +2302,40 @@ class MovementController:
                     self.combat_units(session, faction) and player and
                     'sc' in player.technologies and 'sc' not in player.exhausted_technologies)
 
+    def combat_agent_die_options(self, faction):
+        """Return legal Letnev/Sol agent targets before a combat roll."""
+        session = self.session
+        player = self.faction_player(faction)
+        if (not session or session.stage not in ('space_combat', 'ground_combat') or
+                session.combat_needs_resolution or faction not in session.combat_factions or
+                player is None):
+            return ()
+        if session.combat_type == 'space' and faction == 'letnev' and \
+                leader_available(player, 'letnevagent'):
+            return tuple((unit, 'letnevagent') for unit in self.combat_units(session, faction))
+        if session.combat_type == 'ground' and faction == 'sol' and \
+                leader_available(player, 'solagent'):
+            return tuple((unit, 'solagent') for unit in self.combat_units(session, faction)
+                         if unit.kind in self.GROUND_FORCES)
+        return ()
+
+    def use_combat_agent_die(self, faction, unit_id):
+        """Exhaust a combat agent and add its die to the selected unit's next roll."""
+        options = self.combat_agent_die_options(faction)
+        target = next(((unit, alias) for unit, alias in options
+                       if unit.unit_id == unit_id), None)
+        if target is None:
+            raise MovementError('No combat agent can add a die to that unit now')
+        unit, alias = target
+        player = self.faction_player(faction)
+        if not leader_available(player, alias):
+            raise MovementError('That combat agent is already exhausted')
+        from leaders import exhaust_leader
+        exhaust_leader(player, alias)
+        session = self.session
+        session.combat_bonus_dice[unit.unit_id] = session.combat_bonus_dice.get(unit.unit_id, 0) + 1
+        session.combat_bonus_sources[unit.unit_id] = alias
+
     def use_supercharge(self, faction):
         """Apply +1 to this faction's combat rolls in the upcoming round."""
         if not self.supercharge_available(faction):
@@ -2380,12 +2429,14 @@ class MovementController:
                             faction == session.magen_suppressed else self.combat_units(session, faction))
             for unit in active_units:
                 profile = unit_profile(unit)
-                dice = int(profile.get('combatDieCount') or 1)
+                base_dice = int(profile.get('combatDieCount') or 1)
+                bonus_dice = session.combat_bonus_dice.get(unit.unit_id, 0)
+                dice = base_dice + bonus_dice
                 if (unit.owner == 'naaz' and unit.kind == 'mech' and
                         any(ship.owner == 'naaz' and ship.kind == 'flagship' and
                             ship.location.region == Region.SPACE for ship in session.target.units)):
                     dice += 1
-                for _ in range(dice):
+                for die_index in range(dice):
                     value = self.roll_d10(session)
                     modifier = session.combat_modifiers.get(faction, 0)
                     if unit.kind == 'fighter':
@@ -2415,7 +2466,9 @@ class MovementController:
                     rolls.append({'unit_id': unit.unit_id, 'kind': unit.kind, 'value': result,
                                   'natural': value, 'modifier': modifier, 'threshold': threshold,
                                   'hit': result >= threshold,
-                                  'rerolled': False})
+                                  'rerolled': False,
+                                  'bonus_source': (session.combat_bonus_sources.get(unit.unit_id)
+                                                   if die_index >= dice - bonus_dice else None)})
             session.combat_rolls[faction] = rolls
             outgoing_hits[faction] = sum(result['hit'] for result in rolls) * (
                 2 if session.combat_type == 'ground' and self.has_tech(faction, 'x89c4') else 1)
@@ -2428,6 +2481,8 @@ class MovementController:
                                               if shooter != faction and hits)
                                for faction in session.combat_factions}
         session.combat_needs_resolution = True
+        session.combat_bonus_dice.clear()
+        session.combat_bonus_sources.clear()
 
     def _finish_combat_round(self, session):
         session.combat_sustained_this_round.clear()
@@ -2972,6 +3027,17 @@ class MovementController:
             return
         plasma_used = set()
         nes_cancel = {}
+        argent = self.faction_player('argent')
+        argent_pds = [(int(unit_profile(unit)['spaceCannonHitsOn']), unit.unit_id)
+                      for planet_id in session.landed_planets
+                      for unit in session.target.units
+                      if unit.owner == 'argent' and unit.kind == 'pds' and
+                      unit.location.region == Region.PLANET and
+                      unit.location.planet_id == planet_id and
+                      unit.unit_id not in session.disabled_pds and
+                      unit_profile(unit).get('spaceCannonHitsOn')]
+        argent_cannon = (min(argent_pds)[1] if argent_pds and argent and
+                         leader_available(argent, 'argentcommander') else None)
         for planet_id in session.landed_planets:
             cannons = [unit for unit in session.target.units if unit.owner != faction and unit.kind == 'pds' and
                        unit.unit_id not in session.disabled_pds and
@@ -2982,10 +3048,13 @@ class MovementController:
             for cannon in cannons:
                 profile = unit_profile(cannon)
                 shooter = self.faction_player(cannon.owner)
-                extra = int(bool(shooter and 'ps' in shooter.technologies and
-                                 cannon.owner not in plasma_used))
-                if extra:
+                plasma_bonus = bool(shooter and 'ps' in shooter.technologies and
+                                    cannon.owner not in plasma_used)
+                extra = int(plasma_bonus)
+                if plasma_bonus:
                     plasma_used.add(cannon.owner)
+                argent_bonus = cannon.unit_id == argent_cannon
+                extra += int(argent_bonus)
                 dice = [self.roll_d10(session)
                         for _ in range(int(profile.get('spaceCannonDieCount') or 1) + extra)]
                 penalty = -1 if 'amd' in session.player.technologies else 0
@@ -2995,7 +3064,9 @@ class MovementController:
                     for value in dice)
                 session.defense_log.append(
                     f'{cannon.owner.upper()} PDS on {planet_id} '
-                    f'({profile["spaceCannonHitsOn"]}+): {results} → {hits} hit(s)')
+                    f'({profile["spaceCannonHitsOn"]}+): {results} → {hits} hit(s)' +
+                    (' · Plasma Scoring +1 die' if plasma_bonus else '') +
+                    (' · Argent commander +1 die' if argent_bonus else ''))
                 for _ in range(hits):
                     if nes_cancel.get(planet_id, 0):
                         nes_cancel[planet_id] -= 1

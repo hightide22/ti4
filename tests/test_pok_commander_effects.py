@@ -68,6 +68,9 @@ class CommanderEffectTests(unittest.TestCase):
         with patch('movement.random.randint', return_value=1):
             movement.resolve_anti_fighter_barrage(session)
         self.assertEqual(3, len(session.afb_rolls['argent']))
+        self.assertEqual(1, sum(roll.get('bonus_source') == 'argentcommander'
+                                for roll in session.afb_rolls['argent']))
+        self.assertIn('Argent commander +1 die', session.afb_log[0])
         tile.units.remove(destroyer)
         session.space_cannon_events.clear()
         with patch('movement.random.randint', return_value=10):
@@ -75,12 +78,37 @@ class CommanderEffectTests(unittest.TestCase):
                                         sol.faction)
         # Plasma Scoring and the commander each contribute one extra die.
         self.assertEqual(3, len(session.space_cannon_events))
+        self.assertIn('Plasma Scoring +1 die', session.cannon_log[0])
+        self.assertIn('Argent commander +1 die', session.cannon_log[0])
         session.space_cannon_events.clear()
         session.stage = 'bombardment'
         session.bombard_targets = {dreadnought.unit_id: planet_id}
         with patch('movement.random.randint', return_value=1):
             movement.resolve_bombardment()
         self.assertEqual(3, len(session.bombard_rolls))
+        self.assertIn('Plasma Scoring +1 die', session.bombard_log[0])
+        self.assertIn('Argent commander +1 die', session.bombard_log[0])
+
+    def test_argent_commander_and_plasma_scoring_add_planetary_defense_dice(self):
+        board, players, movement = game('argent')
+        argent, sol = players[:2]
+        argent.technologies = frozenset({'ps'})
+        argent.leaders['argentcommander'].unlocked = True
+        tile = next(tile for tile in board.values() if tile.planets and not tile.units)
+        planet_id = tile.planets[0].planet_id
+        tile.units.extend((
+            Unit('argent-defense-pds', 'pds', 'argent', argent.color_code,
+                 UnitLocation(Region.PLANET, planet_id)),
+            Unit('sol-landing-infantry', 'infantry', 'sol', sol.color_code,
+                 UnitLocation(Region.PLANET, planet_id))))
+        session = Session(sol, tile, {}, Snapshot.capture(board, sol, players))
+        session.landed_planets = [planet_id]
+        movement.session = session
+        with patch('movement.random.randint', return_value=10):
+            movement.resolve_planetary_cannon_defense(session)
+        self.assertIn('Plasma Scoring +1 die', session.defense_log[0])
+        self.assertIn('Argent commander +1 die', session.defense_log[0])
+        self.assertEqual(3, session.defense_log[0].count('HIT'))
 
     def test_winnu_commander_adds_two_on_mecatol_and_home_but_not_elsewhere(self):
         board, players, movement = game('winnu')

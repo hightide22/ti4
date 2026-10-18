@@ -106,6 +106,31 @@ class LeaderPanelTests(unittest.TestCase):
         self.assertIn(('use', 'solagent'),
                       [row[0] for row in self.panel.hits])
 
+    def test_l1z1x_agent_button_opens_active_system_infantry_choices(self):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('l1z1x', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        player = players[0]
+        tile = next(tile for tile in board.values()
+                    if any(unit.owner == 'l1z1x' and unit.kind == 'infantry'
+                           for unit in tile.units))
+        infantry = next(unit for unit in tile.units
+                        if unit.owner == 'l1z1x' and unit.kind == 'infantry')
+        self.window.player_panel.players = players
+        self.window.turn_order.active_player = player
+        self.movement.session = SimpleNamespace(player=player, target=tile,
+                                                stage='movement')
+        self.panel.select('l1z1xagent', player)
+        self.draw(player=player, available_actions=('l1z1xagent',))
+        button = next(row for row in self.panel.hits
+                      if row[0] == ('use', 'l1z1xagent'))
+        self.assertIsNone(self.panel.handle_click(
+            (button[1] + button[2]) / 2, (button[3] + button[4]) / 2, player))
+        self.draw(player=player, available_actions=('l1z1xagent',))
+        self.assertIn(('use', 'l1z1xagent', infantry.unit_id),
+                      [row[0] for row in self.panel.hits])
+
     def test_header_drag_stays_on_screen(self):
         self.draw()
         left, right, bottom, top = self.panel.bounds

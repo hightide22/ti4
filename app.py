@@ -12,7 +12,7 @@ from ui_theme import (BG, PANEL, SHELL, INK, MUTED, ACCENT, GOLD, DANGER, SIDEBA
                       VARIANT, button)
 
 from board import Board, Tile, load_board
-from units import Region, Unit, UnitLocation, UNIT_TYPES
+from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile
 from unit_view import UnitRenderer
 from system_panel import SystemPanel
 from player import PlanetCard, create_players
@@ -39,10 +39,12 @@ from exploration import ExplorationController
 from exploration_panel import ExplorationPanel
 from relic_action_panel import RelicActionPanel
 from leader_panel import LeaderPanel
-from leaders import ready_leaders, refresh_leader_unlocks, record_scored_objective
+from leaders import (leader_available, ready_leaders, refresh_leader_unlocks,
+                     record_scored_objective)
 from leader_effects import (clear_round_hero_effects, use_cabal_hero,
+                            use_arborec_agent, use_xxcha_agent,
                             use_empyrean_hero, use_keleres_harka_hero,
-                            use_naaz_agent, use_naaz_hero, use_nomad_hero,
+                            use_l1z1x_agent, use_naaz_agent, use_naaz_hero, use_nomad_hero,
                             use_titans_hero)
 from pok_factions import keleres_council_patronage, naaz_fabrication
 
@@ -811,6 +813,48 @@ class BoardWindow(arcade.Window):
             return
         alias = command[1]
         player = self.turn_order.active_player
+        if alias == 'l1z1xagent':
+            session = self.movement.session
+            if (player is None or player.faction != 'l1z1x' or session is None or
+                    session.player is not player or session.stage != 'movement'):
+                self.movement_error = 'I48S can be used after you activate a system.'
+                return
+            snapshot = Snapshot.capture(self.board, player, self.player_panel.players,
+                                        self.action_cards, self.exploration)
+            try:
+                use_l1z1x_agent(player, session.player, session.target,
+                                command[2], self.board)
+            except (ValueError, KeyError) as error:
+                snapshot.restore()
+                self.movement_error = str(error)
+                return
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            self.leader_panel.close()
+            self.movement_error = None
+            return
+        if alias in ('arborecagent', 'xxchaagent'):
+            snapshot = None
+            try:
+                snapshot = self._component_action_snapshot()
+                if alias == 'arborecagent':
+                    _effect, faction, ship_id, replacement_kind = command[2]
+                    target = next(candidate for candidate in self.player_panel.players
+                                  if candidate.faction == faction)
+                    use_arborec_agent(player, target, self.board, ship_id,
+                                      replacement_kind)
+                else:
+                    _effect, planet_id, infantry_id = command[2]
+                    use_xxcha_agent(player, self.board, planet_id,
+                                    remove_infantry_id=infantry_id)
+            except (ValueError, KeyError, StopIteration) as error:
+                if snapshot is not None:
+                    snapshot.restore()
+                self.movement_error = str(error) or 'That target is no longer available.'
+                return
+            self.leader_panel.close()
+            self._finish_component_action(snapshot)
+            self.movement_error = None
+            return
         if alias == 'naazagent':
             if (player is None or player.faction != 'naaz' or not self.turn_order.action_used or
                     self.movement.session or self.strategy.session):
@@ -1297,9 +1341,23 @@ class BoardWindow(arcade.Window):
                 self.exploration_panel.draw(self, owner, self.exploration)
         if self.leader_panel.open and self.turn_order.active_player:
             player = self.turn_order.active_player
-            available = ('naazagent',) if (
-                player.faction == 'naaz' and self.turn_order.action_used and
-                self.movement.session is None and not self.strategy.session) else ()
+            available = set()
+            if (player.faction == 'naaz' and self.turn_order.action_used and
+                    self.movement.session is None and not self.strategy.session):
+                available.add('naazagent')
+            session = self.movement.session
+            if (player.faction == 'l1z1x' and session is not None and
+                    session.player is player and session.stage == 'movement' and
+                    any(unit.owner == player.faction and unit.kind == 'infantry'
+                        for unit in session.target.units)):
+                available.add('l1z1xagent')
+            if (not self.movement.session and not self.strategy.session and
+                    self.turn_order.can_take_action):
+                if player.faction == 'arborec' and leader_available(player, 'arborecagent'):
+                    available.add('arborecagent')
+                if (player.faction == 'xxcha' and leader_available(player, 'xxchaagent') and
+                        any(card.exhausted for card in player.planets)):
+                    available.add('xxchaagent')
             self.leader_panel.draw(self, player, self.board, self.movement,
                                    available_actions=available)
         if self.relic_action_panel.open and self.turn_order.active_player:
@@ -2668,7 +2726,8 @@ class BoardWindow(arcade.Window):
                          len(response) > 1 and response[1] not in self.ai.bot_factions) or
                         (response[0] in ('assign_hit', 'spend_munitions', 'reroll_die',
                                          'supercharge',
-                                         'reroll_dice', 'fire_team_die', 'fire_team_resolve') and
+                                         'reroll_dice', 'fire_team_die', 'fire_team_resolve',
+                                         'agent_bonus_die') and
                          len(response) > 1 and response[1] not in self.ai.bot_factions)))
                     if not allowed:
                         return
@@ -2805,7 +2864,11 @@ class BoardWindow(arcade.Window):
             action = self.combat_panel.hit_test(x, y)
             if action:
                 try:
-                    if action[0] == 'assign_hit':
+                    if action[0] == 'agent_bonus_die':
+                        if action[1] in self.ai.bot_factions:
+                            return
+                        self.movement.use_combat_agent_die(action[1], action[3])
+                    elif action[0] == 'assign_hit':
                         if action[1] in self.ai.bot_factions:
                             return
                         self.movement.assign_combat_hit(action[1], action[2])
@@ -2822,6 +2885,19 @@ class BoardWindow(arcade.Window):
                     elif action[0] == 'fire_team_resolve':
                         self.action_cards.resolve_fire_team(action[1])
                     elif action[0] == 'advance':
+                        session = self.movement.session
+                        if (session and not session.combat_needs_resolution and
+                                session.stage in ('space_combat', 'ground_combat')):
+                            for faction in session.combat_factions:
+                                if faction not in self.ai.bot_factions:
+                                    continue
+                                options = self.movement.combat_agent_die_options(faction)
+                                if options:
+                                    unit, _alias = min(options, key=lambda option: (
+                                        self.movement.combat_threshold(
+                                            faction, unit_profile(option[0])),
+                                        option[0].unit_id))
+                                    self.movement.use_combat_agent_die(faction, unit.unit_id)
                         self.movement.advance_combat()
                     elif action[0] == 'announce_retreat':
                         self.movement.announce_retreat(action[1])

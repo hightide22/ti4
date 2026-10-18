@@ -61,12 +61,16 @@ class CombatPanel:
                      int(profile.get('combatDieCount') or 1))].append(unit)
         return sorted(grouped.items(), key=lambda item: item[0][0])
 
-    def draw_die(self, window, x, y, value, hit, size=19, *, key, selected=False):
+    def draw_die(self, window, x, y, value, hit, size=19, *, key, selected=False,
+                 bonus_source=None):
         fill = GOLD if hit else DISABLED
-        border = ACCENT if selected else GOLD if hit else BORDER
+        border = ACCENT if selected or bonus_source else GOLD if hit else BORDER
         arcade.draw_lrbt_rectangle_filled(x, x + size, y, y + size, fill)
         arcade.draw_lrbt_rectangle_outline(x, x + size, y, y + size, border, 2 if selected else 1)
         window.text(('combat_die', key), str(value), x + 5, y + 4, 10, PRIMARY_TEXT if hit else INK)
+        if bonus_source:
+            window.text(('combat_die_bonus', key), '+', x + size - 7, y + size - 9,
+                        7, ACCENT)
 
     def draw_side(self, window, session, factions, x, y, width, column=0):
         fixed_y = y
@@ -94,7 +98,13 @@ class CombatPanel:
                 rolls = [roll for roll in session.combat_rolls.get(faction, [])
                          if roll['kind'] == kind and roll['unit_id'] in {unit.unit_id for unit in group}]
                 dice_columns = max(1, int((width - 58) // 25))
-                row_height = ROW_HEIGHT + math.ceil(len(rolls) / dice_columns) * 25
+                bonus_option = None
+                if not window.ai.is_bot(player) and not rolls:
+                    bonus_option = next(((unit, alias) for unit, alias in
+                                         window.movement.combat_agent_die_options(faction)
+                                         if unit in group), None)
+                bonus_row = 27 if bonus_option else 0
+                row_height = ROW_HEIGHT + math.ceil(len(rolls) / dice_columns) * 25 + bonus_row
                 assigned_here = sum(unit_id in {u.unit_id for u in group}
                                     for unit_id in session.combat_assignments.get(faction, []))
                 surface(x, x + width, top - row_height, top, SELECTED if assigned_here else CARD, None)
@@ -103,13 +113,14 @@ class CombatPanel:
                                               x + 20, top - row_height / 2, 29)
                 window.text(('combat_unit_group', faction, kind, target),
                             f'{UNIT_TYPES[kind]["name"]} ×{len(group)}  ·  hit on {target}+',
-                            x + 44, top - 16, 11, INK, max_width=width - 170)
+                            x + 44, top - 16, 11, INK,
+                            max_width=width - (170 if bonus_option else 16))
                 window.text(('combat_assigned', faction, kind), f'{assigned_here} hits assigned' if assigned_here else '',
                             x + width - 119, top - 16, 9, GOLD)
                 damage = sum(unit.damaged for unit in group)
                 window.text(('combat_unit_damage', faction, kind),
                             f'{damage} damaged' if damage else '', x + 44, top - 30, 9, MUTED)
-                dice_x, dice_y = x + 44, top - 67
+                dice_x, dice_y = x + 44, top - 67 - bonus_row
                 group_ids = {unit.unit_id for unit in group}
                 rolls = [(roll_index, roll) for roll_index, roll in enumerate(session.combat_rolls.get(faction, []))
                          if roll['kind'] == kind and roll['unit_id'] in group_ids]
@@ -120,7 +131,8 @@ class CombatPanel:
                                 (session.fire_team_pending == faction and
                                  roll_index in session.fire_team_selected))
                     self.draw_die(window, die_x, die_y, roll['value'], roll['hit'], size=21,
-                                  key=(faction, kind, target, index), selected=selected)
+                                  key=(faction, kind, target, index), selected=selected,
+                                  bonus_source=roll.get('bonus_source'))
                     if session.fire_team_pending == faction and not window.ai.is_bot(player):
                         self.action_hits.append((('fire_team_die', faction, roll_index),
                                                  die_x, die_x + 21, die_y, die_y + 21))
@@ -128,6 +140,14 @@ class CombatPanel:
                             and not window.ai.is_bot(player)):
                         self.reroll_die_hits.append((('reroll_die', faction, roll_index),
                                                      die_x, die_x + 21, die_y, die_y + 21))
+                if bonus_option:
+                    unit, alias = bonus_option
+                    label = 'LETNEV AGENT · +1 DIE' if alias == 'letnevagent' else 'SOL AGENT · +1 DIE'
+                    bx, by, bw, bh = x + 44, top - row_height + 3, min(184, width - 56), 22
+                    button(window, ('combat_agent_die', alias, unit.unit_id), label,
+                           bx, by, bw, bh, primary=True, size=8)
+                    self.action_hits.append((('agent_bonus_die', faction, alias, unit.unit_id),
+                                             bx, bx + bw, by, by + bh))
                 assignments = session.combat_assignments.get(faction, [])
                 available = (not window.ai.is_bot(player) and session.combat_needs_resolution and
                              window.movement.combat_assignment_target(session, faction, kind) is not None)
@@ -360,7 +380,9 @@ class CombatPanel:
                         afb_rows += 1
                         afb_x = left + 24
                         afb_y -= 17
-                    self.draw_die(window, afb_x, afb_y - 1, roll['value'], roll['hit'], size=14, key=('barrage', faction, roll_index))
+                    self.draw_die(window, afb_x, afb_y - 1, roll['value'], roll['hit'],
+                                  size=14, key=('barrage', faction, roll_index),
+                                  bonus_source=roll.get('bonus_source'))
                     afb_x += 17
                 afb_x += 8
         side_top = bottom + height - 94 - afb_rows * 17

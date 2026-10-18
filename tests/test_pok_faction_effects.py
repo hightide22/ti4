@@ -4,8 +4,10 @@ import random
 import unittest
 
 from board import ROOT, load_board
-from leader_effects import (use_cabal_agent, use_cabal_hero, use_empyrean_agent,
+from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, use_empyrean_agent,
                             use_empyrean_hero, use_nomad_artuno, use_nomad_hero,
+                            use_l1z1x_agent,
+                            use_xxcha_agent,
                             clear_round_hero_effects, use_mahact_hero, use_titans_agent,
                             use_titans_hero)
 from leaders import leader_available, ready_leaders, unlock_leader
@@ -72,6 +74,70 @@ class PokEffectsTests(unittest.TestCase):
         use_empyrean_agent(empyrean, sol, board, empty, 'tactical')
         self.assertEqual(sol.command_pools['tactical'], before + 1)
         self.assertFalse(leader_available(empyrean, 'empyreanagent'))
+
+    def test_l1z1x_agent_replaces_active_system_infantry_with_mech(self):
+        board, l1z1x, sol = self.game('l1z1x')
+        tile = next(tile for tile in board.values()
+                    if any(unit.owner == 'l1z1x' and unit.kind == 'infantry'
+                           for unit in tile.units))
+        infantry = next(unit for unit in tile.units
+                        if unit.owner == 'l1z1x' and unit.kind == 'infantry')
+        mech = use_l1z1x_agent(l1z1x, l1z1x, tile, infantry.unit_id, board)
+        self.assertNotIn(infantry, tile.units)
+        self.assertIn(mech, tile.units)
+        self.assertEqual('mech', mech.kind)
+        self.assertEqual(infantry.location, mech.location)
+        self.assertFalse(leader_available(l1z1x, 'l1z1xagent'))
+
+    def test_l1z1x_agent_does_not_exhaust_without_mech_in_reinforcements(self):
+        board, l1z1x, _ = self.game('l1z1x')
+        tile = next(tile for tile in board.values()
+                    if any(unit.owner == 'l1z1x' and unit.kind == 'infantry'
+                           for unit in tile.units))
+        infantry = next(unit for unit in tile.units
+                        if unit.owner == 'l1z1x' and unit.kind == 'infantry')
+        other = next(candidate for candidate in board.values()
+                     if candidate is not tile and candidate.planets)
+        for index in range(4):
+            other.units.append(Unit(f'l1z1x-reserve-mech-{index}', 'mech', 'l1z1x',
+                                    l1z1x.color_code,
+                                    UnitLocation(Region.PLANET, other.planets[0].planet_id)))
+        with self.assertRaises(ValueError):
+            use_l1z1x_agent(l1z1x, l1z1x, tile, infantry.unit_id, board)
+        self.assertTrue(leader_available(l1z1x, 'l1z1xagent'))
+
+    def test_arborec_agent_replaces_ship_and_keeps_legal_cargo_attached(self):
+        board, arborec, sol = self.game('arborec')
+        tile = next(tile for tile in board.values() if not tile.units)
+        carrier = Unit('sol-agent-carrier', 'carrier', 'sol', sol.color_code,
+                       UnitLocation(Region.SPACE))
+        infantry = Unit('sol-agent-infantry', 'infantry', 'sol', sol.color_code,
+                        UnitLocation(Region.TRANSPORT, carrier_id=carrier.unit_id))
+        tile.units.extend((carrier, infantry))
+        replacement = use_arborec_agent(arborec, sol, board, carrier.unit_id,
+                                        'dreadnought')
+        self.assertNotIn(carrier, tile.units)
+        self.assertIn(replacement, tile.units)
+        self.assertEqual('dreadnought', replacement.kind)
+        self.assertEqual(replacement.unit_id, infantry.location.carrier_id)
+        self.assertFalse(leader_available(arborec, 'arborecagent'))
+
+    def test_xxcha_agent_readies_planet_and_optionally_returns_infantry(self):
+        board, xxcha, _ = self.game('xxcha')
+        card = xxcha.planets[0]
+        home = next(tile for tile in board.values()
+                    if card.planet.planet_id in tile.planet_owners)
+        neighbor = next(tile for tile in board.neighbors(home.position) if tile.planets)
+        neighbor.planet_owners[neighbor.planets[0].planet_id] = 'xxcha'
+        card.exhausted = True
+        infantry = Unit('xxcha-agent-infantry', 'infantry', 'xxcha', xxcha.color_code,
+                        UnitLocation(Region.PLANET, card.planet.planet_id))
+        home.units.append(infantry)
+        self.assertIs(use_xxcha_agent(xxcha, board, card.planet.planet_id,
+                                      remove_infantry_id=infantry.unit_id), infantry)
+        self.assertFalse(card.exhausted)
+        self.assertNotIn(infantry, home.units)
+        self.assertFalse(leader_available(xxcha, 'xxchaagent'))
 
     def test_empyrean_hero_restores_frontiers_and_returns_systems_to_explore(self):
         from exploration import ExplorationController
