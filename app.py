@@ -3337,6 +3337,7 @@ class BoardWindow(arcade.Window):
                 self.roster.offset = max(0, self.roster.offset - int(scroll_y))
             return
         if x < self.width - self.sidebar and y < self.player_panel.HEIGHT:
+            self.player_panel.scroll_planets(x, y, scroll_y, self.width - self.sidebar)
             return
         if x >= self.width - self.sidebar:
             if not self.inspector_visible:

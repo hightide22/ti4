@@ -143,6 +143,19 @@ class BotActionDecisions(TestCase):
         plan_bombardment(session)
         self.assertNotIn(empty, session.bombard_targets.values())
 
+    def test_blitz_ships_without_profile_bombardment_are_planned_at_six_plus(self):
+        planet = self.target.planets[0]
+        self.target.planet_owners[planet.planet_id] = self.hacan.faction
+        self.unit('infantry', self.hacan, 'blitz-defender',
+                  UnitLocation(Region.PLANET, planet.planet_id))
+        cruiser = self.unit('cruiser', self.sol, 'blitz-cruiser')
+        session = self.session('bombardment', bombard_targets={cruiser.unit_id: None})
+        session.blitz_factions = {'sol'}
+
+        plan_bombardment(session)
+
+        self.assertEqual(session.bombard_targets[cruiser.unit_id], planet.planet_id)
+
     def test_war_effort_respects_fleet_limit_and_uses_own_turn(self):
         self.sol.action_cards[:] = ['war_effort']
         for tile in self.board.values():

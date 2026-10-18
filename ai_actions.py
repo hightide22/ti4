@@ -281,7 +281,10 @@ def plan_bombardment(session):
         options = []
         for planet_id, current in distributions.items():
             penalty = 4 if tile.planet_owners.get(planet_id) in session.bunker_factions else 0
-            p = max(0, min(1, (11 - int(profile['bombardHitsOn']) - penalty) / 10))
+            # Blitz grants Bombardment 6 to ships whose own profile lacks the
+            # ability, so the AI must use the card's threshold for those ships.
+            hits_on = int(profile.get('bombardHitsOn') or 6)
+            p = max(0, min(1, (11 - hits_on - penalty) / 10))
             rolls = [comb(dice, n) * p ** n * (1 - p) ** (dice - n) for n in range(dice + 1)]
             combined = [0.0] * (len(current) + dice)
             for i, before in enumerate(current):

@@ -92,6 +92,28 @@ class PlayerPanel:
         control = next((c for c in self.controls if c.action[0] == 'planet' and c.contains(x, y)), None)
         self.hovered_planet = control.action[1] if control else None
 
+    def scroll_planets(self, x, y, scroll_y, window_width):
+        """Scroll the horizontal planet-card strip when the wheel is over it."""
+        if not self.player or not getattr(self, 'interactive', True) or not scroll_y:
+            return False
+        width = window_width
+        reserve_left = width - 344
+        card_width, gap = (138 if VARIANT == 'Atlas' else 126), 8
+        slots = max(1, int((reserve_left - 28) // (card_width + gap)))
+        if len(self.player.planets) <= slots:
+            return False
+        if not (0 <= x < reserve_left - 28 and 12 <= y < self.HEIGHT - 74):
+            return False
+        # Scroll down advances through the row; handle fractional wheel events
+        # as one card so high-resolution wheels do not appear unresponsive.
+        delta = -int(scroll_y)
+        if delta == 0:
+            delta = -1 if scroll_y > 0 else 1
+        previous = self.card_offset
+        self.card_offset = max(0, min(len(self.player.planets) - slots,
+                                      self.card_offset + delta))
+        return self.card_offset != previous
+
     @property
     def hovered_planet_id(self):
         if self.player and self.hovered_planet is not None and 0 <= self.hovered_planet < len(self.player.planets):

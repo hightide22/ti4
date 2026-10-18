@@ -114,6 +114,25 @@ def main():
         w.movement.cancel()
         w.movement_panel.reset()
 
+        # The bottom planet-card strip remains wheel-scrollable during
+        # production payment, without accidentally zooming the map.
+        player = w.player_panel.player
+        original_planets = player.planets
+        player.planets = (original_planets * 8)[:15]
+        w.player_panel.card_offset = 0
+        render('planet-cards-before-scroll')
+        dashboard_y = w.player_panel.HEIGHT // 2
+        zoom_before = w.target_zoom
+        w.movement.session = type('ProductionScrollSession', (), {'stage': 'production'})()
+        w.on_mouse_scroll(30, dashboard_y, 0, -1)
+        assert w.player_panel.card_offset == 1
+        assert w.target_zoom == zoom_before
+        w.on_mouse_scroll(30, dashboard_y, 0, .5)
+        assert w.player_panel.card_offset == 0
+        w.movement.session = None
+        player.planets = original_planets
+        render('planet-cards-scrolled')
+
         # The fighter-capacity overflow must render its own selectable rows and
         # keep selection state in sync with the real mouse handler.
         capacity_units_before = list(target.units)
@@ -178,7 +197,7 @@ def main():
         w.combat_panel.move(12, 8)
         render()
         assert len(w.labels) == label_count, 'Dragging must reuse dice labels'
-        print('PASS: compact source scrolling, hover routes, capacity overflow selection, timeline expansion, dense dice and scrolled hit assignment', flush=True)
+        print('PASS: planet-card payment scrolling, compact source scrolling, hover routes, capacity overflow selection, timeline expansion, dense dice and scrolled hit assignment', flush=True)
     finally:
         w.unit_renderer.layout_executor.shutdown(wait=True, cancel_futures=True)
         w.close()
