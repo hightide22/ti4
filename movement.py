@@ -3130,6 +3130,7 @@ class MovementController:
             return
         while (self.exploration_queue and self.exploration.pending is None and
                self.exploration.freelancer_offer is None and
+               self.exploration.terragenesis_pending is None and
                not self.exploration.secret_objectives.pending_returns):
             player, tile, planet_id = self.exploration_queue.pop(0)
             if planet_id is None:
@@ -3145,20 +3146,48 @@ class MovementController:
                     player, tile, planet_id, auto_resolve=self.exploration_is_bot(player))
             if outcome.card is not None:
                 self.exploration_outcomes.append((player.faction, outcome))
-            if outcome.resolved and outcome.card is not None:
-                self._after_planet_explored(player, tile, planet_id)
+            if outcome.resolved and planet_id is not None:
+                self.after_planet_explored(player, tile, planet_id)
 
-    def _after_planet_explored(self, player, tile, planet_id):
+    def after_planet_explored(self, player, tile, planet_id):
         if 'pfa' in player.technologies:
             card = next((card for card in player.planets
                          if card.planet.planet_id == planet_id), None)
             if card is not None:
                 card.exhausted = False
-        if (player.faction == 'titans' and planet_id is not None and
+        if (player.faction == 'titans' and self.exploration is not None and
                 planet_id not in tile.sleeper_tokens):
-            from pok_factions import titans_place_sleeper
-            if sum(len(system.sleeper_tokens) for system in self.board.values()) < 5:
+            from pok_factions import SLEEPER_TOKEN_SUPPLY, titans_place_sleeper
+            from exploration import PendingTerragenesis
+            sleeper_count = sum(len(system.sleeper_tokens) for system in self.board.values())
+            if sleeper_count < SLEEPER_TOKEN_SUPPLY:
                 titans_place_sleeper(player, self.board, tile, planet_id)
+            else:
+                self.exploration.terragenesis_pending = PendingTerragenesis(
+                    player.faction, tile.position, planet_id)
+
+    def terragenesis_sources(self):
+        pending = self.exploration.terragenesis_pending
+        if pending is None:
+            return ()
+        locations = {planet.planet_id: (tile, planet)
+                     for tile in self.board.values() for planet in tile.planets}
+        return tuple((tile, locations[planet_id][1])
+                     for tile in self.board.values() for planet_id in sorted(tile.sleeper_tokens)
+                     if planet_id in locations)
+
+    def resolve_terragenesis(self, move_from_planet_id=None):
+        pending = self.exploration.terragenesis_pending
+        if pending is None:
+            raise MovementError('Terragenesis is not waiting for a choice.')
+        player = self.exploration.players[pending.faction]
+        if move_from_planet_id is not None:
+            tile = self.board[pending.position]
+            from pok_factions import titans_place_sleeper
+            titans_place_sleeper(player, self.board, tile, pending.planet_id,
+                                 move_from_planet_id=move_from_planet_id)
+        self.exploration.terragenesis_pending = None
+        self.resolve_exploration_queue()
 
     def resolve_exploration_choice(self, choice):
         if self.exploration is None or self.exploration.pending is None:
@@ -3168,8 +3197,8 @@ class MovementController:
         tile = self.board[self.exploration.pending.position]
         outcome = self.exploration.resolve_pending(choice)
         self.exploration_outcomes.append((faction, outcome))
-        if outcome.resolved and outcome.card is not None and planet_id is not None:
-            self._after_planet_explored(self.exploration.players[faction], tile, planet_id)
+        if outcome.resolved and planet_id is not None:
+            self.after_planet_explored(self.exploration.players[faction], tile, planet_id)
         self.resolve_exploration_queue()
         return outcome
 

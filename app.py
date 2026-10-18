@@ -35,7 +35,7 @@ from technology import restore_infantry_on_cards
 from action_cards import ActionCardController
 from action_card_panel import ActionCardPanel
 from game_ai import GameAI
-from exploration import ExplorationController
+from exploration import ExplorationController, ATTACHMENT_TOKEN_STEMS
 from exploration_panel import ExplorationPanel
 from relic_action_panel import RelicActionPanel
 from leader_panel import LeaderPanel
@@ -339,6 +339,27 @@ class BoardWindow(arcade.Window):
                 marker_size = max(8, width * .06)
                 self.player_panel.image(f'command_token/control_{owner.color_code}.png', px, py, marker_size)
                 self.player_panel.image(f'factions/{owner.faction}.png', px, py, marker_size * .52)
+            center_x = tile_left + planet.center[0] * scale
+            center_y = tile_top - planet.center[1] * scale
+            marker_size = max(8, width * .075)
+            if planet.planet_id in tile.sleeper_tokens:
+                self.player_panel.image(
+                    'tokens/token_sleeper.png',
+                    center_x - planet.radius * .62 * scale,
+                    center_y - planet.radius * .62 * scale,
+                    marker_size)
+            if self.exploration:
+                for index, alias in enumerate(self.exploration.attachments.get(planet.planet_id, ())):
+                    stem = ATTACHMENT_TOKEN_STEMS.get(alias, alias.replace('_', ''))
+                    image_path = f'attachment_token/attachment_{stem}.png'
+                    if not (ROOT / 'assets/source/asyncti4/src/main/resources' /
+                            image_path).is_file():
+                        continue
+                    self.player_panel.image(
+                        image_path,
+                        center_x - planet.radius * .62 * scale + (index % 2) * marker_size * .55,
+                        center_y + planet.radius * .62 * scale - (index // 2) * marker_size * .55,
+                        marker_size)
         players = [player for player in self.player_panel.players if player.faction in tile.command_tokens]
         token_size = width * .18
         spacing = token_size + max(2, width * .012)
@@ -699,6 +720,8 @@ class BoardWindow(arcade.Window):
 
     def exploration_decision_owner(self):
         """The player who must answer the currently open exploration decision."""
+        if self.exploration.terragenesis_pending is not None:
+            return self.exploration.players[self.exploration.terragenesis_pending.faction]
         if self.exploration.pending is not None:
             return self.exploration.players[self.exploration.pending.faction]
         if self.exploration.freelancer_offer is not None:
@@ -868,6 +891,9 @@ class BoardWindow(arcade.Window):
                 outcome = use_naaz_agent(player, beneficiary, self.exploration,
                                          self.board[position], planet_id)
                 self.movement.exploration_outcomes.append((beneficiary.faction, outcome))
+                if outcome.resolved:
+                    self.movement.after_planet_explored(
+                        beneficiary, self.board[position], planet_id)
             except (ValueError, KeyError) as error:
                 snapshot.restore()
                 self.movement_error = str(error)
@@ -1328,7 +1354,13 @@ class BoardWindow(arcade.Window):
             self.action_card_panel.draw(self)
         if self.star_forge_target is not None:
             self.draw_star_forge_modal()
-        if not self.exploration_panel.is_visible(self.exploration):
+        terragenesis_result_waiting = (
+            self.exploration.terragenesis_pending is not None and
+            self.exploration.pending is None and self.exploration.freelancer_offer is None and
+            not self.exploration.secret_objectives.pending_returns and
+            not self.exploration_panel.open and not self.exploration_panel.result_mode)
+        if (not self.exploration_panel.is_visible(self.exploration) or
+                terragenesis_result_waiting):
             while self.movement.exploration_outcomes:
                 faction, outcome = self.movement.exploration_outcomes.pop(0)
                 player = next((p for p in self.player_panel.players if p.faction == faction), None)
@@ -2510,6 +2542,12 @@ class BoardWindow(arcade.Window):
                 if action and action[0] == 'resolve':
                     self.movement.resolve_exploration_choice(action[1])
                     self.advance_hero_frontier()
+                    self.exploration_panel.close()
+                elif action and action[0] == 'move_sleeper':
+                    self.movement.resolve_terragenesis(action[1])
+                    self.exploration_panel.close()
+                elif action and action[0] == 'decline_terragenesis':
+                    self.movement.resolve_terragenesis()
                     self.exploration_panel.close()
                 elif action and action[0] == 'freelancer_kind':
                     self.exploration_panel.freelancer_kind = action[1]

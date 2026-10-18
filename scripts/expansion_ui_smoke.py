@@ -7,7 +7,7 @@ import arcade
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import BoardWindow  # noqa: E402
-from exploration import PendingExploration  # noqa: E402
+from exploration import PendingExploration, PendingTerragenesis  # noqa: E402
 from movement import Session, Snapshot  # noqa: E402
 from player import PlanetCard  # noqa: E402
 from strategic_action import StrategyResolution  # noqa: E402
@@ -383,7 +383,42 @@ def main():
         window.system_panel.draw(window, tile, window.width - window.sidebar)
         assert window.labels[(attachment_planet.planet_id, 'specialties')].text == 'Technology: BIOTIC'
         assert window.labels[(attachment_planet.planet_id, 'attachments')].text == 'Attached: Biotic'
-        print('PASS: immediate token allocation, decline interaction and visible research-facility data')
+
+        # Attachment and Titans sleeper tokens render on planets; when the
+        # sleeper supply is full, the Terragenesis prompt moves one by choice.
+        window.configure_game(Path(__file__).resolve().parents[1] /
+                              'maps/three_player.json', ('titans', 'sol', 'hacan'))
+        titans = window.turn_order.active_player
+        marker_tile = next(tile for tile in window.board.values() if len(tile.planets) >= 2)
+        marked_planet, destination = marker_tile.planets[:2]
+        window.exploration.attachments[marked_planet.planet_id] = ['ds', 'biotic']
+        marker_tile.sleeper_tokens.add(marked_planet.planet_id)
+        window.selected = marker_tile.position
+        window.on_draw()
+        loaded = {Path(path).name for path in window.player_panel.textures}
+        assert {'token_sleeper.png', 'attachment_dysonsphere.png',
+                'attachment_biotic.png'} <= loaded
+
+        destination_tile = marker_tile
+        destination_tile.planet_owners[destination.planet_id] = titans.faction
+        if not any(card.planet.planet_id == destination.planet_id for card in titans.planets):
+            titans.planets.append(PlanetCard(destination))
+        all_planets = [(tile, planet) for tile in window.board.values() for planet in tile.planets
+                       if planet.planet_id != destination.planet_id]
+        source_planets = [planet.planet_id for _, planet in all_planets[:5]]
+        for tile, planet in all_planets[:5]:
+            tile.sleeper_tokens.add(planet.planet_id)
+        window.exploration.terragenesis_pending = PendingTerragenesis(
+            titans.faction, destination_tile.position, destination.planet_id)
+        window.on_draw()
+        assert 'terragenesis_help' in window.labels
+        source = source_planets[0]
+        move_hit = next(hit for hit in window.exploration_panel.hits
+                        if hit[0] == ('move_sleeper', source))
+        click(window, move_hit)
+        assert destination.planet_id in destination_tile.sleeper_tokens
+        assert not any(source in tile.sleeper_tokens for tile in window.board.values())
+        print('PASS: token allocation, exploration decline, attachment and sleeper markers, and Terragenesis move choice')
     finally:
         window.close()
 

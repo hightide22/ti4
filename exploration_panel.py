@@ -72,6 +72,7 @@ class ExplorationPanel:
     def is_visible(self, exploration) -> bool:
         return (self.open or exploration.pending is not None or
                 exploration.freelancer_offer is not None or
+                exploration.terragenesis_pending is not None or
                 bool(exploration.secret_objectives.pending_returns))
 
     def show_result(self, outcome) -> None:
@@ -188,8 +189,38 @@ class ExplorationPanel:
             self._draw_secret_return(window, player, exploration)
         elif self.result_mode and self.result:
             self._draw_result(window)
+        elif exploration.terragenesis_pending is not None:
+            self._draw_terragenesis(window, player, exploration)
         else:
             self._draw_inventory(window, player, exploration)
+
+    def _draw_terragenesis(self, window, player, exploration):
+        pending = exploration.terragenesis_pending
+        tile = window.board[pending.position]
+        planet = next(planet for planet in tile.planets
+                      if planet.planet_id == pending.planet_id)
+        x, bottom, width, height = self._window_rect(window, 760, 490)
+        self._frame(window, x, bottom, width, height,
+                    'TERRAGENESIS · PLACE OR MOVE A SLEEPER', close=False)
+        top = bottom + height
+        window.text('terragenesis_help',
+                    f'{player.faction.upper()} · Place a sleeper on {planet.name}, or move one from another planet.',
+                    x + 24, top - 91, 10, MUTED, width - 48)
+        sources = window.movement.terragenesis_sources()
+        row_y = top - 157
+        row_step = 48
+        for index, (source_tile, source_planet) in enumerate(sources):
+            by = row_y - index * row_step
+            label = f'MOVE FROM {source_planet.name} · {source_tile.name}'
+            button(window, ('move_sleeper', source_planet.planet_id), label,
+                   x + 24, by, width - 48, 37, primary=True, size=9)
+            self.hits.append((('move_sleeper', source_planet.planet_id),
+                              x + 24, x + width - 24, by, by + 37))
+        decline_y = bottom + 24
+        button(window, 'decline_terragenesis', 'DECLINE',
+               x + width - 132, decline_y, 108, 34, size=9)
+        self.hits.append((('decline_terragenesis',), x + width - 132,
+                          x + width - 24, decline_y, decline_y + 34))
 
     def _draw_secret_return(self, window, player, exploration):
         deck = exploration.secret_objectives

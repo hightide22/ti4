@@ -159,6 +159,73 @@ class PokMovementEffectsTests(unittest.TestCase):
         movement.cancel()
         self.assertEqual([], movement.exploration.fragments[sol.faction])
 
+    def test_titans_scanlink_places_visible_sleeper_after_exploration(self):
+        board, players, movement = game('titans')
+        titans = players[0]
+        titans.technologies |= {'sdn'}
+        traits = {'cultural': 'crf1', 'hazardous': 'hrf1', 'industrial': 'irf1'}
+        target, planet = next((tile, planet) for tile in board.values()
+                              for planet in tile.planets
+                              if planet.planet_type and planet.planet_type.lower() in traits and
+                              not planet.faction_homeworld and
+                              tile.planet_owners.get(planet.planet_id) is None and
+                              titans.faction not in tile.command_tokens)
+        target.planet_owners[planet.planet_id] = titans.faction
+        titans.planets.append(PlanetCard(planet))
+        target.units.append(Unit('titans-scanlink-infantry', 'infantry', titans.faction,
+                                 titans.color_code,
+                                 UnitLocation(Region.PLANET, planet.planet_id)))
+        decks = {'cultural': [], 'hazardous': [], 'industrial': [], 'frontier': []}
+        decks[planet.planet_type.lower()] = [traits[planet.planet_type.lower()]]
+        movement.exploration = ExplorationController(board, players, decks=decks,
+                                                     relic_deck=[])
+
+        movement.activate(titans, target.position)
+        movement.explore_with_scanlink(planet.planet_id)
+
+        self.assertIn(planet.planet_id, target.sleeper_tokens)
+        self.assertIsNone(movement.exploration.terragenesis_pending)
+
+    def test_titans_terragenesis_prompts_to_move_a_sleeper_when_supply_is_full(self):
+        board, players, movement = game('titans')
+        titans = players[0]
+        titans.technologies |= {'sdn'}
+        traits = {'cultural': 'crf1', 'hazardous': 'hrf1', 'industrial': 'irf1'}
+        target, planet = next((tile, planet) for tile in board.values()
+                              for planet in tile.planets
+                              if planet.planet_type and planet.planet_type.lower() in traits and
+                              not planet.faction_homeworld and
+                              tile.planet_owners.get(planet.planet_id) is None and
+                              titans.faction not in tile.command_tokens)
+        target.planet_owners[planet.planet_id] = titans.faction
+        titans.planets.append(PlanetCard(planet))
+        target.units.append(Unit('titans-full-supply-infantry', 'infantry', titans.faction,
+                                 titans.color_code,
+                                 UnitLocation(Region.PLANET, planet.planet_id)))
+        existing_sleepers = [candidate.planet_id for tile in board.values()
+                             for candidate in tile.planets
+                             if candidate.planet_id != planet.planet_id][:5]
+        for tile in board.values():
+            tile.sleeper_tokens.update(candidate.planet_id for candidate in tile.planets
+                                       if candidate.planet_id in existing_sleepers)
+        decks = {'cultural': [], 'hazardous': [], 'industrial': [], 'frontier': []}
+        decks[planet.planet_type.lower()] = [traits[planet.planet_type.lower()]]
+        movement.exploration = ExplorationController(board, players, decks=decks,
+                                                     relic_deck=[])
+
+        movement.activate(titans, target.position)
+        movement.explore_with_scanlink(planet.planet_id)
+
+        pending = movement.exploration.terragenesis_pending
+        self.assertIsNotNone(pending)
+        self.assertEqual((titans.faction, target.position, planet.planet_id),
+                         (pending.faction, pending.position, pending.planet_id))
+        source = existing_sleepers[0]
+        movement.resolve_terragenesis(source)
+        self.assertIn(planet.planet_id, target.sleeper_tokens)
+        self.assertFalse(any(source in tile.sleeper_tokens for tile in board.values()))
+        self.assertIsNone(movement.exploration.terragenesis_pending)
+
     def test_self_assembly_and_ai_development_production_are_optional(self):
         board, players, movement = game()
         sol = players[0]

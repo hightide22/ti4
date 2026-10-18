@@ -35,6 +35,13 @@ ATTACHMENT_BONUSES = {
     'ls': (1, 2), 'mw': (2, 0), 'rw': (1, 0),
     'nanoforge': (2, 2),
 }
+ATTACHMENT_TOKEN_STEMS = {
+    'dmz': 'dmz', 'ds': 'dysonsphere', 'pw': 'paradiseworld',
+    'toe': 'tombofemphidia', 'ls': 'lazaxsurvivors', 'mw': 'miningworld',
+    'rw': 'richworld', 'nanoforge': 'nanoforge',
+    'warfare': 'warfare', 'biotic': 'biotic',
+    'cybernetic': 'cybernetic', 'propulsion': 'propulsion',
+}
 FRONTIER_COMMAND_AND_GOODS = {
     'minent': (1, 1),
     'ent': (1, 2),
@@ -87,6 +94,13 @@ class PendingExploration:
     offered_aliases: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class PendingTerragenesis:
+    faction: str
+    position: tuple[int, int]
+    planet_id: str
+
+
 class ExplorationController:
     def __init__(self, board, players, *, rng=None, action_cards=None,
                  decks=None, relic_deck=None, secret_objective_deck=None):
@@ -111,6 +125,7 @@ class ExplorationController:
         self.discards: dict[str, list[str]] = {trait: [] for trait in TRAITS}
         self.purged: set[str] = set()
         self.attachments: dict[str, list[str]] = {}
+        self.terragenesis_pending: PendingTerragenesis | None = None
         self.attached_relics: dict[str, str] = {}
         self.legendary_planets: set[str] = set()
         self.destroyed_planets: set[str] = set()
@@ -130,7 +145,7 @@ class ExplorationController:
     def snapshot(self):
         return deepcopy((self.decks, self.discards, self.purged, self.attachments,
                          self.attached_relics, self.legendary_planets,
-                         self.destroyed_planets,
+                         self.destroyed_planets, self.terragenesis_pending,
                          self.space_tokens, self.fragments, self.kept_cards,
                          self.common_cards, self.pending, self.freelancer_offer,
                          self.next_unit_number,
@@ -140,7 +155,7 @@ class ExplorationController:
     def restore(self, snapshot):
         (self.decks, self.discards, self.purged, self.attachments,
          self.attached_relics, self.legendary_planets,
-         self.destroyed_planets,
+         self.destroyed_planets, self.terragenesis_pending,
          self.space_tokens, self.fragments, self.kept_cards,
          self.common_cards, self.pending, self.freelancer_offer,
          self.next_unit_number,

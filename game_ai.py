@@ -194,6 +194,19 @@ class GameAI:
                         advance()
                     self.report(owner, 'Returned an excess secret objective.', .2)
                 return
+        if exploration is not None and exploration.terragenesis_pending is not None:
+            owner = exploration.players[exploration.terragenesis_pending.faction]
+            if self.is_bot(owner):
+                sources = w.movement.terragenesis_sources()
+                source = min(sources, key=lambda entry: (
+                    entry[0].planet_owners.get(entry[1].planet_id) != owner.faction,
+                    not any(unit.owner == owner.faction and unit.kind == 'pds' and
+                            unit.location.planet_id == entry[1].planet_id
+                            for unit in entry[0].units),
+                    entry[1].planet_id)) if sources else None
+                w.movement.resolve_terragenesis(source[1].planet_id if source else None)
+                self.report(owner, 'Resolved Terragenesis sleeper placement.', .2)
+            return
         if exploration is not None and exploration.pending:
             pending = exploration.pending
             owner = exploration.players[pending.faction]

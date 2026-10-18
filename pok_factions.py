@@ -99,9 +99,8 @@ def titans_place_sleeper(player, board, tile, planet_id: str,
     if player.faction != 'titans' or tile.position not in board:
         raise ValueError('Only Titans can place a sleeper token on this board')
     if (planet_id not in {planet.planet_id for planet in tile.planets} or
-            tile.planet_owners.get(planet_id) != player.faction or
             planet_id in tile.sleeper_tokens):
-        raise ValueError('Choose a newly explored controlled planet without a sleeper')
+        raise ValueError('Choose an explored planet without a sleeper')
     placed = [(candidate, sleeper) for candidate in board.values()
               for sleeper in candidate.sleeper_tokens]
     if move_from_planet_id is not None:
