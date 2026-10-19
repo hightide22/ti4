@@ -178,11 +178,19 @@ def main():
             'The selected controlled system should remain clickable beside the modal.'
         assert w.pick(sx, sy) == selected_system.position
         w.on_mouse_press(sx, sy, arcade.MOUSE_BUTTON_LEFT, 0)
-        assert w.strategy.session.stage == 'offer'
+        assert w.strategy.session.stage == 'ready_planets'
         assert all(player.faction in selected_system.command_tokens
                    for player in w.player_panel.players if player is not diplomacy_owner)
+        selected_planets = [card.planet.planet_id for card in diplomacy_owner.planets
+                            if selected_system.planet_owners.get(card.planet.planet_id) ==
+                            diplomacy_owner.faction and card.exhausted]
+        assert selected_planets, 'The selected system should offer controlled planets to ready.'
+        for planet_id in selected_planets[:2]:
+            click(('ready_planet', planet_id))
+        click(('ready_confirm',))
+        assert w.strategy.session.stage == 'offer'
         assert all(not card.exhausted for card in diplomacy_owner.planets
-                   if selected_system.planet_owners.get(card.planet.planet_id) == diplomacy_owner.faction)
+                   if card.planet.planet_id in selected_planets[:2])
         assert remote_card.exhausted
         responder = w.strategy.player
         for card in responder.planets:
