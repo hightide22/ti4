@@ -52,6 +52,7 @@ class PlayerState:
     exhausted_technologies: set[str] = field(default_factory=set)
     infantry_on_cards: dict[str, int] = field(default_factory=dict)
     action_cards: list[str] = field(default_factory=list)
+    exhausted_legendary_abilities: set[str] = field(default_factory=set)
 
     def change_currency(self, currency, amount):
         if currency not in ('trade_goods', 'commodities'):

@@ -274,10 +274,12 @@ class CommanderEffectTests(unittest.TestCase):
                                       count=2)
         placed = [unit for unit in home.units if unit.unit_id.startswith('sol-primor-infantry-')]
         self.assertEqual(2, len(placed))
-        self.assertTrue(card.exhausted)
+        self.assertFalse(card.exhausted)
+        self.assertIn('primor', sol.exhausted_legendary_abilities)
         self.assertNotIn('primor', movement.legendary_planet_options(sol))
         movement.undo()
         self.assertFalse(card.exhausted)
+        self.assertNotIn('primor', sol.exhausted_legendary_abilities)
         self.assertTrue(all(unit not in home.units for unit in placed))
 
     def test_hopes_end_places_mech_or_draws_card_with_undo(self):
@@ -299,18 +301,70 @@ class CommanderEffectTests(unittest.TestCase):
                                       destination_planet_id=target_id)
         self.assertTrue(any(unit.unit_id.startswith('sol-hopesend-mech-')
                             for unit in home.units))
-        self.assertTrue(card.exhausted)
+        self.assertFalse(card.exhausted)
+        self.assertIn('hopesend', sol.exhausted_legendary_abilities)
         movement.undo()
         self.assertFalse(card.exhausted)
+        self.assertNotIn('hopesend', sol.exhausted_legendary_abilities)
         self.assertFalse(any(unit.unit_id.startswith('sol-hopesend-mech-')
                              for unit in home.units))
         movement.use_legendary_planet(sol, 'hopesend', choice='card')
         self.assertEqual(['fs1'], sol.action_cards)
-        self.assertTrue(card.exhausted)
+        self.assertFalse(card.exhausted)
+        self.assertIn('hopesend', sol.exhausted_legendary_abilities)
         movement.undo()
         self.assertEqual([], sol.action_cards)
         self.assertFalse(card.exhausted)
+        self.assertNotIn('hopesend', sol.exhausted_legendary_abilities)
         self.assertEqual(['fs1'], movement.action_cards.deck)
+
+    def test_newly_captured_legendary_ability_is_ready_while_planet_card_is_exhausted(self):
+        board, players, movement = game('sol')
+        sol = players[0]
+        source = next(tile for tile in board.values() if not tile.planets)
+        source.definition = TILES[65]
+        planet = source.planets[0]
+        movement.exploration = ExplorationController(
+            board, players,
+            decks={'cultural': [], 'hazardous': [], 'industrial': [], 'frontier': []},
+            relic_deck=[])
+        session = Session(sol, source, {}, Snapshot.capture(
+            board, sol, players, exploration=movement.exploration))
+
+        self.assertTrue(movement.capture_planet(session, 'primor'))
+
+        planet_card = next(card for card in sol.planets if card.planet.planet_id == 'primor')
+        self.assertTrue(planet_card.exhausted)
+        self.assertIn('primor', movement.legendary_planet_options(sol))
+        destination = next(card.planet.planet_id for card in sol.planets
+                           if card.planet.planet_id != 'primor')
+        movement.use_legendary_planet(sol, 'primor', destination_planet_id=destination)
+        self.assertTrue(planet_card.exhausted)
+        self.assertIn('primor', sol.exhausted_legendary_abilities)
+
+    def test_exhausted_legendary_ability_transfers_with_the_planet_and_undoes(self):
+        board, players, movement = game('sol')
+        sol, hacan = players[:2]
+        source = next(tile for tile in board.values() if not tile.planets)
+        source.definition = TILES[65]
+        source.planet_owners['primor'] = sol.faction
+        sol.planets.append(PlanetCard(source.planets[0], exhausted=True))
+        sol.exhausted_legendary_abilities.add('primor')
+        movement.exploration = ExplorationController(
+            board, players,
+            decks={'cultural': [], 'hazardous': [], 'industrial': [], 'frontier': []},
+            relic_deck=[])
+        session = Session(hacan, source, {}, Snapshot.capture(
+            board, hacan, players, exploration=movement.exploration))
+
+        self.assertTrue(movement.capture_planet(session, 'primor'))
+
+        self.assertNotIn('primor', sol.exhausted_legendary_abilities)
+        self.assertIn('primor', hacan.exhausted_legendary_abilities)
+        session.snapshot.restore()
+        self.assertIn('primor', sol.exhausted_legendary_abilities)
+        self.assertNotIn('primor', hacan.exhausted_legendary_abilities)
+        self.assertEqual(sol.faction, source.planet_owners['primor'])
 
 
 if __name__ == '__main__':

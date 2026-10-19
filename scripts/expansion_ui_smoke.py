@@ -223,8 +223,9 @@ def main():
                            if hit[0] == ('use', 'primor', 'infantry', 'jord', 1)))
         assert sum(unit.owner == player.faction and unit.kind == 'infantry'
                    for tile in window.board.values() for unit in tile.units) == before_infantry + 1
-        assert next(card for card in player.planets
-                    if card.planet.planet_id == 'primor').exhausted
+        assert not next(card for card in player.planets
+                        if card.planet.planet_id == 'primor').exhausted
+        assert 'primor' in player.exhausted_legendary_abilities
 
         window.configure_game(Path(__file__).resolve().parents[1] /
                               'maps/three_player.json', ('naaz', 'sol', 'jolnar'))

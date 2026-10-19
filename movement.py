@@ -78,7 +78,8 @@ class Snapshot:
                        'leaders', 'scored_objectives', 'scored_secret_objectives',
                        'foreign_fleet_tokens', 'foreign_command_tokens_out',
                        'captured_units', 'hero_attachments', 'hero_round_flags',
-                       'pending_commands') if hasattr(other, name)})
+                       'pending_commands', 'exhausted_legendary_abilities')
+                      if hasattr(other, name)})
                     for other in all_players],
                    (exploration, exploration.snapshot()) if exploration else None)
 
@@ -3109,6 +3110,20 @@ class MovementController:
             target.custodians_present = False
         target.planet_owners[planet_id] = player.faction
         planet = next(planet for planet in target.planets if planet.planet_id == planet_id)
+        if (self.exploration is not None and
+                self.exploration.planet_is_legendary(planet)):
+            if previous_owner is None:
+                player.exhausted_legendary_abilities.discard(planet_id)
+            elif previous_owner != player.faction:
+                old_owner = self.faction_player(previous_owner)
+                ability_was_exhausted = bool(
+                    old_owner and planet_id in old_owner.exhausted_legendary_abilities)
+                if old_owner:
+                    old_owner.exhausted_legendary_abilities.discard(planet_id)
+                if ability_was_exhausted:
+                    player.exhausted_legendary_abilities.add(planet_id)
+                else:
+                    player.exhausted_legendary_abilities.discard(planet_id)
         if (previous_owner and self.exploration is not None and
                 (planet.faction_homeworld or self.exploration.planet_is_legendary(planet))):
             self.exploration.relics.transfer_shard(previous_owner, player.faction)
@@ -3367,7 +3382,8 @@ class MovementController:
                      self.exploration.planet_is_blocked(planet.planet_id) or
                      planet.planet_id in self.exploration.destroyed_planets))}
         ready = {card.planet.planet_id for card in player.planets
-                 if not card.exhausted and card.planet.planet_id in owned}
+                 if card.planet.planet_id in owned and
+                 card.planet.planet_id not in player.exhausted_legendary_abilities}
         options = {}
         infantry_out = sum(unit.owner == player.faction and unit.kind == 'infantry'
                            for tile in self.board.values() for unit in tile.units)
@@ -3409,8 +3425,6 @@ class MovementController:
             kind, quantity = 'card', 1
         else:
             raise MovementError('This legendary planet ability is unavailable.')
-        card = next(card for card in player.planets
-                    if card.planet.planet_id == source_planet_id)
         snapshot = Snapshot.capture(self.board, player, self.players,
                                     self.action_cards, self.exploration)
         if kind == 'card':
@@ -3424,7 +3438,7 @@ class MovementController:
                 destination.units.append(Unit(f'{player.faction}-{source_planet_id}-{kind}-{uuid4().hex}',
                                               kind, player.faction, player.color_code,
                                               UnitLocation(Region.PLANET, destination_planet_id)))
-        card.exhausted = True
+        player.exhausted_legendary_abilities.add(source_planet_id)
         self.history.append(UndoEntry(snapshot, counts_as_action=False))
         return {'source': source_planet_id, 'choice': kind, 'count': quantity,
                 'destination': destination_planet_id}

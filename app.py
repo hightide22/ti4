@@ -1043,6 +1043,7 @@ class BoardWindow(arcade.Window):
                 for card in player.planets:
                     card.exhausted = False
                 player.exhausted_technologies.clear()
+                player.exhausted_legendary_abilities.clear()
                 ready_leaders(player)
                 clear_round_hero_effects(player)
                 for _ in range(2 if 'nm' in player.technologies else 1):
@@ -1442,9 +1443,9 @@ class BoardWindow(arcade.Window):
         height = min(510, self.height - 40)
         left, bottom = (self.width - width) / 2, (self.height - height) / 2
         modal(left, left + width, bottom, bottom + height)
-        self.text('legendary_title', 'END OF TURN · LEGENDARY PLANETS',
+        self.text('legendary_title', 'LEGENDARY PLANET ABILITIES',
                   left + 22, bottom + height - 39, 16, ACCENT)
-        self.text('legendary_help', 'Exhaust a legendary planet now, or finish your turn.',
+        self.text('legendary_help', 'New abilities are ready immediately; use them at the end of your turn.',
                   left + 22, bottom + height - 66, 10, MUTED, width - 44)
         self.legendary_hits.clear()
 
