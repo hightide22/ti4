@@ -186,6 +186,102 @@ class PokMovementEffectsTests(unittest.TestCase):
         self.assertIn(planet.planet_id, target.sleeper_tokens)
         self.assertIsNone(movement.exploration.terragenesis_pending)
 
+    def test_titans_awaken_replaces_only_sleepers_present_at_activation(self):
+        board, players, movement = game('titans')
+        titans = players[0]
+        target = next(tile for tile in board.values()
+                      if len(tile.planets) >= 2 and
+                      titans.faction not in tile.command_tokens and
+                      not tile.sleeper_tokens)
+        original, added_later = target.planets[:2]
+        target.sleeper_tokens.add(original.planet_id)
+
+        session = movement.activate(titans, target.position)
+        target.sleeper_tokens.add(added_later.planet_id)
+        placed = movement.awaken_titans_sleepers()
+
+        self.assertEqual([original.planet_id], [unit.location.planet_id for unit in placed])
+        self.assertNotIn(original.planet_id, target.sleeper_tokens)
+        self.assertIn(added_later.planet_id, target.sleeper_tokens)
+        self.assertEqual({original.planet_id}, set(session.titans_awakened_planets))
+
+    def test_titans_awaken_can_relocate_pds_from_an_unactivated_system(self):
+        board, players, movement = game('titans')
+        titans = players[0]
+        target = next(tile for tile in board.values()
+                      if tile.planets and titans.faction not in tile.command_tokens)
+        planet = target.planets[0]
+        target.sleeper_tokens.add(planet.planet_id)
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == titans.faction and unit.kind == 'pds')]
+        sources = [tile for tile in board.values()
+                   if tile is not target and tile.planets and
+                   titans.faction not in tile.command_tokens]
+        pds_planets = [(tile, p) for tile in sources for p in tile.planets]
+        for index, (source, source_planet) in enumerate(pds_planets[:6]):
+            source.units.append(Unit(f'titans-reserve-pds-{index}', 'pds', titans.faction,
+                                     titans.color_code,
+                                     UnitLocation(Region.PLANET, source_planet.planet_id)))
+        source_tile, source_pds = next(
+            (tile, unit) for tile in sources for unit in tile.units
+            if unit.owner == titans.faction and unit.kind == 'pds')
+        movement.activate(titans, target.position)
+
+        placed = movement.awaken_titans_sleepers()
+
+        self.assertEqual(1, len(placed))
+        self.assertIs(placed[0], source_pds)
+        self.assertNotIn(source_pds, source_tile.units)
+        self.assertIn(source_pds, target.units)
+        self.assertEqual(6, sum(unit.owner == titans.faction and unit.kind == 'pds'
+                                for tile in board.values() for unit in tile.units))
+
+    def test_titans_awaken_triggers_ground_combat_on_enemy_planet(self):
+        board, players, movement = game('titans')
+        titans, defender = players[:2]
+        target = next(tile for tile in board.values()
+                      if tile.planets and not tile.units and
+                      titans.faction not in tile.command_tokens)
+        planet = target.planets[0]
+        target.sleeper_tokens.add(planet.planet_id)
+        target.planet_owners[planet.planet_id] = defender.faction
+        target.units.append(Unit('enemy-planet-infantry', 'infantry', defender.faction,
+                                 defender.color_code,
+                                 UnitLocation(Region.PLANET, planet.planet_id)))
+        session = movement.activate(titans, target.position)
+
+        movement.awaken_titans_sleepers()
+        session.stage = 'invasion'
+        movement.establish_control()
+
+        self.assertEqual('ground_combat', session.stage)
+        self.assertEqual(planet.planet_id, session.combat_planet_id)
+        self.assertEqual(1, len(movement.combat_units(session, titans.faction)))
+
+    def test_titans_awaken_captures_enemy_planet_without_ground_forces(self):
+        board, players, movement = game('titans')
+        titans, defender = players[:2]
+        target = next(tile for tile in board.values()
+                      if tile.planets and not tile.units and
+                      titans.faction not in tile.command_tokens)
+        planet = target.planets[0]
+        target.sleeper_tokens.add(planet.planet_id)
+        target.planet_owners[planet.planet_id] = defender.faction
+        defender.planets.append(PlanetCard(planet))
+        enemy_pds = Unit('enemy-planet-pds', 'pds', defender.faction,
+                         defender.color_code, UnitLocation(Region.PLANET, planet.planet_id))
+        target.units.append(enemy_pds)
+        session = movement.activate(titans, target.position)
+
+        movement.awaken_titans_sleepers()
+
+        self.assertEqual(titans.faction, target.planet_owners[planet.planet_id])
+        self.assertNotIn(enemy_pds, target.units)
+        self.assertIn(planet.planet_id, session.titans_awakened_captured)
+        self.assertTrue(any(card.planet.planet_id == planet.planet_id
+                            for card in titans.planets))
+
     def test_titans_terragenesis_prompts_to_move_a_sleeper_when_supply_is_full(self):
         board, players, movement = game('titans')
         titans = players[0]

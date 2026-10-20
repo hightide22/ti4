@@ -390,6 +390,28 @@ def main():
         window.configure_game(Path(__file__).resolve().parents[1] /
                               'maps/three_player.json', ('titans', 'sol', 'hacan'))
         titans = window.turn_order.active_player
+        awaken_tile = next(tile for tile in window.board.values()
+                           if tile.planets and titans.faction not in tile.command_tokens and
+                           not tile.sleeper_tokens and
+                           not any(unit.owner == titans.faction and unit.kind == 'pds'
+                                   and unit.location.planet_id == tile.planets[0].planet_id
+                                   for unit in tile.units))
+        awaken_planet = awaken_tile.planets[0]
+        awaken_tile.sleeper_tokens.add(awaken_planet.planet_id)
+        window.movement.activate(titans, awaken_tile.position)
+        window.on_draw()
+        awaken_hit = next(hit for hit in window.movement_panel.buttons
+                          if hit[0] == ('awaken_sleepers',))
+        assert 'AWAKEN 1 SLEEPER' in window.labels['awaken_sleepers'].text
+        click(window, awaken_hit)
+        window.on_draw()
+        assert awaken_planet.planet_id not in awaken_tile.sleeper_tokens
+        assert any(unit.owner == titans.faction and unit.kind == 'pds' and
+                   unit.location.planet_id == awaken_planet.planet_id
+                   for unit in awaken_tile.units)
+        assert 'Placed 1 PDS' in window.movement.session.titans_awaken_log
+        assert window.movement.cancel()
+
         marker_tile = next(tile for tile in window.board.values() if len(tile.planets) >= 2)
         marked_planet, destination = marker_tile.planets[:2]
         window.exploration.attachments[marked_planet.planet_id] = ['ds', 'biotic']

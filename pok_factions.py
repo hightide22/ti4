@@ -114,22 +114,69 @@ def titans_place_sleeper(player, board, tile, planet_id: str,
     tile.sleeper_tokens.add(planet_id)
 
 
-def titans_awaken(player, board, tile, *, planet_ids: tuple[str, ...] | None = None):
-    """Replace sleeper tokens present at activation with PDS units."""
+def titans_awaken(player, board, tile, *, planet_ids: tuple[str, ...]):
+    """Replace selected sleeper tokens that were present at activation with PDS units."""
     if player.faction != 'titans' or tile.position not in board:
         raise ValueError('Only Titans can awaken sleeper tokens')
-    selected = set(tile.sleeper_tokens if planet_ids is None else planet_ids)
+    selected = set(planet_ids)
     if not selected <= tile.sleeper_tokens:
         raise ValueError('Sleeper token was not present at activation')
-    available = PDS_SUPPLY - sum(unit.owner == player.faction and unit.kind == 'pds'
-                                 for system in board.values() for unit in system.units)
-    if len(selected) > available:
-        raise ValueError('No PDS remains in reinforcements')
+    planet_ids_on_tile = {planet.planet_id for planet in tile.planets}
+    if not selected <= planet_ids_on_tile:
+        raise ValueError('A sleeper token is not on a planet in this system')
+
+    pds_count = sum(unit.owner == player.faction and unit.kind == 'pds'
+                    for system in board.values() for unit in system.units)
+    reserve = max(0, PDS_SUPPLY - pds_count)
+    movable = sorted(
+        ((system.position, unit.unit_id, system, unit)
+         for system in board.values()
+         if player.faction not in system.command_tokens
+         for unit in system.units
+         if unit.owner == player.faction and unit.kind == 'pds'),
+        key=lambda item: (item[0], item[1]))
+    planned = []
+    reserved_for_move = set()
+    pds_on_target = {
+        planet_id: sum(unit.owner == player.faction and unit.kind == 'pds' and
+                       unit.location.region == Region.PLANET and
+                       unit.location.planet_id == planet_id
+                       for unit in tile.units)
+        for planet_id in selected
+    }
+    for planet_id in sorted(selected):
+        # The unit limit is two PDS of a faction on any one planet.
+        if pds_on_target[planet_id] >= 2:
+            continue
+        if reserve:
+            reserve -= 1
+            planned.append((planet_id, None))
+            pds_on_target[planet_id] += 1
+            continue
+        source = next((entry for entry in movable if entry[1] not in reserved_for_move and
+                       entry[2] is not tile), None)
+        if source is None:
+            continue
+        reserved_for_move.add(source[1])
+        planned.append((planet_id, source))
+        pds_on_target[planet_id] += 1
+
+    if not planned:
+        return ()
+
+    from technology import upgrade_profile
     placed = []
-    for planet_id in selected:
+    for planet_id, source in planned:
         tile.sleeper_tokens.remove(planet_id)
-        unit = Unit(f'{player.faction}-pds-{uuid4().hex}', 'pds', player.faction,
-                    player.color_code, UnitLocation(Region.PLANET, planet_id))
+        if source is None:
+            unit = Unit(f'{player.faction}-pds-{uuid4().hex}', 'pds', player.faction,
+                        player.color_code, UnitLocation(Region.PLANET, planet_id),
+                        profile_id=(upgrade_profile(player, 'pds') or {}).get('id'))
+        else:
+            _, _, source_tile, unit = source
+            source_tile.units.remove(unit)
+            unit.location = UnitLocation(Region.PLANET, planet_id)
+            unit.damaged = False
         tile.units.append(unit)
         placed.append(unit)
     refresh_leader_unlocks(player, board)

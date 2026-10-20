@@ -3058,9 +3058,8 @@ class BoardWindow(arcade.Window):
                         elif action[0] == 'scanlink':
                             self.movement.explore_with_scanlink(action[1])
                         elif action[0] == 'awaken_sleepers':
-                            from pok_factions import titans_awaken
-                            titans_awaken(self.movement.session.player, self.board,
-                                          self.movement.session.target)
+                            self.movement.awaken_titans_sleepers()
+                            self.movement_error = None
                         elif action[0] == 'action_cards':
                             self.action_card_panel.open = True
                         elif action[0] == 'foresight':

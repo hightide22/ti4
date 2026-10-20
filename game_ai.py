@@ -1109,6 +1109,15 @@ class GameAI:
         if any(not self.is_bot(p) for p in w.action_cards.participants(s)):
             return
         if s.stage == 'movement':
+            if (s.player.faction == 'titans' and
+                    s.titans_sleepers_at_activation & s.target.sleeper_tokens):
+                try:
+                    placed = ctl.awaken_titans_sleepers()
+                except MovementError as error:
+                    self.report(s.player, str(error), .6)
+                else:
+                    self.report(s.player, s.titans_awaken_log or
+                                f'Awakened {len(placed)} sleeper token(s) into PDS.', .6)
             ships = sum(s.choices[unit_id].kind not in ('infantry', 'mech', 'fighter')
                         for unit_id in s.selected)
             ctl.confirm()

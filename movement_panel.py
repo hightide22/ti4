@@ -196,10 +196,13 @@ class MovementPanel:
                    card_x, card_y, 133, 27, primary=bool(playable_cards), size=9)
             self.buttons.append((('action_cards',), card_x, card_x + 133,
                                  card_y, card_y + 27))
-        if (session.stage == 'movement' and session.player.faction == 'titans' and
-                target.sleeper_tokens):
+        awakenable = (session.titans_sleepers_at_activation & target.sleeper_tokens
+                      if session.player.faction == 'titans' else set())
+        if session.stage == 'movement' and awakenable:
             awaken_x, awaken_y = x, window.height - 136
-            button(window, 'awaken_sleepers', 'AWAKEN SLEEPERS', awaken_x, awaken_y,
+            count = len(awakenable)
+            label = f'AWAKEN {count} SLEEPER{"S" if count != 1 else ""} · PLACE PDS'
+            button(window, 'awaken_sleepers', label, awaken_x, awaken_y,
                    width, 28, primary=True, size=9)
             self.buttons.append((('awaken_sleepers',), awaken_x,
                                  awaken_x + width, awaken_y, awaken_y + 28))
@@ -249,6 +252,8 @@ class MovementPanel:
                 notices.append(('ANTI-FIGHTER BARRAGE', session.afb_log[-1]))
             if session.assault_log:
                 notices.append(('ASSAULT CANNON', session.assault_log[-1]))
+            if session.titans_awaken_log:
+                notices.append(('TITANS · AWAKEN', session.titans_awaken_log))
             if session.retreat_log:
                 notices.append(('RETREAT', session.retreat_log))
             if session.bombard_log:

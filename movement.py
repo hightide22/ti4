@@ -160,7 +160,7 @@ class SessionCheckpoint:
         session.overflow_next_stage = None
         if self.stage == 'invasion':
             session.landed_planets.clear()
-            session.captured_planets.clear()
+            session.captured_planets[:] = session.titans_awakened_captured
             session.ground_planets.clear()
             session.ground_planet_index = 0
             session.defense_checked = False
@@ -297,6 +297,10 @@ class Session:
     bombardment_checkpoint: SessionCheckpoint | None = None
     invasion_checkpoint: SessionCheckpoint | None = None
     production_checkpoint: SessionCheckpoint | None = None
+    titans_sleepers_at_activation: frozenset[str] = frozenset()
+    titans_awakened_planets: list[str] = field(default_factory=list)
+    titans_awakened_captured: list[str] = field(default_factory=list)
+    titans_awaken_log: str = ''
     movement_bonus: int = 0
     combat_modifiers: dict[str, int] = field(default_factory=dict)
     fighter_combat_modifiers: dict[str, int] = field(default_factory=dict)
@@ -785,11 +789,14 @@ class MovementController:
             if ships:
                 passengers = self._movement_passengers(origin, player)
                 sources[origin.position] = Source(origin, ships, passengers, routes)
+        sleepers_at_activation = (frozenset(target.sleeper_tokens)
+                                  if player.faction == 'titans' else frozenset())
         snapshot = Snapshot.capture(self.board, player, self.players or [player],
                                     self.action_cards, self.exploration)
         player.command_pools['tactical'] -= 1
         target.command_tokens.add(player.faction)
-        self.session = Session(player, target, sources, snapshot)
+        self.session = Session(player, target, sources, snapshot,
+                               titans_sleepers_at_activation=sleepers_at_activation)
         self._magen_activation(target)
         self.session.gravity_bonus_ids = gravity_bonus_ids
         self._refresh_pickup_sources(self.session)
@@ -800,6 +807,44 @@ class MovementController:
                 opponent.trade_goods += 4
                 self.resolve_pillage(opponent)
         return self.session
+
+    def awaken_titans_sleepers(self):
+        """Resolve Awaken using only sleeper tokens present when this system activated."""
+        session = self.session
+        if (not session or session.stage != 'movement' or
+                session.player.faction != 'titans'):
+            raise MovementError('Titans can awaken sleepers only after activating a system.')
+        eligible = tuple(sorted(session.titans_sleepers_at_activation &
+                                session.target.sleeper_tokens))
+        if not eligible:
+            raise MovementError('No sleeper tokens in this system were present at activation.')
+        from pok_factions import titans_awaken
+        placed = titans_awaken(session.player, self.board, session.target,
+                               planet_ids=eligible)
+        if not placed:
+            raise MovementError('No legal PDS placement is available for these sleeper tokens.')
+        remaining = len(eligible) - len(placed)
+        session.titans_awaken_log = (
+            f'Placed {len(placed)} PDS for {len(eligible)} sleeper token(s).' if not remaining else
+            f'Placed {len(placed)} PDS; {remaining} sleeper token(s) remain because no legal PDS '
+            'placement is available.')
+
+        for unit in placed:
+            planet_id = unit.location.planet_id
+            if planet_id not in session.titans_awakened_planets:
+                session.titans_awakened_planets.append(planet_id)
+            previous_owner = session.target.planet_owners.get(planet_id)
+            if previous_owner in (None, session.player.faction):
+                continue
+            enemy_ground = any(
+                other.owner != session.player.faction and
+                other.location.region == Region.PLANET and
+                other.location.planet_id == planet_id and self.ground_combatant(other)
+                for other in session.target.units)
+            if not enemy_ground:
+                if self.capture_planet(session, planet_id):
+                    session.titans_awakened_captured.append(planet_id)
+        return placed
 
     def scanlink_planets(self):
         """Planets in the activated system eligible for the optional Scanlink explore."""
@@ -3016,14 +3061,14 @@ class MovementController:
             if planet_id not in landed_planets:
                 landed_planets.append(planet_id)
         session.landed_planets = landed_planets
-        session.captured_planets = []
+        session.captured_planets = list(session.titans_awakened_captured)
         session.ground_planets = []
         session.ground_planet_index = 0
         self.resolve_planetary_cannon_defense(session)
         for planet_id in landed_planets:
             attackers = [unit for unit in target.units if unit.owner == player.faction and
                          unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
-                         unit.kind in self.GROUND_FORCES]
+                         self.ground_combatant(unit)]
             if not attackers:
                 continue
             defenders = [unit for unit in target.units if unit.owner != player.faction and
@@ -3033,8 +3078,30 @@ class MovementController:
                 self.capture_planet(session, planet_id)
             else:
                 session.ground_planets.append(planet_id)
-        if not landed_planets:
-            session.outcome = 'No ground forces landed. No planets changed control.'
+        for planet_id in session.titans_awakened_planets:
+            if planet_id in session.ground_planets:
+                continue
+            planet_owner = target.planet_owners.get(planet_id)
+            if planet_owner in (None, player.faction):
+                continue
+            attackers = [unit for unit in target.units if unit.owner == player.faction and
+                         unit.location.region == Region.PLANET and
+                         unit.location.planet_id == planet_id and self.ground_combatant(unit)]
+            defenders = [unit for unit in target.units if unit.owner != player.faction and
+                         unit.location.region == Region.PLANET and
+                         unit.location.planet_id == planet_id and self.ground_combatant(unit)]
+            if attackers and defenders:
+                session.ground_planets.append(planet_id)
+            elif not defenders:
+                if self.capture_planet(session, planet_id):
+                    session.titans_awakened_captured.append(planet_id)
+        if not landed_planets and not session.ground_planets:
+            captured_names = [next((planet.name for planet in target.planets
+                                    if planet.planet_id == planet_id), planet_id)
+                              for planet_id in session.captured_planets]
+            session.outcome = ('No ground forces landed.' +
+                               (f' Awakened PDS captured {", ".join(captured_names)}.'
+                                if captured_names else ' No planets changed control.'))
             if session.custodian_payment_log:
                 session.outcome += ' ' + ' '.join(session.custodian_payment_log)
             self.prepare_production(session)
@@ -3310,7 +3377,7 @@ class MovementController:
                          self.ground_combatant(unit)]
             attackers = [unit for unit in session.target.units if unit.owner == session.player.faction and
                          unit.location.region == Region.PLANET and unit.location.planet_id == next_planet and
-                         unit.kind in self.GROUND_FORCES]
+                         self.ground_combatant(unit)]
             if defenders and attackers:
                 self.start_ground_combat(session, next_planet)
                 return
@@ -3345,9 +3412,10 @@ class MovementController:
         planets = {planet.planet_id: planet for planet in session.target.planets}
         landed_names = [planets[planet_id].name for planet_id in session.landed_planets]
         captured_names = [planets[planet_id].name for planet_id in session.captured_planets]
-        session.outcome = ('Landed forces on ' + ', '.join(landed_names) + '. ' +
-                           ('Captured: ' + ', '.join(captured_names) + '.' if captured_names else
-                            'Control did not change.'))
+        session.outcome = (('Landed forces on ' + ', '.join(landed_names) + '. ') if landed_names else
+                           'No ground forces landed. ')
+        session.outcome += ('Captured: ' + ', '.join(captured_names) + '.' if captured_names else
+                            'Control did not change.')
         if session.custodian_payment_log:
             session.outcome += ' ' + ' '.join(session.custodian_payment_log)
         if 'ie' in session.player.technologies and session.captured_planets:
