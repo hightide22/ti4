@@ -104,7 +104,8 @@ def refresh_leader_unlocks(player, board, players=()) -> list[str]:
              if unit.owner == faction]
     owned_planets = [(tile, planet) for tile in board.values() for planet in tile.planets
                      if tile.planet_owners.get(planet.planet_id) == faction]
-    owned_tiles = {tile.position for tile, _ in units}
+    unit_tiles = {tile.position for tile, _ in units}
+    owned_tiles = set(unit_tiles)
     owned_tiles.update(tile.position for tile, _ in owned_planets)
     unit_count = lambda kind: sum(unit.kind == kind for _, unit in units)
     checks = {
@@ -115,9 +116,8 @@ def refresh_leader_unlocks(player, board, players=()) -> list[str]:
         'argentcommander': lambda: sum(any(unit_profile(unit).get(key)
                                               for key in ('afbHitsOn', 'spaceCannonHitsOn',
                                                           'bombardHitsOn')) for _, unit in units) >= 6,
-        'cabalcommander': lambda: sum(any('gravity_rift' in tile.anomalies and
-                                        tile.position == position for tile in board.values())
-                                      for position in owned_tiles) >= 3,
+        'cabalcommander': lambda: sum(tile.is_gravity_rift and tile.position in unit_tiles
+                                     for tile in board.values()) >= 3,
         'ghostcommander': lambda: sum(bool({'ALPHA', 'BETA'} & set(tile.wormholes)) and
                                       tile.position in owned_tiles for tile in board.values()) >= 3,
         'empyreancommander': lambda: bool(players) and all(

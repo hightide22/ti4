@@ -530,6 +530,8 @@ class StrategyController:
         tile.units.append(Unit(f'{s.player.faction}-structure-{uuid4().hex}', kind, s.player.faction,
                                s.player.color_code, location,
                                profile_id=(upgrade_profile(s.player, kind) or {}).get('id')))
+        from leaders import refresh_leader_unlocks
+        refresh_leader_unlocks(s.player, self.board, self.turn.players)
         s.builds_left -= 1
         if s.builds_left:
             s.structure = 'pds'

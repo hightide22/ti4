@@ -738,14 +738,11 @@ class MovementController:
 
     @staticmethod
     def is_gravity_rift(tile):
-        return ('gravity_rift' in tile.anomalies or
-                any(unit.owner == 'cabal' and unit.kind == 'spacedock'
-                    for unit in tile.units))
+        return tile.is_gravity_rift
 
     @staticmethod
     def ignores_gravity_rift(unit, tile):
-        return unit.owner == 'cabal' and any(
-            dock.owner == 'cabal' and dock.kind == 'spacedock' for dock in tile.units)
+        return unit.owner == 'cabal' and tile.has_dimensional_tear
 
     @staticmethod
     def roll_d10(session):

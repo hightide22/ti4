@@ -7,8 +7,11 @@ from factions import faction_catalog
 from leaders import (exhaust_leader, leader_available, purge_leader,
                      ready_leaders, record_scored_objective, refresh_leader_unlocks)
 from main_menu import MainMenu
-from player import create_players
-from units import Region, unit_profile
+from movement import MovementController
+from player import PlanetCard, create_players
+from strategic_action import StrategyController, StrategyResolution
+from turn_order import TurnOrder
+from units import Region, Unit, UnitLocation, unit_profile
 
 
 class PokFactionSetupTests(unittest.TestCase):
@@ -116,6 +119,52 @@ class LeaderLifecycleTests(unittest.TestCase):
                                    UnitLocation(Region.SPACE)))
         self.assertIn('argentcommander', refresh_leader_unlocks(self.argent, self.board))
         self.assertTrue(leader_available(self.argent, 'argentcommander'))
+
+    def test_cabal_commander_counts_dimensional_tears_and_unlocks_on_construction(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('cabal', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        cabal = players[0]
+        home = next(tile for tile in board.values() if any(
+            planet.faction_homeworld == 'cabal' for planet in tile.planets))
+        self.assertTrue(home.has_dimensional_tear)
+        self.assertTrue(home.is_gravity_rift)
+        self.assertFalse(leader_available(cabal, 'cabalcommander'))
+
+        available = [tile for tile in board.values()
+                     if tile.player is None and tile.planets and not tile.units][:2]
+        self.assertEqual(len(available), 2)
+        for tile in available:
+            planet = tile.planets[0]
+            tile.planet_owners[planet.planet_id] = cabal.faction
+            cabal.planets.append(PlanetCard(planet))
+        second, third = available
+        second.units.append(Unit('second-dimensional-tear', 'spacedock', 'cabal',
+                                 cabal.color_code,
+                                 UnitLocation(Region.PLANET, second.planets[0].planet_id)))
+        unitless_rift = next(tile for tile in board.values()
+                             if 'gravity_rift' in tile.anomalies and tile.planets)
+        unitless_rift.planet_owners[unitless_rift.planets[0].planet_id] = cabal.faction
+        self.assertEqual([], refresh_leader_unlocks(cabal, board, players))
+
+        turn = TurnOrder(players)
+        movement = MovementController(board, players)
+        strategy = StrategyController(board, turn, movement)
+        strategy.session = StrategyResolution(4, cabal, cabal, [], stage='construction',
+                                              selected_system=third.position)
+        strategy.build(third.planets[0].planet_id)
+        self.assertTrue(third.has_dimensional_tear)
+        self.assertTrue(movement.is_gravity_rift(third))
+        self.assertTrue(leader_available(cabal, 'cabalcommander'))
+        dock = next(unit for unit in third.units if unit.kind == 'spacedock')
+        production = movement.start_strategy_production(cabal, third, dock)
+        movement.adjust_production('fighter', 1)
+        self.assertEqual(2, production.production_choices['fighter'])
+        self.assertEqual(0, movement.production_total(production))
+
+        third.units.clear()
+        self.assertFalse(third.has_dimensional_tear)
+        self.assertFalse(third.is_gravity_rift)
 
 
 if __name__ == '__main__':

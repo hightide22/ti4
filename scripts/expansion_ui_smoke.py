@@ -7,6 +7,7 @@ import arcade
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import BoardWindow  # noqa: E402
+from board import RESOURCES  # noqa: E402
 from exploration import PendingExploration, PendingTerragenesis  # noqa: E402
 from movement import Session, Snapshot  # noqa: E402
 from player import PlanetCard  # noqa: E402
@@ -123,6 +124,8 @@ def main():
         window.configure_game(Path(__file__).resolve().parents[1] /
                               'maps/three_player.json', ('cabal', 'sol', 'jolnar'))
         player = window.turn_order.active_player
+        window.on_draw()
+        assert RESOURCES / 'tokens/token_gravityrift.png' in window.unit_renderer.textures
         player.captured_units['destroyer'] = 1
         home = next(tile for tile in window.board.home_tiles
                     if player.faction in tile.planet_owners.values())

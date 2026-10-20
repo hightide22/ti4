@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import arcade
 
+from board import RESOURCES
 from units import Region, UNIT_TYPES, Unit, UnitPlacement, layout_units
 
 COLORS = {"blu": (106, 183, 255), "ylw": (244, 183, 87), "ppl": (185, 148, 248)}
@@ -135,6 +136,13 @@ class UnitRenderer:
                 pulse = 1 + .035 * math.sin(self.elapsed * 4)
                 arcade.draw_circle_filled(cx, cy, pixel_size * .78 * pulse, (*color, 18))
                 arcade.draw_circle_outline(cx, cy, pixel_size * .64, (*color, strength), max(1, scale * .65))
+            if unit.kind == 'spacedock' and unit.owner == 'cabal':
+                token_path = RESOURCES / 'tokens/token_gravityrift.png'
+                if token_path not in self.textures:
+                    self.textures[token_path] = arcade.load_texture(token_path)
+                marker_size = pixel_size * 1.7
+                arcade.draw_texture_rect(self.textures[token_path],
+                                         arcade.XYWH(cx, cy, marker_size, marker_size))
             if unit.image_path not in self.textures:
                 self.textures[unit.image_path] = arcade.load_texture(unit.image_path)
             texture = self.textures[unit.image_path]

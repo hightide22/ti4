@@ -92,6 +92,15 @@ class Tile:
     def anomalies(self) -> tuple[str, ...]:
         return self.definition.anomalies
 
+    @property
+    def has_dimensional_tear(self) -> bool:
+        return any(unit.owner == 'cabal' and unit.kind == 'spacedock'
+                   for unit in self.units)
+
+    @property
+    def is_gravity_rift(self) -> bool:
+        return 'gravity_rift' in self.anomalies or self.has_dimensional_tear
+
 
 class PlanetaryTile(Tile):
     kind = "planetary"
