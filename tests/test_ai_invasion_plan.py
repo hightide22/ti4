@@ -40,6 +40,34 @@ class InvasionPlanTests(unittest.TestCase):
         ai.plan_invasion(session)
         self.assertEqual(session.landings[troop.unit_id], zohbat.planet_id)
 
+    def test_ai_does_not_commit_ground_forces_to_demilitarized_zone(self):
+        config, board = load_board()
+        players = create_players(board, config)
+        sol = next(player for player in players if player.faction == 'sol')
+        target = next(tile for tile in board.values()
+                      if tile.name == 'Mellon/Zohbat')
+        mellon = next(planet for planet in target.planets if planet.name == 'Mellon')
+        zohbat = next(planet for planet in target.planets if planet.name == 'Zohbat')
+        target.planet_owners[mellon.planet_id] = None
+        target.planet_owners[zohbat.planet_id] = None
+        troop = Unit('dmz-forecast-landing', 'infantry', 'sol', sol.color_code,
+                     UnitLocation(Region.TRANSPORT, carrier_id='dmz-forecast-carrier'))
+        target.units.append(troop)
+
+        exploration = SimpleNamespace(
+            planet_is_blocked=lambda planet_id: planet_id == zohbat.planet_id,
+            destroyed_planets=set())
+        turn = TurnOrder(players)
+        window = SimpleNamespace(board=board, turn_order=turn,
+                                 movement=None, exploration=exploration)
+        ai = GameAI(window, {'sol', 'jolnar'})
+        session = SimpleNamespace(player=sol, target=target,
+                                  landings={troop.unit_id: None})
+
+        ai.plan_invasion(session)
+
+        self.assertEqual(session.landings[troop.unit_id], mellon.planet_id)
+
 
 if __name__ == '__main__':
     unittest.main()

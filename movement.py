@@ -2967,14 +2967,17 @@ class MovementController:
                 unit.kind in self.GROUND_FORCES and unit.location.region in
                 (Region.TRANSPORT, Region.SPACE, Region.SPACE_AREA)]
 
+    def planet_allows_landing(self, planet_id):
+        return (self.exploration is None or not (
+            self.exploration.planet_is_blocked(planet_id) or
+            planet_id in self.exploration.destroyed_planets))
+
     def cycle_landing(self, unit_id):
         session = self.session
         if not session or session.stage != 'invasion' or unit_id not in session.landings:
             raise MovementError('This ground force cannot be landed')
         planets = [planet for planet in session.target.planets
-                   if self.exploration is None or not (
-                       self.exploration.planet_is_blocked(planet.planet_id) or
-                       planet.planet_id in self.exploration.destroyed_planets)]
+                   if self.planet_allows_landing(planet.planet_id)]
         choices = [None, *(planet.planet_id for planet in planets)]
         current = session.landings[unit_id]
         session.landings[unit_id] = choices[(choices.index(current) + 1) % len(choices)]
@@ -2985,6 +2988,14 @@ class MovementController:
             raise MovementError('Invasion is not active')
         session.invasion_checkpoint = SessionCheckpoint.capture(self, session, 'invasion')
         target, player = session.target, session.player
+        # Keep invalid or stale AI assignments from putting ground forces on
+        # planets that cannot receive units, such as those with Demilitarized
+        # Zone attachments. The forces remain aboard their transports.
+        legal_planets = {planet.planet_id for planet in target.planets
+                         if self.planet_allows_landing(planet.planet_id)}
+        for unit_id, planet_id in tuple(session.landings.items()):
+            if planet_id is not None and planet_id not in legal_planets:
+                session.landings[unit_id] = None
         mecatol_landings = [unit for unit in self.landing_forces(session)
                             if session.landings.get(unit.unit_id) == 'mr']
         if target.custodians_present and mecatol_landings:

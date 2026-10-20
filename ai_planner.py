@@ -47,9 +47,13 @@ def _landing_options(ai, target, player, ground):
     human = ai.human_faction()
     session = getattr(getattr(ai.window, 'movement', None), 'session', None)
     disabled = session.disabled_pds if session and session.target is target else set()
+    exploration = getattr(ai.window, 'exploration', None)
     for planet in sorted(target.planets, key=lambda item: item.planet_id):
         owner = target.planet_owners.get(planet.planet_id)
         if owner == player.faction:
+            continue
+        if exploration and (exploration.planet_is_blocked(planet.planet_id) or
+                            planet.planet_id in exploration.destroyed_planets):
             continue
         enemies = [unit for unit in target.units if unit.owner != player.faction and
                    unit.kind in ('infantry', 'mech') and

@@ -114,6 +114,39 @@ class MovementTests(unittest.TestCase):
         self.assertIn('needs 6 ready influence', session.outcome)
         self.assertIn('remained aboard their ships', session.outcome)
 
+    def test_demilitarized_zone_rejects_stale_landing_assignment(self):
+        from exploration import ExplorationController
+
+        target = next(tile for tile in self.board.values()
+                      if any(planet.planet_id not in tile.planet_owners
+                             for planet in tile.planets))
+        planet = next(planet for planet in target.planets
+                      if planet.planet_id not in target.planet_owners)
+        exploration = ExplorationController(
+            self.board, self.players,
+            decks={'cultural': [], 'hazardous': [], 'industrial': [], 'frontier': []},
+            relic_deck=[])
+        exploration.attachments[planet.planet_id] = ['dmz']
+        self.controller.exploration = exploration
+        carrier = Unit('dmz-landing-carrier', 'carrier', self.player.faction,
+                       self.player.color_code, UnitLocation(Region.SPACE))
+        infantry = Unit('dmz-landing-infantry', 'infantry', self.player.faction,
+                        self.player.color_code,
+                        UnitLocation(Region.TRANSPORT, carrier_id=carrier.unit_id))
+        target.units.extend((carrier, infantry))
+        session = Session(self.player, target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='invasion', landings={infantry.unit_id: planet.planet_id})
+        self.controller.session = session
+
+        self.controller.establish_control()
+
+        self.assertEqual(infantry.location,
+                         UnitLocation(Region.TRANSPORT, carrier_id=carrier.unit_id))
+        self.assertNotIn(planet.planet_id, target.planet_owners)
+        self.assertNotIn(planet.planet_id,
+                         {card.planet.planet_id for card in self.player.planets})
+
     def test_mecatol_custodians_are_paid_before_ground_forces_land(self):
         mecatol = next(tile for tile in self.board.values() if tile.number == 18)
         owned = {card.planet.planet_id for card in self.player.planets}
