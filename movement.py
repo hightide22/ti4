@@ -592,6 +592,8 @@ class MovementController:
             if tile.number == 18 or tile.position not in adjacent_positions:
                 continue
             for planet in tile.planets:
+                if self.exploration is not None and planet.planet_id in self.exploration.destroyed_planets:
+                    continue
                 if tile.planet_owners.get(planet.planet_id) == player.faction:
                     continue
                 occupied = any(unit.location.region == Region.PLANET and
@@ -603,12 +605,44 @@ class MovementController:
         tile, planet = max(candidates, key=lambda item: (
             item[1].resources + item[1].influence, item[1].resources,
             item[1].influence, item[1].name))
+        previous_owner = tile.planet_owners.get(planet.planet_id)
         tile.planet_owners[planet.planet_id] = player.faction
+        self._take_planet_card(player, planet, previous_owner)
+        self._finish_planet_claim(player, tile, planet.planet_id, previous_owner)
+        return planet
+
+    def _take_planet_card(self, player, planet, previous_owner):
+        """Transfer an exhausted planet card and its persistent abilities."""
+        planet_id = planet.planet_id
+        if (self.exploration is not None and
+                self.exploration.planet_is_legendary(planet)):
+            if previous_owner is None:
+                player.exhausted_legendary_abilities.discard(planet_id)
+            elif previous_owner != player.faction:
+                old_owner = self.faction_player(previous_owner)
+                ability_was_exhausted = bool(
+                    old_owner and planet_id in old_owner.exhausted_legendary_abilities)
+                if old_owner:
+                    old_owner.exhausted_legendary_abilities.discard(planet_id)
+                if ability_was_exhausted:
+                    player.exhausted_legendary_abilities.add(planet_id)
+                else:
+                    player.exhausted_legendary_abilities.discard(planet_id)
+        if (previous_owner and self.exploration is not None and
+                (planet.faction_homeworld or self.exploration.planet_is_legendary(planet))):
+            self.exploration.relics.transfer_shard(previous_owner, player.faction)
         for other in self.players:
             other.planets[:] = [card for card in other.planets
-                                if card.planet.planet_id != planet.planet_id]
-        player.planets.append(PlanetCard(planet))
-        return planet
+                                if card.planet.planet_id != planet_id]
+        player.planets.append(PlanetCard(planet, exhausted=True))
+
+    def _finish_planet_claim(self, player, tile, planet_id, previous_owner):
+        if previous_owner is None and self.exploration is not None:
+            self.exploration_queue.append((player, tile, planet_id))
+            self.resolve_exploration_queue()
+        from leaders import refresh_leader_unlocks
+        for participant in self.players:
+            refresh_leader_unlocks(participant, self.board, self.players)
 
     def has_tech(self, faction, alias):
         player = self.faction_player(faction)
@@ -3188,23 +3222,7 @@ class MovementController:
             target.custodians_present = False
         target.planet_owners[planet_id] = player.faction
         planet = next(planet for planet in target.planets if planet.planet_id == planet_id)
-        if (self.exploration is not None and
-                self.exploration.planet_is_legendary(planet)):
-            if previous_owner is None:
-                player.exhausted_legendary_abilities.discard(planet_id)
-            elif previous_owner != player.faction:
-                old_owner = self.faction_player(previous_owner)
-                ability_was_exhausted = bool(
-                    old_owner and planet_id in old_owner.exhausted_legendary_abilities)
-                if old_owner:
-                    old_owner.exhausted_legendary_abilities.discard(planet_id)
-                if ability_was_exhausted:
-                    player.exhausted_legendary_abilities.add(planet_id)
-                else:
-                    player.exhausted_legendary_abilities.discard(planet_id)
-        if (previous_owner and self.exploration is not None and
-                (planet.faction_homeworld or self.exploration.planet_is_legendary(planet))):
-            self.exploration.relics.transfer_shard(previous_owner, player.faction)
+        self._take_planet_card(player, planet, previous_owner)
         for unit in list(target.units):
             if unit.owner != player.faction and unit.location.region == Region.PLANET and \
                     unit.location.planet_id == planet_id and unit.kind in ('pds', 'spacedock'):
@@ -3214,20 +3232,12 @@ class MovementController:
                                              player.faction, player.color_code,
                                              UnitLocation(Region.PLANET, planet_id),
                                              profile_id=(upgrade_profile(player, unit.kind) or {}).get('id')))
-        for other in self.players:
-            other.planets[:] = [card for card in other.planets if card.planet.planet_id != planet_id]
-        player.planets.append(PlanetCard(planet, exhausted=True))
         if player.faction == 'saar':
             player.trade_goods += 1
             self.resolve_pillage(player)
         if planet_id not in session.captured_planets:
             session.captured_planets.append(planet_id)
-        if previous_owner is None and self.exploration is not None:
-            self.exploration_queue.append((player, target, planet_id))
-            self.resolve_exploration_queue()
-        from leaders import refresh_leader_unlocks
-        for participant in self.players:
-            refresh_leader_unlocks(participant, self.board, self.players)
+        self._finish_planet_claim(player, target, planet_id, previous_owner)
         return True
 
     def resolve_exploration_queue(self):

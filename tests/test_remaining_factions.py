@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from action_cards import ActionCardController
 from board import ROOT, load_board
+from exploration import ExplorationController
 from movement import MovementController, Session, Snapshot
 from player import PlanetCard, create_players
 from turn_order import TurnOrder
@@ -182,12 +183,37 @@ class RemainingFactionTests(unittest.TestCase):
                                    UnitLocation(Region.PLANET, planet.planet_id)))
         target_tile.planet_owners.pop(target_planet.planet_id, None)
         movement = MovementController(board, players)
+        self.assertEqual(target_planet.planet_type, 'CULTURAL')
+        movement.exploration = ExplorationController(board, players, decks={
+            'cultural': ['crf1'], 'hazardous': [], 'industrial': [], 'frontier': []})
 
         claimed = movement.peace_accords(xxcha)
 
         self.assertEqual(claimed.planet_id, target_planet.planet_id)
         self.assertEqual(target_tile.planet_owners[target_planet.planet_id], 'xxcha')
-        self.assertTrue(any(card.planet.planet_id == target_planet.planet_id for card in xxcha.planets))
+        card = next(card for card in xxcha.planets
+                    if card.planet.planet_id == target_planet.planet_id)
+        self.assertTrue(card.exhausted)
+        self.assertIn('crf1', movement.exploration.fragments['xxcha'])
+
+    def test_xxcha_peace_accords_cannot_claim_destroyed_planet(self):
+        board, players, by_faction = self.game(('xxcha', 'sol', 'jolnar', 'hacan'))
+        xxcha = by_faction['xxcha']
+        home = next(tile for tile in board.values()
+                    if any(planet.faction_homeworld == 'xxcha' for planet in tile.planets))
+        adjacent_planets = [(tile, planet) for tile in board.neighbors(home.position)
+                            if tile.number != 18 for planet in tile.planets]
+        target_tile, target_planet = adjacent_planets[0]
+        for tile, planet in adjacent_planets[1:]:
+            tile.units.append(Unit(f'peace-accords-occupant-{planet.planet_id}',
+                                   'infantry', 'sol', by_faction['sol'].color_code,
+                                   UnitLocation(Region.PLANET, planet.planet_id)))
+        movement = MovementController(board, players)
+        movement.exploration = ExplorationController(board, players)
+        movement.exploration.destroyed_planets.add(target_planet.planet_id)
+
+        self.assertIsNone(movement.peace_accords(xxcha))
+        self.assertNotIn(target_planet.planet_id, target_tile.planet_owners)
 
     def test_mentak_ambush_rolls_at_combat_start(self):
         board, players, by_faction = self.game(('mentak', 'sol', 'jolnar', 'hacan'))
