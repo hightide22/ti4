@@ -47,12 +47,12 @@ class SetupTests(unittest.TestCase):
         menu.player_count = 4
         self.assertEqual(menu.active_factions, ('sol', 'jolnar', 'letnev', 'arborec'))
 
-    def test_four_player_map_has_four_distinct_home_systems_and_37_tiles(self):
+    def test_four_player_map_has_four_distinct_home_systems_and_nexus(self):
         config, board = load_board(ROOT / 'maps/four_player.json')
         players = create_players(board, config)
-        self.assertEqual(len(board), 37)
+        self.assertEqual(len(board), 38)
         self.assertEqual([player.faction for player in players], ['sol', 'jolnar', 'hacan', 'letnev'])
-        self.assertEqual(len({tile.position for tile in board.values()}), 37)
+        self.assertEqual(len({tile.position for tile in board.values()}), 38)
         self.assertEqual({tile.number for tile in board.home_tiles}, {1, 10, 12, 16})
 
     def test_menu_faction_choices_are_applied_in_player_slot_order(self):

@@ -9,8 +9,8 @@ from player import create_players
 
 
 MAP_CASES = (
-    ('three_player.json', 28, {(-3, 3), (0, -3), (3, 0)}),
-    ('four_player.json', 37, {(0, -3), (3, -2), (-3, 2), (0, 3)}),
+    ('three_player.json', 29, {(-3, 3), (0, -3), (3, 0)}),
+    ('four_player.json', 38, {(0, -3), (3, -2), (-3, 2), (0, 3)}),
 )
 
 
@@ -43,11 +43,14 @@ class ProphecyOfKingsMapTests(unittest.TestCase):
                 self.assertEqual(len({tile.number for tile in board.values()}), count)
                 self.assertEqual({tile.position for tile in board.home_tiles}, home_positions)
                 self.assertEqual(board[(0, 0)].number, 18)
-                self.assertTrue(all(board.neighbors(tile.position) for tile in board.values()))
+                self.assertTrue(all(board.neighbors(tile.position) for tile in board.values()
+                                    if tile.number != 82))
+                nexus = next(tile for tile in board.values() if tile.number == 82)
+                self.assertFalse(board.neighbors(nexus.position))
                 self.assertEqual(len(create_players(board, config)), len(home_positions))
 
     def test_both_layouts_offer_pok_exploration_and_legendary_planets(self):
-        required = {64, 65, 66, 67, 68, 79}
+        required = {64, 65, 66, 67, 68, 79, 82}
         for filename, _, _ in MAP_CASES:
             with self.subTest(map=filename):
                 config, board = load_board(ROOT / 'maps' / filename)

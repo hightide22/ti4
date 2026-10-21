@@ -297,6 +297,8 @@ class GameAI:
             self.report(player, f'Allocated a gained command token to {pool}.', .2)
             return
         if not turn.can_take_action:
+            if self.use_legendary_planet(player):
+                return
             self.report(player, 'Ended the turn.', .35)
             w.pass_turn()
             return
@@ -339,9 +341,66 @@ class GameAI:
             self.report(player, f'Played {STRATEGY_NAMES[best_card]}.')
             w.sync_strategy_actor()
         else:
+            if self.use_legendary_planet(player):
+                return
             self.report(player, 'Ended the turn.' if turn.action_used else
                         'Passed for the rest of the round.', .65)
             w.pass_turn()
+
+    def legendary_destination(self, player, planet_ids):
+        """Reinforce a threatened frontier with a route to use the new troops."""
+        movement = self.window.movement
+        destinations = {planet.planet_id: tile for tile in self.window.board.values()
+                        for planet in tile.planets if planet.planet_id in planet_ids}
+
+        def value(planet_id):
+            tile = destinations[planet_id]
+            neighbors = movement.neighbors(tile, player.faction)
+            open_planets = sum(neighbor.planet_owners.get(planet.planet_id) != player.faction
+                               for neighbor in neighbors for planet in neighbor.planets)
+            enemy_fleet = sum(unit.owner != player.faction and unit.location.region == Region.SPACE
+                              for neighbor in neighbors for unit in neighbor.units)
+            transports = sum(unit.capacity for unit in tile.units
+                             if unit.owner == player.faction and unit.location.region == Region.SPACE)
+            garrison = sum(unit.owner == player.faction and unit.kind in ('infantry', 'mech') and
+                           unit.location.planet_id == planet_id for unit in tile.units)
+            return (min(open_planets, 3) * 4 + min(enemy_fleet, 3) * 2 +
+                    min(transports, 4) - min(garrison, 5), planet_id)
+
+        return max(destinations, key=value) if destinations else None
+
+    def use_legendary_planet(self, player):
+        """Use ready end-of-turn abilities before passing, via the normal controller."""
+        movement = self.window.movement
+        options = movement.legendary_planet_options(player)
+        if 'primor' in options:
+            infantry = options['primor']['infantry']
+            destination = self.legendary_destination(player, infantry)
+            if destination:
+                count = options['primor']['maximum']
+                movement.use_legendary_planet(player, 'primor',
+                                              destination_planet_id=destination, count=count)
+                self.report(player, f'Primor placed {count} infantry on {destination}.', .2)
+                return True
+        if 'hopesend' in options:
+            mech = options['hopesend'].get('mech', ())
+            destination = self.legendary_destination(player, mech)
+            if destination:
+                movement.use_legendary_planet(player, 'hopesend', choice='mech',
+                                              destination_planet_id=destination)
+                self.report(player, f"Hope's End placed a mech on {destination}.", .2)
+                return True
+            if options['hopesend'].get('card'):
+                movement.use_legendary_planet(player, 'hopesend', choice='card')
+                self.report(player, "Hope's End drew an action card.", .2)
+                return True
+        if 'mallice' in options:
+            choice = ('convert_commodities' if player.commodities > 2 and
+                      options['mallice']['convert_commodities'] else 'trade_goods')
+            movement.use_legendary_planet(player, 'mallice', choice=choice)
+            self.report(player, 'Used Mallice to fund the fleet.', .2)
+            return True
+        return False
 
     @staticmethod
     def _discard_excess_card(player):

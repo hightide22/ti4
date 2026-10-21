@@ -119,10 +119,11 @@ class EmptySpaceTile(Tile):
 
 
 class TileCatalog:
-    def __init__(self, by_number: dict[int, TileDefinition]):
+    def __init__(self, by_number: dict[int, TileDefinition], alternates=None):
         self.by_number = by_number
         self.by_system_id = {definition.system_id: definition
                              for definition in by_number.values()}
+        self.by_system_id.update(alternates or {})
 
     def __getitem__(self, number: int | str) -> TileDefinition:
         if isinstance(number, str) and number in self.by_system_id:
@@ -132,6 +133,7 @@ class TileCatalog:
     @classmethod
     def from_resources(cls, resources: Path = RESOURCES, sources: set[str] | None = None) -> TileCatalog:
         by_number = {}
+        alternates = {}
         anomaly_flags = {"isAsteroidField": "asteroid_field", "isNebula": "nebula", "isSupernova": "supernova", "isGravityRift": "gravity_rift"}
         for path in sorted((resources / "systems").glob("*.json")):
             system = json.loads(path.read_text(encoding="utf-8"))
@@ -140,18 +142,26 @@ class TileCatalog:
                 continue
             if system_id.isdecimal():
                 number = int(system_id)
+            elif system_id in ('82a', '82b'):
+                number = 82
             elif system.get('source') == 'codex3' and system_id in ('92new', '93new', '94new'):
                 number = int(system_id[:2])
             else:
                 continue
-            if number in by_number:
+            if number in by_number and system_id != '82b':
                 raise ValueError(f"Duplicate tile number: {number}")
             image_path = resources / "tiles" / system["imagePath"]
             if not image_path.is_file():
                 raise FileNotFoundError(image_path)
-            planets = tuple(Planet.from_data(json.loads((resources / "planets" / f"{planet_id}.json").read_text(encoding="utf-8"))) for planet_id in system.get("planets", []))
-            by_number[number] = TileDefinition(number, system_id, system["name"], image_path, planets, tuple(system.get("wormholes") or ()), tuple(name for flag, name in anomaly_flags.items() if system.get(flag)), system.get("tileBack") == "green", system.get("source", "unknown"), deepcopy(system))
-        return cls(by_number)
+            # Both sides represent the same planet and use the same planet card.
+            planet_ids = ['mallice'] if system_id == '82a' else system.get('planets', [])
+            planets = tuple(Planet.from_data(json.loads((resources / "planets" / f"{planet_id}.json").read_text(encoding="utf-8"))) for planet_id in planet_ids)
+            definition = TileDefinition(number, system_id, system["name"], image_path, planets, tuple(system.get("wormholes") or ()), tuple(name for flag, name in anomaly_flags.items() if system.get(flag)), system.get("tileBack") == "green", system.get("source", "unknown"), deepcopy(system))
+            if system_id == '82b':
+                alternates[system_id] = definition
+            else:
+                by_number[number] = definition
+        return cls(by_number, alternates)
 
     def create(self, number: int | str, position: Position, player: str | None = None, color=(100, 207, 224)) -> Tile:
         definition = self[number]
@@ -208,6 +218,14 @@ class Board(Mapping[Position, Tile]):
     def neighbors(self, position: Position) -> list[Tile]:
         q, r = position
         return [self._tiles[(q + dq, r + dr)] for dq, dr in DIRECTIONS if (q + dq, r + dr) in self._tiles]
+
+    def flip_wormhole_nexus(self) -> bool:
+        """Reveal the other wormholes after first entry or control of Mallice."""
+        nexus = next((tile for tile in self.values() if tile.system_id == '82a'), None)
+        if nexus is None or not (nexus.units or nexus.planet_owners.get('mallice')):
+            return False
+        nexus.definition = TILES['82b']
+        return True
 
     @property
     def home_tiles(self) -> list[Tile]:
@@ -316,6 +334,10 @@ def load_board(map_path: Path | str = ROOT / "maps/three_player.json",
                                entry.get('color', (112, 190, 215))))
         entry['ghost_home_position'] = home_pos
         entry['player'] = None
+    if not any(tile.number == 82 for tile in board.values()):
+        # The nexus starts outside the galaxy, with no ordinary hex adjacency.
+        edge = max(q for q, _ in board)
+        board.add(TILES.create('82a', (edge + 2, -1)))
     from units import setup_starting_fleets
     setup_starting_fleets(board, config)
     return config, board

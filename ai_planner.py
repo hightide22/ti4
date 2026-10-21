@@ -20,7 +20,7 @@ from units import Region, UNIT_TYPES, Unit, UnitLocation, mobile_ship, unit_prof
 
 SHIP_VALUE = {'fighter': .8, 'destroyer': 1.4, 'cruiser': 2.4,
               'carrier': 1.7, 'dreadnought': 4.4, 'flagship': 6.5, 'warsun': 9.0}
-MIN_WIN_CHANCE = .80
+MIN_WIN_CHANCE = .72
 
 
 class ActivationPlan(NamedTuple):
@@ -36,7 +36,7 @@ class ActivationPlan(NamedTuple):
 def planet_value(planet, owner, human, round_number):
     if owner is None:
         return 2 + planet.resources + .5 * planet.influence
-    pressure = 6.5 if owner == human else 3.5
+    pressure = 8 if owner == human else 4
     value = pressure * (1 + .3 * planet.resources)
     return value * (.65 if round_number == 1 else 1)
 
@@ -568,9 +568,9 @@ def _evaluate_activation(ai, player, target, chosen, ground_goal, friendly, enem
     # chasing a lone fighter is not worth an activation.
     raid_value = 0
     if enemies and (owned or enemy_value >= 3):
-        pressure = 1.3 if any(unit.owner == ai.human_faction()
-                             for unit in enemies) else 1
-        raid_value = min(7, enemy_value * pressure) + 3 * len(owned)
+        pressure = 1.7 if any(unit.owner == ai.human_faction()
+                             for unit in enemies) else 1.2
+        raid_value = min(10, enemy_value * pressure) + 4 * len(owned)
     if not capture_value and not raid_value:
         return None, False
     departure = _departure_cost(ai, player, target, chosen,

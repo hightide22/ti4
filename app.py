@@ -75,6 +75,7 @@ class TileSprite(arcade.Sprite):
     def __init__(self, tile: Tile):
         super().__init__(tile.image_path)
         self.tile = tile
+        self.source_path = tile.image_path
 
 
 class BoardWindow(arcade.Window):
@@ -325,7 +326,11 @@ class BoardWindow(arcade.Window):
         arcade.draw_polygon_outline(corners(1.01), (*GOLD, round(245 * fade)), 3)
 
     def draw_tile(self, tile, x, y, width, detailed=False, scope='main', interactive=True):
-        texture = self.tile_sprites[tile].texture
+        sprite = self.tile_sprites[tile]
+        if sprite.source_path != tile.image_path:
+            sprite.texture = arcade.load_texture(tile.image_path)
+            sprite.source_path = tile.image_path
+        texture = sprite.texture
         arcade.draw_texture_rect(texture, arcade.XYWH(x, y, width, width * texture.height / texture.width))
         self.unit_renderer.draw(tile, x, y, width, detailed=detailed, selected=self.selected_units, hovered=self.hovered_units, interactive=interactive, scope=scope)
         scale = width / 345
@@ -1121,6 +1126,7 @@ class BoardWindow(arcade.Window):
         if self.main_menu_visible:
             self.main_menu.draw(self)
             return
+        self.board.flip_wormhole_nexus()
         star_bins = [[] for _ in range(6)]
         for sx, sy, brightness in self.stars:
             bucket = min(5, max(0, (brightness - 45) // 10))
@@ -1457,7 +1463,8 @@ class BoardWindow(arcade.Window):
         if self.legendary_choice is None:
             for index, source in enumerate(options):
                 label = ('PRIMOR · PLACE INFANTRY' if source == 'primor' else
-                         "HOPE'S END · MECH OR ACTION CARD")
+                         "HOPE'S END · MECH OR ACTION CARD" if source == 'hopesend' else
+                         'MALLICE · EXTERRIX HEADQUARTERS')
                 add(('select', source), label, left + 22,
                     bottom + height - 127 - index * 58, width - 44, 43,
                     primary=True)
@@ -1477,11 +1484,19 @@ class BoardWindow(arcade.Window):
                         bottom + height - 126, 130, 32,
                         primary=count == quantity)
                 destinations = options[source]['infantry']
-            else:
+            elif source == 'hopesend':
                 if options[source].get('card'):
                     add(('use', source, 'card', None, 1), 'DRAW ACTION CARD',
                         left + 119, bottom + height - 126, 180, 32, primary=True)
                 destinations = options[source].get('mech', ())
+            else:
+                add(('use', source, 'trade_goods', None, 2), 'GAIN 2 TRADE GOODS',
+                    left + 119, bottom + height - 126, 180, 32, primary=True)
+                if options[source]['convert_commodities']:
+                    add(('use', source, 'convert_commodities', None, 0),
+                        'CONVERT ALL COMMODITIES', left + 306,
+                        bottom + height - 126, width - 328, 32)
+                destinations = ()
             if destinations:
                 self.text('legendary_destination', 'CHOOSE A CONTROLLED PLANET',
                           left + 22, bottom + height - 173, 10, GOLD)
@@ -1555,7 +1570,7 @@ class BoardWindow(arcade.Window):
                 hit = next(hit for hit in self.main_menu.hits if hit[0] == ('start',))
                 self.on_mouse_press((hit[1] + hit[2]) / 2, (hit[3] + hit[4]) / 2,
                                     arcade.MOUSE_BUTTON_LEFT, 0)
-                assert not self.main_menu_visible and len(self.board) == 37
+                assert not self.main_menu_visible and len(self.board) == 38
                 assert tuple(player.faction for player in self.player_panel.players) == self.main_menu.active_factions
                 mecatol = next(tile for tile in self.board.values() if tile.number == 18)
                 self.selected = mecatol.position

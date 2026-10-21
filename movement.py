@@ -62,7 +62,8 @@ class Snapshot:
         cards = [(other, list(other.planets)) for other in all_players]
         return cls(player, dict(player.command_pools),
                    [(tile, list(tile.units), set(tile.command_tokens), dict(tile.planet_owners),
-                     tile.custodians_present, set(getattr(tile, 'sleeper_tokens', ())))
+                     tile.custodians_present, set(getattr(tile, 'sleeper_tokens', ())),
+                     tile.definition)
                     for tile in board.values()],
                    [(unit, unit.location, unit.damaged, unit.profile_id)
                     for tile in board.values() for unit in tile.units],
@@ -86,8 +87,9 @@ class Snapshot:
     def restore(self):
         self.player.command_pools.clear()
         self.player.command_pools.update(self.pools)
-        for tile, units, tokens, owners, custodians_present, sleepers in self.tiles:
+        for tile, units, tokens, owners, custodians_present, sleepers, definition in self.tiles:
             tile.units[:] = units
+            tile.definition = definition
             tile.command_tokens.clear()
             tile.command_tokens.update(tokens)
             tile.planet_owners.clear()
@@ -637,6 +639,7 @@ class MovementController:
         player.planets.append(PlanetCard(planet, exhausted=True))
 
     def _finish_planet_claim(self, player, tile, planet_id, previous_owner):
+        self.board.flip_wormhole_nexus()
         if previous_owner is None and self.exploration is not None:
             self.exploration_queue.append((player, tile, planet_id))
             self.resolve_exploration_queue()
@@ -1232,6 +1235,7 @@ class MovementController:
             session.target.units.append(unit)
             if unit.unit_id in ships_entering_target:
                 session.moved_ship_ids.add(unit.unit_id)
+        self.board.flip_wormhole_nexus()
         session.cannon_log = []
         session.landings = ({unit.unit_id: None for unit in self.landing_forces(session)}
                             if session.target.planets else {})
@@ -3487,11 +3491,14 @@ class MovementController:
                 choices['card'] = True
             if choices:
                 options['hopesend'] = choices
+        if 'mallice' in ready:
+            options['mallice'] = {'trade_goods': True,
+                                  'convert_commodities': player.commodities > 0}
         return options
 
     def use_legendary_planet(self, player, source_planet_id, *, destination_planet_id=None,
                              choice='infantry', count=2):
-        """Exhaust Primor or Hope's End at the caller's end-of-turn timing window."""
+        """Exhaust a legendary planet at the caller's end-of-turn timing window."""
         if self.session is not None or not any(player is participant for participant in self.players):
             raise MovementError('Resolve the current action before using a legendary planet.')
         options = self.legendary_planet_options(player)
@@ -3509,6 +3516,14 @@ class MovementController:
             if not abilities.get('card') or destination_planet_id is not None:
                 raise MovementError("Hope's End cannot draw an action card now.")
             kind, quantity = 'card', 1
+        elif choice == 'trade_goods' and source_planet_id == 'mallice':
+            if not abilities.get('trade_goods') or destination_planet_id is not None:
+                raise MovementError('Mallice cannot gain trade goods now.')
+            kind, quantity = 'trade_goods', 2
+        elif choice == 'convert_commodities' and source_planet_id == 'mallice':
+            if not abilities.get('convert_commodities') or destination_planet_id is not None:
+                raise MovementError('Mallice has no commodities to convert.')
+            kind, quantity = 'convert_commodities', player.commodities
         else:
             raise MovementError('This legendary planet ability is unavailable.')
         snapshot = Snapshot.capture(self.board, player, self.players,
@@ -3517,6 +3532,11 @@ class MovementController:
             drawn = self.action_cards.draw(player, 1)
             if not drawn:
                 raise MovementError('No action card could be drawn.')
+        elif kind == 'trade_goods':
+            player.trade_goods += quantity
+        elif kind == 'convert_commodities':
+            player.commodities = 0
+            player.trade_goods += quantity
         else:
             destination = next(tile for tile in self.board.values()
                                if destination_planet_id in {planet.planet_id for planet in tile.planets})

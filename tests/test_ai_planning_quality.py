@@ -116,6 +116,25 @@ class TacticalPlanningQualityTests(unittest.TestCase):
         self.assertFalse(plan.passengers)
         self.assertGreaterEqual(plan.odds[0], .8)
 
+    def test_bot_attacks_a_credible_but_not_overwhelming_human_fleet(self):
+        self.target.planet_owners[self.target.planets[0].planet_id] = 'hacan'
+        self.unit(self.home, 'carrier')
+        self.unit(self.home, 'cruiser')
+        self.infantry(self.home, 2)
+        self.unit(self.target, 'cruiser', 'hacan')
+        plan = best_activation(self.ai, self.player)
+        self.assertIsNotNone(plan)
+        self.assertEqual(self.target.position, plan.target)
+        self.assertGreaterEqual(plan.odds[0], .72)
+        self.assertLess(plan.odds[0], .8)
+
+    def test_bot_still_rejects_a_low_probability_invasion(self):
+        self.target.planet_owners[self.target.planets[0].planet_id] = 'hacan'
+        self.unit(self.home, 'carrier')
+        self.infantry(self.home, 2)
+        self.unit(self.target, 'cruiser', 'hacan')
+        self.assertIsNone(best_activation(self.ai, self.player))
+
     def test_stages_towards_real_objective_when_it_is_out_of_range(self):
         self.target.planet_owners[self.target.planets[0].planet_id] = 'sol'
         goal = TILES.create(30, (2, 0))

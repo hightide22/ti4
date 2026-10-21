@@ -444,6 +444,20 @@ def main():
         click(window, move_hit)
         assert destination.planet_id in destination_tile.sleeper_tokens
         assert not any(source in tile.sleeper_tokens for tile in window.board.values())
+        window.configure_game(Path(__file__).resolve().parents[1] /
+                              'maps/three_player.json', ('sol', 'jolnar', 'hacan'))
+        nexus = next(tile for tile in window.board.values() if tile.number == 82)
+        window.selected = nexus.position
+        window.focus_view = True
+        window.on_draw()
+        assert window.tile_sprites[nexus].source_path == nexus.image_path
+        assert nexus.system_id == '82a'
+        sol = window.player_panel.players[0]
+        nexus.units.append(Unit('smoke-nexus-fighter', 'fighter', sol.faction,
+                                sol.color_code, UnitLocation(Region.SPACE)))
+        window.on_draw()
+        assert nexus.system_id == '82b'
+        assert window.tile_sprites[nexus].source_path == nexus.image_path
         print('PASS: token allocation, exploration decline, attachment and sleeper markers, and Terragenesis move choice')
     finally:
         window.close()
