@@ -8,6 +8,7 @@ from board import ROOT, load_board
 from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, use_empyrean_agent,
                             use_empyrean_hero, use_nomad_artuno, use_nomad_hero,
                             use_ghost_agent, use_l1z1x_agent, use_saar_agent,
+                            cabal_agent_options,
                             l1z1x_agent_mech_available,
                             use_xxcha_agent,
                             clear_round_hero_effects, use_mahact_hero, use_titans_agent,
@@ -15,6 +16,7 @@ from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, 
 from leaders import leader_available, ready_leaders, unlock_leader
 from player import create_players
 from pok_factions import (cabal_capture_destroyed, cabal_return_captured,
+                          cabal_capture_unit,
                           keleres_council_patronage, mahact_gain_fleet_token,
                           mahact_fleet_limit, naaz_explore_planet, titans_awaken,
                           titans_hero_space_cannon, titans_place_sleeper)
@@ -36,10 +38,11 @@ class PokEffectsTests(unittest.TestCase):
     def test_cabal_agent_and_devour_capture_without_touching_structures(self):
         board, cabal, sol = self.game('cabal')
         sol.commodities = sol.commodity_limit
-        use_cabal_agent(cabal, sol, 'carrier')
+        use_cabal_agent(cabal, sol, 'carrier', board)
         self.assertEqual(sol.commodities, 0)
         self.assertEqual(sol.trade_goods, sol.commodity_limit)
         self.assertEqual(cabal.captured_units['carrier'], 1)
+        self.assertEqual(cabal.captured_unit_sources[('carrier', 'sol')], 1)
         self.assertFalse(leader_available(cabal, 'cabalagent'))
         ready_leaders(cabal)
         carrier = Unit('enemy-carrier', 'carrier', 'sol', sol.color_code,
@@ -49,6 +52,55 @@ class PokEffectsTests(unittest.TestCase):
         self.assertEqual(cabal.captured_units['carrier'], 2)
         self.assertTrue(cabal_return_captured(cabal, 'carrier'))
         self.assertEqual(cabal.captured_units['carrier'], 1)
+        self.assertEqual(cabal.captured_unit_sources[('carrier', 'sol')], 1)
+
+    def test_cabal_agent_cannot_recapture_a_plastic_unit_already_captured(self):
+        board, cabal, sol = self.game('cabal')
+        sol_carriers = sum(unit.owner == sol.faction and unit.kind == 'carrier'
+                           for tile in board.values() for unit in tile.units)
+        for _ in range(4 - sol_carriers):
+            cabal_capture_unit(cabal, 'carrier', sol.faction)
+
+        self.assertNotIn('carrier', cabal_agent_options(
+            sol, board, captured_by=cabal))
+
+        self.assertTrue(cabal_return_captured(cabal, 'carrier', sol.faction))
+        self.assertEqual(4 - sol_carriers - 1,
+                         cabal.captured_unit_sources[('carrier', sol.faction)])
+        self.assertIn('carrier', cabal_agent_options(
+            sol, board, captured_by=cabal))
+
+    def test_cabal_agent_uses_replenishment_value_even_if_commodities_are_gone(self):
+        board, cabal, sol = self.game('cabal')
+        home = next(tile for tile in board.values()
+                    if any(unit.owner == 'sol' and unit.kind == 'carrier'
+                           for unit in tile.units))
+        sol.commodities = 0
+        self.assertIn('dreadnought', cabal_agent_options(
+            sol, board, commodity_value=4))
+
+        use_cabal_agent(cabal, sol, 'dreadnought', board, commodity_value=4)
+
+        self.assertEqual(sol.trade_goods, 0)
+        self.assertEqual(sol.commodities, 0)
+        self.assertEqual(cabal.captured_units['dreadnought'], 1)
+
+    def test_cabal_agent_cannot_capture_plastic_units_not_in_reinforcements(self):
+        board, cabal, sol = self.game('cabal')
+        carrier = next(unit for tile in board.values() for unit in tile.units
+                       if unit.owner == 'sol' and unit.kind == 'carrier')
+        home = next(tile for tile in board.values() if carrier in tile.units)
+        for index in range(4 - sum(unit.owner == 'sol' and unit.kind == 'carrier'
+                                   for tile in board.values() for unit in tile.units)):
+            home.units.append(Unit(f'extra-sol-carrier-{index}', 'carrier', 'sol',
+                                   sol.color_code, UnitLocation(Region.SPACE)))
+        self.assertNotIn('carrier', cabal_agent_options(sol, board))
+        sol.commodities = sol.commodity_limit
+
+        with self.assertRaises(ValueError):
+            use_cabal_agent(cabal, sol, 'carrier', board)
+
+        self.assertTrue(leader_available(cabal, 'cabalagent'))
 
     def test_cabal_hero_rolls_for_enemy_ship_and_captures_its_cargo(self):
         board, cabal, sol = self.game('cabal')

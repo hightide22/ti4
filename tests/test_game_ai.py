@@ -28,6 +28,29 @@ class Card:
 
 
 class GameAITests(unittest.TestCase):
+    def test_bot_cabal_resolves_queued_trade_agent_before_next_strategy_step(self):
+        config, board = load_board(
+            Path(__file__).resolve().parents[1] / 'maps/four_player.json',
+            ('cabal', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        cabal, sol = players[:2]
+        sol.commodities = sol.commodity_limit
+        state = SimpleNamespace(
+            turn_order=SimpleNamespace(players=players),
+            strategy=SimpleNamespace(
+                pending_cabal_replenishments=[
+                    ('cabal', 'sol', sol.commodity_limit)]),
+            leader_panel=SimpleNamespace(reaction_owner_faction=None),
+            board=board, movement_error=None)
+        ai = GameAI(state, {'cabal'})
+
+        ai.step()
+
+        self.assertFalse(state.strategy.pending_cabal_replenishments)
+        self.assertEqual(sum(cabal.captured_units.values()), 1)
+        self.assertEqual(sol.commodities, 0)
+        self.assertEqual(sol.trade_goods, sol.commodity_limit)
+
     def test_technology_priorities_reference_real_base_cards(self):
         self.assertFalse(set(TECH_PRIORITY) - set(technology_catalog()))
         self.assertTrue({'dd2', 'cr2', 'inf2', 'ac2', 'so2'} <= set(TECH_PRIORITY))

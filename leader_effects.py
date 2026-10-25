@@ -14,7 +14,8 @@ from player import command_tokens_in_reinforcements
 from units import (Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles,
                    unit_profile)
 from technology import upgrade_profile
-from unit_supply import can_transfer_infantry
+from unit_supply import can_transfer_infantry, unit_supply_remaining
+from pok_factions import cabal_capture_unit
 
 
 UNIT_SUPPLY_LIMITS = {
@@ -69,23 +70,46 @@ def use_argent_agent(owner, beneficiary, board, source_tile, produced_units,
         destination.units.append(unit)
 
 
-def use_cabal_agent(owner, target, kind: str):
+def cabal_agent_options(target, board, commodity_value=None, captured_by=None):
+    """Unit types still in a player's reinforcements and within commodity value."""
+    value = target.commodity_limit if commodity_value is None else commodity_value
+    definitions, factions = unit_profiles()
+    options = {}
+    for alias in factions.get(target.faction, {}).get('units', ()):
+        profile = definitions.get(alias)
+        if not profile:
+            continue
+        kind = profile.get('baseType')
+        if kind not in UNIT_TYPES or kind in ('pds', 'spacedock'):
+            continue
+        # The researched profile is the unit actually present in the player's
+        # reinforcements; an unresearched War Sun is not a legal choice.
+        profile = upgrade_profile(target, kind) or profile
+        cost = profile.get('cost')
+        if cost is None or float(cost) > float(value):
+            continue
+        supply = unit_supply_remaining(target, board, kind)
+        if supply is not None and captured_by is not None:
+            captured = getattr(captured_by, 'captured_unit_sources', {})
+            supply -= captured.get((kind, target.faction), 0)
+        if supply is not None and supply <= 0:
+            continue
+        options[kind] = float(cost)
+    return tuple(sorted(options, key=lambda kind: (options[kind], kind)))
+
+
+def use_cabal_agent(owner, target, kind: str, board=None, *, commodity_value=None):
     """Convert a replenished player's commodities and capture one unit."""
     _require_agent(owner, 'cabalagent')
-    if owner is target or target.commodities <= 0:
+    if owner is target:
         raise ValueError('Choose another player after commodity replenishment')
-    definitions, factions = unit_profiles()
-    candidates = [definitions[alias] for alias in factions[target.faction]['units']
-                  if alias in definitions and definitions[alias].get('baseType') == kind]
-    if not candidates:
-        raise ValueError('This player has no such unit in reinforcements')
-    profile = candidates[0]
-    if kind in ('pds', 'spacedock') or float(profile.get('cost', 0)) > target.commodity_limit:
-        raise ValueError('The captured unit must cost no more than the commodity value')
+    if board is None or kind not in cabal_agent_options(
+            target, board, commodity_value=commodity_value, captured_by=owner):
+        raise ValueError('Choose a unit in that player’s reinforcements within their commodity value')
     exhaust_leader(owner, 'cabalagent')
     target.trade_goods += target.commodities
     target.commodities = 0
-    owner.captured_units[kind] = owner.captured_units.get(kind, 0) + 1
+    cabal_capture_unit(owner, kind, target.faction)
 
 
 def use_empyrean_agent(owner, beneficiary, board, tile, pool: str):
@@ -558,6 +582,6 @@ def use_cabal_hero(owner, board, rng):
                  unit.location.carrier_id == ship.unit_id]
         for unit in (ship, *cargo):
             tile.units.remove(unit)
-            owner.captured_units[unit.kind] = owner.captured_units.get(unit.kind, 0) + 1
+            cabal_capture_unit(owner, unit.kind, unit.owner)
     purge_leader(owner, 'cabalhero')
     return tuple(results)

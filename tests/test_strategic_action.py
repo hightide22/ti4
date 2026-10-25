@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from board import ROOT, load_board
+from exploration import ExplorationController, PendingExploration
 from player import PlanetCard, create_players, command_tokens_in_play
 from movement import MovementController
 from strategic_action import StrategyController, StrategyResolution
@@ -95,6 +96,65 @@ class StrategicActionTests(unittest.TestCase):
         c.pay_leadership()
         self.assertEqual(self.hacan.trade_goods, 1)
         self.assertTrue(all(not p.exhausted for p in self.hacan.planets))
+
+    def test_cabal_agent_reaction_is_queued_for_trade_primary_and_secondary(self):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('sol', 'cabal', 'hacan', 'jolnar'))
+        by_faction = {p.faction: p for p in create_players(board, config)}
+        players = [by_faction[f] for f in ('sol', 'cabal', 'hacan', 'jolnar')]
+        sol, cabal, hacan, _jolnar = players
+        turn = TurnOrder(players, strategy_enabled=True)
+        turn.strategy_selection = False
+        turn.strategy_assignments = {player.faction: [] for player in players}
+        turn.strategy_assignments['sol'] = [5]
+        turn.active_index = players.index(sol)
+        movement = MovementController(board, players)
+        controller = StrategyController(board, turn, movement)
+
+        controller.start(5)
+        controller.confirm_trade()
+        self.assertEqual(controller.pending_cabal_replenishments,
+                         [('cabal', 'sol', sol.commodity_limit)])
+        controller.pending_cabal_replenishments.clear()  # Resolve the reaction.
+
+        self.assertIs(controller.player, cabal)
+        controller.decline_secondary()
+        self.assertIs(controller.player, hacan)
+        controller.accept_secondary()
+        self.assertEqual(controller.pending_cabal_replenishments,
+                         [('cabal', 'hacan', hacan.commodity_limit)])
+
+    def test_cabal_agent_reacts_to_replenishment_exploration_not_commodity_gain(self):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('sol', 'cabal', 'hacan', 'jolnar'))
+        players = create_players(board, config)
+        sol, cabal = players[:2]
+        exploration = ExplorationController(board, players)
+        movement = MovementController(board, players)
+        movement.exploration = exploration
+        controller = StrategyController(board, TurnOrder(players), movement,
+                                        exploration=exploration)
+        movement.on_commodities_replenished = controller.note_commodities_replenished
+        empty = next(tile for tile in board.values() if not tile.planets)
+        exploration.pending = PendingExploration(
+            sol.faction, empty.position, None, 'ms1',
+            ('replenish_commodities', 'convert_commodities'))
+
+        movement.resolve_exploration_choice('replenish_commodities')
+
+        self.assertEqual(sol.commodities, sol.commodity_limit)
+        self.assertEqual(controller.pending_cabal_replenishments,
+                         [('cabal', 'sol', sol.commodity_limit)])
+        controller.pending_cabal_replenishments.clear()
+        exploration.pending = PendingExploration(
+            sol.faction, empty.position, None, 'aw1',
+            ('gain_commodities', 'convert_commodities'))
+
+        movement.resolve_exploration_choice('gain_commodities')
+
+        self.assertEqual(controller.pending_cabal_replenishments, [])
 
     def test_exploration_attachment_modifies_leadership_payment(self):
         card = self.sol.planets[0]

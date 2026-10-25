@@ -56,9 +56,12 @@ class ExpansionCardTests(unittest.TestCase):
         session = self.session(tile=tile)
         self.sol.commodities = 0
         self.sol.action_cards.append('harness')
+        replenishments = []
+        self.movement.on_commodities_replenished = replenishments.append
         self.assertTrue(self.cards.can_play('sol', 'harness', session))
         self.cards.play(self.sol, 0)
         self.assertEqual(self.sol.commodities, self.sol.commodity_limit)
+        self.assertEqual(replenishments, [self.sol])
 
     def test_counterstroke_returns_existing_board_token_to_tactics(self):
         session = self.session()

@@ -942,6 +942,9 @@ class ActionCardController:
                 2, command_tokens_in_reinforcements(player, self.movement.board))
         elif effect == 'harness':
             player.commodities = player.commodity_limit
+            on_replenished = getattr(self.movement, 'on_commodities_replenished', None)
+            if on_replenished:
+                on_replenished(player)
         elif effect == 'counterstroke':
             session.target.command_tokens.remove(player.faction)
             player.command_pools['tactical'] += 1

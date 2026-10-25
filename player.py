@@ -44,6 +44,7 @@ class PlayerState:
     foreign_fleet_tokens: set[str] = field(default_factory=set)
     foreign_command_tokens_out: set[str] = field(default_factory=set)
     captured_units: dict[str, int] = field(default_factory=dict)
+    captured_unit_sources: dict[tuple[str, str], int] = field(default_factory=dict)
     hero_attachments: set[str] = field(default_factory=set)
     hero_round_flags: set[str] = field(default_factory=set)
     command_pools: dict[str, int] = field(default_factory=lambda: {

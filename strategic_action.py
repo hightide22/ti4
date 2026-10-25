@@ -46,10 +46,25 @@ class StrategyController:
         self.exploration = exploration
         self.session = None
         self.hero_secondary_choices: dict[tuple[str, int], set[int]] = {}
+        self.pending_cabal_replenishments: list[tuple[str, str, int]] = []
 
     def commodity_limit(self, player):
         return (self.exploration.relics.commodity_limit(player)
                 if self.exploration else player.commodity_limit)
+
+    def note_commodities_replenished(self, player):
+        """Queue the Cabal agent window at the exact replenishment timing."""
+        from leaders import leader_available
+        from leader_effects import cabal_agent_options
+        cabal = next((candidate for candidate in self.turn.players
+                      if candidate.faction == 'cabal'), None)
+        value = self.commodity_limit(player)
+        if (cabal is not None and cabal is not player and value > 0 and
+                leader_available(cabal, 'cabalagent') and
+                cabal_agent_options(player, self.board,
+                                commodity_value=value, captured_by=cabal)):
+            self.pending_cabal_replenishments.append(
+                (cabal.faction, player.faction, value))
 
     def _spend_strategy_token(self, player, cost=1):
         if cost < 0 or player.command_pools['strategic'] < cost:
@@ -199,6 +214,7 @@ class StrategyController:
             self._participant_done()
         if s.card == 5:
             s.player.commodities = self.commodity_limit(s.player)
+            self.note_commodities_replenished(s.player)
             self._participant_done()
 
     def decline_secondary(self):
@@ -518,6 +534,7 @@ class StrategyController:
         s = self.session
         s.player.trade_goods += 3
         s.player.commodities = self.commodity_limit(s.player)
+        self.note_commodities_replenished(s.player)
         self.movement.resolve_pillage(s.player)
         self._participant_done()
 

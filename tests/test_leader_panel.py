@@ -131,6 +131,30 @@ class LeaderPanelTests(unittest.TestCase):
         self.assertIn(('use', 'l1z1xagent', infantry.unit_id),
                       [row[0] for row in self.panel.hits])
 
+    def test_cabal_reaction_lists_only_capturable_units(self):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('cabal', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        cabal, sol = players[:2]
+        self.window.player_panel.players = players
+        self.window.strategy = SimpleNamespace(
+            session=object(), pending_cabal_replenishments=[
+                ('cabal', 'sol', sol.commodity_limit)])
+        self.window.turn_order.active_player = sol
+        self.panel.open_for_reaction(cabal, 'cabalagent')
+        self.draw(player=cabal, available_actions=('cabalagent',))
+        use = next(row for row in self.panel.hits
+                   if row[0] == ('use', 'cabalagent'))
+        self.assertIsNone(self.panel.handle_click(
+            (use[1] + use[2]) / 2, (use[3] + use[4]) / 2, cabal))
+        self.panel.target_page = 1
+        self.draw(player=cabal, available_actions=('cabalagent',))
+        actions = [row[0] for row in self.panel.hits]
+        self.assertIn(('use', 'cabalagent', 'dreadnought'), actions)
+        self.assertNotIn(('use', 'cabalagent', 'pds'), actions)
+        self.assertNotIn(('use', 'cabalagent', 'spacedock'), actions)
+
     def test_header_drag_stays_on_screen(self):
         self.draw()
         left, right, bottom, top = self.panel.bounds

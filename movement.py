@@ -81,7 +81,8 @@ class Snapshot:
                    [(other, {name: deepcopy(getattr(other, name)) for name in (
                        'leaders', 'scored_objectives', 'scored_secret_objectives',
                        'foreign_fleet_tokens', 'foreign_command_tokens_out',
-                       'captured_units', 'hero_attachments', 'hero_round_flags',
+                       'captured_units', 'captured_unit_sources',
+                       'hero_attachments', 'hero_round_flags',
                        'pending_commands', 'exhausted_legendary_abilities')
                       if hasattr(other, name)})
                     for other in all_players],
@@ -469,6 +470,7 @@ class MovementController:
         self.history: list[UndoEntry] = []
         self.action_cards = None
         self.exploration = None
+        self.on_commodities_replenished = None
         self.exploration_is_bot = lambda _player: False
         self.exploration_queue = []
         self.exploration_outcomes = []
@@ -748,7 +750,8 @@ class MovementController:
                     any(other is not unit and other.owner == 'cabal' and
                         other.kind == 'mech' and other.location == unit.location
                         for other in tile.units)):
-                player.captured_units['infantry'] = player.captured_units.get('infantry', 0) + 1
+                from pok_factions import cabal_capture_unit
+                cabal_capture_unit(player, 'infantry', unit.owner)
         if player and unit.kind == 'mech' and 'sar' in player.technologies:
             player.trade_goods += 1
             self.resolve_pillage(player)
@@ -758,7 +761,8 @@ class MovementController:
                              for other in tile.units)
         if (cabal is not None and cabal_flagship and
                 unit.kind not in ('pds', 'spacedock')):
-            cabal.captured_units[unit.kind] = cabal.captured_units.get(unit.kind, 0) + 1
+            from pok_factions import cabal_capture_unit
+            cabal_capture_unit(cabal, unit.kind, unit.owner)
         elif in_combat and session is not None and 'cabal' in session.combat_factions:
             if cabal is not None:
                 from pok_factions import cabal_capture_destroyed
@@ -3374,9 +3378,10 @@ class MovementController:
             for tile in self.board.values():
                 tile.units[:] = [unit for unit in tile.units if unit.unit_id not in reclaim_ids]
         for kind, count in session.amalgamation_choices.items():
-            session.player.captured_units[kind] -= count
-            if not session.player.captured_units[kind]:
-                del session.player.captured_units[kind]
+            from pok_factions import cabal_return_captured
+            for _ in range(count):
+                if not cabal_return_captured(session.player, kind):
+                    raise MovementError('A captured unit is no longer available for Amalgamation.')
         if session.aida_production_discount:
             session.player.exhausted_technologies.add('aida')
         used_ids = {unit.unit_id for tile in self.board.values() for unit in tile.units}
@@ -3736,6 +3741,11 @@ class MovementController:
         planet_id = self.exploration.pending.planet_id
         tile = self.board[self.exploration.pending.position]
         outcome = self.exploration.resolve_pending(choice)
+        if (outcome.resolved and outcome.card and
+                outcome.card.alias.startswith('ms') and
+                choice == 'replenish_commodities' and
+                self.on_commodities_replenished):
+            self.on_commodities_replenished(self.exploration.players[faction])
         self.exploration_outcomes.append((faction, outcome))
         if outcome.resolved and planet_id is not None:
             self.after_planet_explored(self.exploration.players[faction], tile, planet_id)

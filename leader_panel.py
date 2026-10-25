@@ -11,8 +11,8 @@ import textwrap
 import arcade
 
 from leaders import leader_available, leader_catalog
-from leader_effects import (arborec_agent_replacements, muaat_agent_systems,
-                            xxcha_agent_remove_options)
+from leader_effects import (arborec_agent_replacements, cabal_agent_options,
+                            muaat_agent_systems, xxcha_agent_remove_options)
 from ui_theme import (ACCENT, BORDER, CARD, GOLD, INK, MUTED, PANEL,
                       SELECTED, button, modal, surface)
 from units import Region, UNIT_TYPES
@@ -27,8 +27,9 @@ MANUAL_ACTION_HEROES = frozenset({
     'cabalhero', 'empyreanhero', 'keleresheroharka', 'naazhero',
     'nomadhero', 'titanshero',
 })
-MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'hacanagent', 'l1z1xagent', 'muaatagent',
-                                  'saaragent', 'xxchaagent'})
+MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'cabalagent', 'hacanagent',
+                                  'l1z1xagent', 'muaatagent', 'saaragent',
+                                  'xxchaagent'})
 
 
 class LeaderPanel:
@@ -445,6 +446,40 @@ class LeaderPanel:
                 self.hits.append((('use', alias,
                                    ('hacan', 'replenish', beneficiary.faction)),
                                   x, x + width, by, by + 27))
+        elif alias == 'cabalagent':
+            pending = (window.strategy.pending_cabal_replenishments[0]
+                       if window.strategy.pending_cabal_replenishments else None)
+            target = (next((candidate for candidate in window.player_panel.players
+                            if candidate.faction == pending[1]), None)
+                      if pending else None)
+            choices = (cabal_agent_options(target, board,
+                                           commodity_value=pending[2],
+                                           captured_by=player)
+                       if target and pending else ())
+            if target is None:
+                window.text('cabal_agent_no_target',
+                            'The replenishment reaction is no longer available.',
+                            x, bottom + 128, 9, MUTED, width)
+            elif not choices:
+                window.text('cabal_agent_no_units',
+                            f'{target.faction.upper()} has no eligible unit in reinforcements.',
+                            x, bottom + 128, 9, MUTED, width)
+            else:
+                window.text('cabal_agent_target',
+                            f'CONVERT {target.commodities} COMMODITIES · '
+                            f'UNIT LIMIT {pending[2]}',
+                            x, bottom + 166, 9, GOLD, max_width=width)
+                pages = max(1, (len(choices) + page_size - 1) // page_size)
+                self.target_page = min(self.target_page, pages - 1)
+                visible = choices[self.target_page * page_size:
+                                  (self.target_page + 1) * page_size]
+                for index, kind in enumerate(visible):
+                    by = bottom + 132 - index * 31
+                    button(window, ('cabal_agent_unit', kind),
+                           f'CAPTURE {UNIT_TYPES[kind]["name"].upper()}',
+                           x, by, width, 27, size=8)
+                    self.hits.append((('use', alias, kind), x, x + width,
+                                      by, by + 27))
         elif alias == 'arborecagent':
             if self.agent_ship_id is None:
                 targets = [(tile, unit) for tile in board.values() for unit in tile.units

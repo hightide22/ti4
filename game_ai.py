@@ -178,6 +178,34 @@ class GameAI:
         w = self.window
         turn = w.turn_order
         exploration = getattr(w, 'exploration', None)
+        pending_cabal = getattr(w.strategy, 'pending_cabal_replenishments', ())
+        if pending_cabal:
+            from leaders import leader_available
+            owner_faction, target_faction, commodity_value = pending_cabal[0]
+            owner = next((candidate for candidate in turn.players
+                          if candidate.faction == owner_faction), None)
+            target = next((candidate for candidate in turn.players
+                           if candidate.faction == target_faction), None)
+            if (owner is None or target is None or
+                    not leader_available(owner, 'cabalagent')):
+                w.strategy.pending_cabal_replenishments.pop(0)
+                return
+            if getattr(w.leader_panel, 'reaction_owner_faction', None):
+                return
+            if not self.is_bot(owner):
+                w.sync_cabal_agent_reaction()
+                return
+            from leader_effects import cabal_agent_options, use_cabal_agent
+            options = cabal_agent_options(target, w.board,
+                                          commodity_value=commodity_value,
+                                          captured_by=owner)
+            if options:
+                kind = options[-1]
+                use_cabal_agent(owner, target, kind, w.board,
+                                commodity_value=commodity_value)
+                self.report(owner, f'Used The Stillness of Stars against {target.faction.upper()} and captured a {kind}.', .25)
+            w.strategy.pending_cabal_replenishments.pop(0)
+            return
         if exploration is not None and exploration.secret_objectives.pending_returns:
             pending_returns = exploration.secret_objectives.pending_returns
             for faction in sorted(pending_returns):

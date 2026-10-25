@@ -43,7 +43,7 @@ from leader_panel import LeaderPanel
 from leaders import (leader_available, ready_leaders, refresh_leader_unlocks,
                      record_scored_objective)
 from leader_effects import (clear_round_hero_effects, use_cabal_hero,
-                            use_arborec_agent, use_xxcha_agent,
+                            use_arborec_agent, use_cabal_agent, use_xxcha_agent,
                             use_empyrean_hero, use_keleres_harka_hero,
                             use_ghost_agent, use_l1z1x_agent, use_naaz_agent, use_naaz_hero,
                             use_nomad_hero, use_saar_agent, l1z1x_agent_mech_available,
@@ -158,6 +158,7 @@ class BoardWindow(arcade.Window):
         self.movement.exploration = self.exploration
         self.strategy = StrategyController(self.board, self.turn_order, self.movement,
                                            self.action_cards, exploration=self.exploration)
+        self.movement.on_commodities_replenished = self.strategy.note_commodities_replenished
         self.patronage_round = 0
         self.apply_council_patronage()
         self.ai = GameAI(self, set())
@@ -507,6 +508,10 @@ class BoardWindow(arcade.Window):
     @property
     def strategy_modal(self):
         if self.bot_actor:
+            return False
+        if self.strategy.pending_cabal_replenishments:
+            return False
+        if self.leader_panel.reaction_owner_faction:
             return False
         return (self.turn_order.strategy_selection or self.turn_order.qdn_pending or
                 bool(self.strategy.session and self.strategy.session.stage != 'production') or
@@ -898,6 +903,21 @@ class BoardWindow(arcade.Window):
             session.activation_agent_alias = None
             self.leader_panel.close()
             self.prompt_activation_agent(session)
+        elif (self.strategy.pending_cabal_replenishments and
+              self.strategy.pending_cabal_replenishments[0][0] == 'cabal'):
+            self.strategy.pending_cabal_replenishments.pop(0)
+            self.leader_panel.close()
+
+    def sync_cabal_agent_reaction(self):
+        """Pause for a human Cabal agent reaction after commodity replenishment."""
+        pending = self.strategy.pending_cabal_replenishments
+        if not pending or self.leader_panel.reaction_owner_faction:
+            return
+        owner = next((candidate for candidate in self.player_panel.players
+                      if candidate.faction == pending[0][0]), None)
+        if owner is None or self.ai.is_bot(owner):
+            return
+        self.leader_panel.open_for_reaction(owner, 'cabalagent')
 
     def finish_activation_agent_reaction(self, session):
         if session.activation_agent_queue:
@@ -930,6 +950,35 @@ class BoardWindow(arcade.Window):
         player = next((candidate for candidate in self.player_panel.players
                        if candidate.faction == self.leader_panel.reaction_owner_faction),
                       self.turn_order.active_player)
+        if alias == 'cabalagent':
+            pending = self.strategy.pending_cabal_replenishments
+            if (player is None or player.faction != 'cabal' or not pending or
+                    len(command) < 3):
+                self.movement_error = 'The Cabal agent reaction is no longer available.'
+                return
+            _owner_faction, target_faction, commodity_value = pending[0]
+            target = next((candidate for candidate in self.player_panel.players
+                           if candidate.faction == target_faction), None)
+            if target is None:
+                self.movement_error = 'The replenishing player is no longer available.'
+                return
+            snapshot = None
+            try:
+                snapshot = Snapshot.capture(
+                    self.board, player, self.player_panel.players,
+                    self.action_cards, self.exploration)
+                use_cabal_agent(player, target, command[2], self.board,
+                                commodity_value=commodity_value)
+            except (ValueError, KeyError) as error:
+                if snapshot is not None:
+                    snapshot.restore()
+                self.movement_error = str(error)
+                return
+            pending.pop(0)
+            self.leader_panel.close()
+            self.movement_error = None
+            self.sync_strategy_actor()
+            return
         if alias == 'hacanagent':
             snapshot = None
             try:
@@ -953,6 +1002,8 @@ class BoardWindow(arcade.Window):
                     snapshot.restore()
                 self.movement_error = str(error) or 'That Hacan agent choice is no longer available.'
                 return
+            if beneficiary is not None:
+                self.strategy.note_commodities_replenished(beneficiary)
             self.leader_panel.close()
             self._finish_component_action(snapshot)
             self.movement_error = None
@@ -1303,6 +1354,7 @@ class BoardWindow(arcade.Window):
         for player in self.turn_order.players:
             if player.faction.startswith('keleres'):
                 keleres_council_patronage(player, self.exploration)
+                self.strategy.note_commodities_replenished(player)
         self.patronage_round = self.turn_order.round_number
 
     def clear_round_tokens(self):
@@ -1573,6 +1625,11 @@ class BoardWindow(arcade.Window):
                            if candidate.faction == self.leader_panel.reaction_owner_faction),
                           self.turn_order.active_player)
             available = set()
+            if (player.faction == 'cabal' and
+                    self.strategy.pending_cabal_replenishments and
+                    self.strategy.pending_cabal_replenishments[0][0] == player.faction and
+                    leader_available(player, 'cabalagent')):
+                available.add('cabalagent')
             if (player.faction == 'naaz' and self.turn_order.action_used and
                     self.movement.session is None and not self.strategy.session):
                 available.add('naazagent')
@@ -1831,6 +1888,7 @@ class BoardWindow(arcade.Window):
             return
         self.unit_renderer.update(delta_time)
         self.sync_turn_action()
+        self.sync_cabal_agent_reaction()
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
         for axis in range(2):
             shift = (self.target_map_center[axis] - self.map_center[axis]) * min(1, delta_time * 7)
@@ -2725,7 +2783,38 @@ class BoardWindow(arcade.Window):
                                 arcade.MOUSE_BUTTON_LEFT, 0)
             assert hacan.commodities == hacan.commodity_limit
             assert not leader_available(hacan, 'hacanagent')
-            print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, command allocation, faction abilities, and Hacan agent checked')
+            self.configure_game(ROOT / 'maps/four_player.json',
+                                ('sol', 'cabal', 'hacan', 'jolnar'))
+            sol = next(player for player in self.turn_order.players
+                       if player.faction == 'sol')
+            cabal = next(player for player in self.turn_order.players
+                         if player.faction == 'cabal')
+            self.turn_order.strategy_assignments[sol.faction] = [5]
+            self.turn_order.active_index = self.turn_order.players.index(sol)
+            self.strategy.start(5)
+            self.strategy.confirm_trade()
+            assert self.strategy.pending_cabal_replenishments == [
+                ('cabal', 'sol', sol.commodity_limit)]
+            self.on_update(0)
+            assert self.leader_panel.reaction_owner_faction == 'cabal'
+            assert not self.strategy_modal
+            self.on_draw()
+            use_hit = next(hit for hit in self.leader_panel.hits
+                           if hit[0] == ('use', 'cabalagent'))
+            self.on_mouse_press((use_hit[1] + use_hit[2]) / 2,
+                                (use_hit[3] + use_hit[4]) / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            self.leader_panel.target_page = 1
+            self.on_draw()
+            capture_hit = next(hit for hit in self.leader_panel.hits
+                               if hit[0] == ('use', 'cabalagent', 'dreadnought'))
+            self.on_mouse_press((capture_hit[1] + capture_hit[2]) / 2,
+                                (capture_hit[3] + capture_hit[4]) / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            assert not self.strategy.pending_cabal_replenishments
+            assert cabal.captured_units.get('dreadnought') == 1
+            assert sol.commodities == 0 and sol.trade_goods == 3 + sol.commodity_limit
+            print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, command allocation, faction abilities, Hacan agent, and Cabal trade reaction checked')
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):
@@ -2773,6 +2862,10 @@ class BoardWindow(arcade.Window):
                     elif action[0] == 'start':
                         self.start_from_menu()
             return
+        if self.strategy.pending_cabal_replenishments:
+            self.sync_cabal_agent_reaction()
+            if not self.leader_panel.reaction_owner_faction:
+                return
         if self.exploration_panel.is_visible(self.exploration):
             owner = self.exploration_decision_owner()
             if owner is None or self.ai.is_bot(owner):

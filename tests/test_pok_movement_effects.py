@@ -9,6 +9,7 @@ from exploration import ExplorationController
 from leaders import leader_available
 from movement import MovementController, MovementError, Session, Snapshot
 from player import PlanetCard, create_players
+from pok_factions import cabal_capture_unit
 from units import Region, Unit, UnitLocation, layout_units, unit_profile
 from unit_supply import unit_supply_remaining
 
@@ -461,7 +462,7 @@ class PokMovementEffectsTests(unittest.TestCase):
         home = next(tile for tile in board.values() if cabal.faction in tile.planet_owners.values())
         dock = next(unit for unit in home.units if unit.owner == 'cabal' and
                     unit.kind == 'spacedock')
-        cabal.captured_units['carrier'] = 1
+        cabal_capture_unit(cabal, 'carrier', 'sol')
         session = movement.start_strategy_production(cabal, home, dock)
         movement.adjust_production('carrier', 1)
         self.assertEqual(3, movement.production_cost(session))
@@ -469,6 +470,7 @@ class PokMovementEffectsTests(unittest.TestCase):
         self.assertEqual(0, movement.production_cost(session))
         movement.produce()
         self.assertNotIn('carrier', cabal.captured_units)
+        self.assertFalse(cabal.captured_unit_sources)
         self.assertEqual(1, sum(unit.owner == 'cabal' and unit.kind == 'carrier' and
                                 unit.unit_id.startswith('cabal-built-') for unit in home.units))
 

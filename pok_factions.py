@@ -14,23 +14,45 @@ SLEEPER_TOKEN_SUPPLY = 5
 PDS_SUPPLY = 6
 
 
+def cabal_capture_unit(cabal, kind: str, original_owner: str) -> None:
+    """Record a captured unit and retain its owner while it is on Cabal's sheet."""
+    cabal.captured_units[kind] = cabal.captured_units.get(kind, 0) + 1
+    # Fighter and infantry captures use unlimited supply tokens. Ships and
+    # mechs leave a faction-specific plastic unit out of its owner's reserve.
+    if kind not in ('fighter', 'infantry'):
+        key = (kind, original_owner)
+        sources = getattr(cabal, 'captured_unit_sources', None)
+        if sources is None:
+            cabal.captured_unit_sources = sources = {}
+        sources[key] = sources.get(key, 0) + 1
+
+
 def cabal_capture_destroyed(cabal, destroyed, *, during_combat: bool) -> bool:
     """Devour captures an enemy non-structure destroyed during combat."""
     if (cabal.faction != 'cabal' or not during_combat or
             destroyed.owner == cabal.faction or
             destroyed.kind in ('pds', 'spacedock')):
         return False
-    cabal.captured_units[destroyed.kind] = cabal.captured_units.get(destroyed.kind, 0) + 1
+    cabal_capture_unit(cabal, destroyed.kind, destroyed.owner)
     return True
 
 
-def cabal_return_captured(cabal, kind: str) -> bool:
+def cabal_return_captured(cabal, kind: str, original_owner: str | None = None) -> bool:
     """Spend one captured unit for Amalgamation or Riftmeld."""
     if cabal.faction != 'cabal' or cabal.captured_units.get(kind, 0) <= 0:
         return False
     cabal.captured_units[kind] -= 1
     if not cabal.captured_units[kind]:
         del cabal.captured_units[kind]
+    sources = getattr(cabal, 'captured_unit_sources', {})
+    candidates = sorted(owner for (unit_kind, owner), count in sources.items()
+                        if unit_kind == kind and count > 0 and
+                        (original_owner is None or owner == original_owner))
+    if candidates:
+        key = (kind, candidates[0])
+        sources[key] -= 1
+        if sources[key] <= 0:
+            del sources[key]
     return True
 
 
