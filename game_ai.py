@@ -1267,6 +1267,12 @@ class GameAI:
             return
         if s.stage in ('space_combat', 'ground_combat') and s.combat_needs_resolution:
             for faction in s.combat_factions:
+                if (faction in self.bot_factions and
+                        ctl.titans_agent_can_cancel_combat_hit(faction)):
+                    ctl.cancel_titans_combat_hit(faction)
+                    self.report(ctl.faction_player(faction),
+                                'Tellurian canceled an incoming combat hit.', .3)
+                    return
                 if faction in self.bot_factions and self._bot_hit(faction, s):
                     return
         if (s.stage == 'space_combat' and not s.combat_needs_resolution and
@@ -1301,6 +1307,11 @@ class GameAI:
             event = s.space_cannon_events[0] if s.space_cannon_events else {}
             target_faction = event.get('target', s.player.faction)
             if target_faction not in self.bot_factions:
+                return
+            if target_faction == 'titans' and ctl.titans_agent_can_cancel_space_cannon_hit():
+                ctl.cancel_titans_space_cannon_hit()
+                self.report(ctl.faction_player(target_faction),
+                            'Tellurian canceled an incoming Space Cannon hit.', .3)
                 return
             candidates = ctl.space_cannon_assignment_candidates(s)
             if candidates:

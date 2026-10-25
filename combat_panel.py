@@ -332,6 +332,14 @@ class CombatPanel:
                 self.action_hits.append((('space_cannon_target', unit.unit_id),
                                          card_left, card_left + cell_width,
                                          card_bottom, card_top))
+            if (target_faction == 'titans' and not window.ai.is_bot(target_player) and
+                    window.movement.titans_agent_can_cancel_space_cannon_hit()):
+                bx, by, bw, bh = left + 24, bottom + 18, 240, 36
+                button(window, ('cancel_titans_space_cannon_hit',),
+                       'TELLURIAN · CANCEL THIS HIT', bx, by, bw, bh,
+                       primary=True, size=8)
+                self.action_hits.append((('cancel_titans_space_cannon_hit', 'titans'),
+                                         bx, bx + bw, by, by + bh))
             if pages > 1:
                 page_y = bottom + 42
                 window.text('space_cannon_page',
@@ -625,6 +633,15 @@ class CombatPanel:
                 if enabled:
                     self.action_hits.append((('reroll_dice', 'letnev'), button_x,
                                              button_x + button_w, button_y, button_y + button_h))
+        titans = next((player for player in combat_players if player.faction == 'titans'), None)
+        if (session.combat_needs_resolution and titans and not window.ai.is_bot(titans) and
+                window.movement.titans_agent_can_cancel_combat_hit('titans')):
+            bx, by, bw, bh = left + 20, bottom + 24, 230, 38
+            button(window, ('cancel_titans_combat_hit', 'titans'),
+                   'TELLURIAN · CANCEL 1 HIT', bx, by, bw, bh,
+                   primary=True, size=8)
+            self.action_hits.append((('cancel_titans_combat_hit', 'titans'),
+                                     bx, bx + bw, by, by + bh))
         if window.movement_error:
             window.text('combat_error', window.movement_error, left + width / 2, bottom + 76, 10,
                         DANGER, width - 40)

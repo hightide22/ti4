@@ -3111,7 +3111,8 @@ class BoardWindow(arcade.Window):
                         (response[0] in ('assign_hit', 'spend_munitions', 'reroll_die',
                                          'supercharge',
                                          'reroll_dice', 'fire_team_die', 'fire_team_resolve',
-                                         'agent_bonus_die') and
+                                         'agent_bonus_die', 'cancel_titans_combat_hit',
+                                         'cancel_titans_space_cannon_hit') and
                          len(response) > 1 and response[1] not in self.ai.bot_factions)))
                     if not allowed:
                         return
@@ -3259,6 +3260,14 @@ class BoardWindow(arcade.Window):
                         if action[1] in self.ai.bot_factions:
                             return
                         self.movement.assign_combat_hit(action[1], action[2])
+                    elif action[0] == 'cancel_titans_combat_hit':
+                        if action[1] in self.ai.bot_factions:
+                            return
+                        self.movement.cancel_titans_combat_hit(action[1])
+                    elif action[0] == 'cancel_titans_space_cannon_hit':
+                        if action[1] in self.ai.bot_factions:
+                            return
+                        self.movement.cancel_titans_space_cannon_hit()
                     elif action[0] == 'spend_munitions':
                         self.movement.spend_munitions(action[1])
                     elif action[0] == 'supercharge':

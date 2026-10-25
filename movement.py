@@ -2599,6 +2599,52 @@ class MovementController:
                 not unit.damaged and assignments.count(unit.unit_id) == 1 and len(assignments) < required):
             assignments.append(unit.unit_id)
 
+    def titans_agent_can_cancel_combat_hit(self, faction):
+        session = self.session
+        player = self.faction_player(faction)
+        if (not session or session.stage not in ('space_combat', 'ground_combat') or
+                not session.combat_needs_resolution or faction not in session.combat_factions or
+                not player or not leader_available(player, 'titansagent')):
+            return False
+        hits = session.combat_hits.get(faction, 0)
+        required = min(hits, self.combat_hit_capacity(session, faction))
+        return hits > 0 and len(session.combat_assignments.get(faction, [])) < required
+
+    def cancel_titans_combat_hit(self, faction):
+        """Use Tellurian before assigning one incoming combat hit."""
+        session = self.session
+        if not self.titans_agent_can_cancel_combat_hit(faction):
+            raise MovementError('Tellurian cannot cancel a hit at this time')
+        from leader_effects import use_titans_agent
+        player = self.faction_player(faction)
+        session.combat_hits[faction] = use_titans_agent(
+            player, session.combat_hits[faction])
+        session.assault_log.append(f'{faction.upper()} Tellurian canceled 1 incoming hit.')
+
+    def titans_agent_can_cancel_space_cannon_hit(self):
+        session = self.session
+        if (not session or session.stage != 'space_cannon_assign' or
+                not session.space_cannon_events):
+            return False
+        event = session.space_cannon_events[0]
+        faction = event.get('target', session.player.faction)
+        player = self.faction_player(faction)
+        return bool(player and leader_available(player, 'titansagent') and
+                    self.space_cannon_assignment_candidates(session))
+
+    def cancel_titans_space_cannon_hit(self):
+        """Use Tellurian to cancel a Space Cannon hit before assignment."""
+        session = self.session
+        if not self.titans_agent_can_cancel_space_cannon_hit():
+            raise MovementError('Tellurian cannot cancel a Space Cannon hit now')
+        event = session.space_cannon_events.pop(0)
+        faction = event.get('target', session.player.faction)
+        from leader_effects import use_titans_agent
+        player = self.faction_player(faction)
+        use_titans_agent(player, 1)
+        session.cannon_log.append(f'{faction.upper()} Tellurian canceled 1 Space Cannon hit.')
+        self.continue_after_space_cannon(session)
+
     def combat_assignments_complete(self, session):
         return all(len(session.combat_assignments.get(faction, [])) >=
                    min(session.combat_hits.get(faction, 0), self.combat_hit_capacity(session, faction))

@@ -14,6 +14,7 @@ from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, 
                             clear_round_hero_effects, use_mahact_hero, use_titans_agent,
                             use_titans_hero)
 from leaders import leader_available, ready_leaders, unlock_leader
+from movement import MovementController, Session, Snapshot
 from player import create_players
 from pok_factions import (cabal_capture_destroyed, cabal_return_captured,
                           cabal_capture_unit,
@@ -312,6 +313,65 @@ class PokEffectsTests(unittest.TestCase):
         self.assertFalse(titans.planets[0].exhausted)
         self.assertIn('elysium', titans.hero_attachments)
         self.assertEqual(titans_hero_space_cannon(titans, home), (5, 3))
+
+    def test_tellurian_cancels_one_combat_hit_before_assignment(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('titans', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        by_faction = {player.faction: player for player in players}
+        titans, sol = by_faction['titans'], by_faction['sol']
+        movement = MovementController(board, players)
+        target = next(iter(board.values()))
+        target.units[:] = [
+            Unit(f'tellurian-dread-{index}', 'dreadnought', 'titans', titans.color_code,
+                 UnitLocation(Region.SPACE)) for index in range(2)]
+        session = Session(titans, target, {}, Snapshot.capture(board, titans, players),
+                          stage='space_combat', combat_factions=('titans', 'sol'),
+                          combat_hits={'titans': 2, 'sol': 0},
+                          combat_assignments={'titans': [], 'sol': []},
+                          combat_needs_resolution=True)
+        movement.session = session
+
+        self.assertTrue(movement.titans_agent_can_cancel_combat_hit('titans'))
+        movement.cancel_titans_combat_hit('titans')
+        self.assertEqual(session.combat_hits['titans'], 1)
+        self.assertFalse(leader_available(titans, 'titansagent'))
+        self.assertFalse(movement.combat_assignments_complete(session))
+
+        movement.assign_combat_hit('titans', 'dreadnought')
+        self.assertTrue(movement.combat_assignments_complete(session))
+        with self.assertRaises(ValueError):
+            movement.cancel_titans_combat_hit('titans')
+        self.assertFalse(leader_available(titans, 'titansagent'))
+        movement.advance_combat()
+        titan_dreadnoughts = [unit for unit in target.units if unit.owner == 'titans']
+        self.assertEqual(len(titan_dreadnoughts), 2)
+        self.assertEqual(sum(unit.damaged for unit in titan_dreadnoughts), 1)
+
+    def test_tellurian_cancels_space_cannon_hit_before_assignment(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('titans', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        by_faction = {player.faction: player for player in players}
+        titans, sol = by_faction['titans'], by_faction['sol']
+        movement = MovementController(board, players)
+        target = next(iter(board.values()))
+        ship = Unit('tellurian-cannon-target', 'carrier', 'titans', titans.color_code,
+                    UnitLocation(Region.SPACE))
+        target.units[:] = [ship]
+        session = Session(sol, target, {}, Snapshot.capture(board, sol, players),
+                          stage='space_cannon_assign', space_cannon_next_stage='invasion',
+                          space_cannon_events=[{'owner': 'sol', 'target': 'titans',
+                                                'candidates': [ship.unit_id],
+                                                'graviton': False}])
+        movement.session = session
+
+        self.assertTrue(movement.titans_agent_can_cancel_space_cannon_hit())
+        movement.cancel_titans_space_cannon_hit()
+        self.assertEqual(session.space_cannon_events, [])
+        self.assertIn(ship, target.units)
+        self.assertFalse(ship.damaged)
+        self.assertFalse(leader_available(titans, 'titansagent'))
 
     def test_titans_pds_limit_is_per_player_and_cannot_be_exceeded(self):
         config, board = load_board(ROOT / 'maps/four_player.json',

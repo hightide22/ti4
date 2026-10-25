@@ -6,8 +6,9 @@ from unittest.mock import patch
 from action_cards import ActionCardController
 from ai_actions import plan_bombardment, resolve_card_choice, war_effort_plan
 from ai_strategy import construction_choice, diplomacy_value, warfare_value
-from board import load_board
+from board import ROOT, load_board
 from game_ai import GameAI
+from leaders import leader_available
 from movement import MovementController, Session, Snapshot
 from player import create_players
 from strategic_action import StrategyController
@@ -65,6 +66,35 @@ class BotActionDecisions(TestCase):
         self.assertFalse(resolve_card_choice(self.ai))
         self.assertIsNotNone(self.cards.pending)
         self.assertEqual(len(self.target.units), 1)
+
+    def test_bot_titans_use_tellurian_before_assigning_incoming_combat_hit(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('titans', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        by_faction = {player.faction: player for player in players}
+        titans, sol = by_faction['titans'], by_faction['sol']
+        movement = MovementController(board, players)
+        target = next(iter(board.values()))
+        target.units[:] = [
+            Unit(f'ai-tellurian-dread-{index}', 'dreadnought', 'titans', titans.color_code,
+                 UnitLocation(Region.SPACE)) for index in range(2)]
+        session = Session(titans, target, {}, Snapshot.capture(board, titans, players),
+                          stage='space_combat', combat_factions=('titans', 'sol'),
+                          combat_hits={'titans': 1, 'sol': 0},
+                          combat_assignments={'titans': [], 'sol': []},
+                          combat_needs_resolution=True)
+        movement.session = session
+        turn = TurnOrder(players)
+        cards = ActionCardController(players, movement, turn=turn)
+        window = SimpleNamespace(board=board, movement=movement, turn_order=turn,
+                                 action_cards=cards)
+        ai = GameAI(window, {'titans'})
+
+        ai.resolve_movement()
+
+        self.assertEqual(session.combat_hits['titans'], 0)
+        self.assertTrue(movement.combat_assignments_complete(session))
+        self.assertFalse(leader_available(titans, 'titansagent'))
 
     def test_fire_team_rerolls_misses_without_touching_successful_dice(self):
         planet = self.target.planets[0].planet_id
