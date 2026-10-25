@@ -1,6 +1,7 @@
 """PoK technology and faction effects at tactical-action timing windows."""
 
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from board import ROOT, load_board
@@ -20,6 +21,60 @@ def game(faction='sol'):
 
 
 class PokMovementEffectsTests(unittest.TestCase):
+    def test_ghost_slipstream_applies_from_home_and_alpha_beta_but_not_gate(self):
+        board, players, movement = game('ghost')
+        ghost = players[0]
+        origin, middle, target = list(board.values())[:3]
+        origin.command_tokens.clear()
+        middle.command_tokens.clear()
+        target.command_tokens.clear()
+        unit = Unit('ghost-slipstream-carrier', 'carrier', 'ghost', ghost.color_code,
+                    UnitLocation(Region.SPACE))
+        route_map = {origin.position: [middle], middle.position: [target],
+                     target.position: []}
+        movement.neighbors = lambda tile, faction=None: route_map[tile.position]
+
+        origin.definition = replace(origin.definition, number=17, wormholes=('ALPHA',))
+        self.assertIsNone(movement.route(origin, target, unit, ghost))
+        origin.definition = replace(origin.definition, number=52, wormholes=('GAMMA',))
+        self.assertIsNone(movement.route(origin, target, unit, ghost))
+        origin.definition = replace(origin.definition, number=51, wormholes=())
+        self.assertEqual((origin.position, middle.position, target.position),
+                         movement.route(origin, target, unit, ghost))
+        origin.definition = replace(origin.definition, number=51, wormholes=('ALPHA',))
+        self.assertEqual((origin.position, middle.position, target.position),
+                         movement.route(origin, target, unit, ghost))
+        origin.definition = replace(origin.definition, number=52, wormholes=('ALPHA',))
+        self.assertEqual((origin.position, middle.position, target.position),
+                         movement.route(origin, target, unit, ghost))
+
+        flagship = Unit('ghost-slipstream-flagship', 'flagship', 'ghost',
+                        ghost.color_code, UnitLocation(Region.SPACE))
+        self.assertIsNone(movement.route(origin, target, flagship, ghost))
+
+    def test_ghost_agent_rebuilds_routes_between_wormhole_systems(self):
+        board, players, movement = game('ghost')
+        ghost = players[0]
+        origin, target = list(board.values())[:2]
+        origin.command_tokens.clear()
+        target.command_tokens.clear()
+        origin.definition = replace(origin.definition, wormholes=('ALPHA',))
+        target.definition = replace(target.definition, wormholes=('GAMMA',))
+        carrier = Unit('ghost-agent-carrier', 'carrier', 'ghost', ghost.color_code,
+                       UnitLocation(Region.SPACE))
+        origin.units.append(carrier)
+        movement.neighbors = lambda tile, faction=None: []
+        session = Session(ghost, target, {}, Snapshot.capture(board, ghost, players))
+        movement.session = session
+
+        movement.refresh_activation_routes(session)
+        self.assertNotIn(origin.position, session.sources)
+        session.ghost_wormhole_adjacency = True
+        movement.refresh_activation_routes(session)
+
+        self.assertEqual((origin.position, target.position),
+                         session.sources[origin.position].routes[carrier.unit_id])
+
     def test_pre_fab_arcologies_readies_explored_planet(self):
         board, players, movement = game('naaz')
         naaz = players[0]

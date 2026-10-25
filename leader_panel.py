@@ -26,7 +26,7 @@ MANUAL_ACTION_HEROES = frozenset({
     'cabalhero', 'empyreanhero', 'keleresheroharka', 'naazhero',
     'nomadhero', 'titanshero',
 })
-MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'l1z1xagent', 'xxchaagent'})
+MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'l1z1xagent', 'saaragent', 'xxchaagent'})
 
 
 class LeaderPanel:
@@ -53,12 +53,20 @@ class LeaderPanel:
         self.agent_mode: str | None = None
         self.agent_ship_id: str | None = None
         self.agent_planet_id: str | None = None
+        self.reaction_owner_faction: str | None = None
 
     def close(self) -> None:
         self.open = False
         self.hits.clear()
         self.bounds = None
         self.cancel_agent_action()
+        self.reaction_owner_faction = None
+
+    def open_for_reaction(self, player, leader_id: str) -> None:
+        """Open this leader's card for a triggered timing window."""
+        self.open = True
+        self.reaction_owner_faction = player.faction
+        self.select(leader_id, player)
 
     def begin_agent_action(self, leader_id: str) -> None:
         self.agent_mode = leader_id
@@ -348,6 +356,26 @@ class LeaderPanel:
                 button(window, ('agent_infantry_target', unit.unit_id),
                        f'{location} · INFANTRY', x, by, width, 27, size=8)
                 self.hits.append((('use', alias, unit.unit_id), x, x + width,
+                                  by, by + 27))
+        elif alias == 'saaragent':
+            session = movement.session
+            active_player = session.player if session else None
+            ships = [(tile, unit) for tile in board.values() for unit in tile.units
+                     if active_player and unit.owner == active_player.faction and
+                     UNIT_TYPES[unit.kind]['ship'] and
+                     unit.location.region == Region.SPACE]
+            ships.sort(key=lambda row: (row[0].number, row[1].kind, row[1].unit_id))
+            pages = max(1, (len(ships) + page_size - 1) // page_size)
+            self.target_page = min(self.target_page, pages - 1)
+            visible = ships[self.target_page * page_size:
+                            (self.target_page + 1) * page_size]
+            for index, (tile, ship) in enumerate(visible):
+                by = bottom + 138 - index * 31
+                label = (f'TILE {tile.number} · {UNIT_TYPES[ship.kind]["name"].upper()} · '
+                         f'MOVE {ship.move_value}')
+                button(window, ('saar_ship_target', ship.unit_id), label,
+                       x, by, width, 27, size=8)
+                self.hits.append((('use', alias, ship.unit_id), x, x + width,
                                   by, by + 27))
         elif alias == 'arborecagent':
             if self.agent_ship_id is None:

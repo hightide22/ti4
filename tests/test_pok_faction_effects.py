@@ -2,11 +2,13 @@
 
 import random
 import unittest
+from dataclasses import replace
 
 from board import ROOT, load_board
 from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, use_empyrean_agent,
                             use_empyrean_hero, use_nomad_artuno, use_nomad_hero,
-                            use_l1z1x_agent,
+                            use_ghost_agent, use_l1z1x_agent, use_saar_agent,
+                            l1z1x_agent_mech_available,
                             use_xxcha_agent,
                             clear_round_hero_effects, use_mahact_hero, use_titans_agent,
                             use_titans_hero)
@@ -89,6 +91,35 @@ class PokEffectsTests(unittest.TestCase):
         self.assertEqual(infantry.location, mech.location)
         self.assertFalse(leader_available(l1z1x, 'l1z1xagent'))
 
+    def test_saar_agent_matches_the_highest_ship_move_value(self):
+        board, saar, sol = self.game('saar')
+        tile = next(tile for tile in board.values() if not tile.units)
+        carrier = Unit('sol-agent-carrier', 'carrier', 'sol', sol.color_code,
+                       UnitLocation(Region.SPACE))
+        hacan_color = next(unit.color_code for system in board.values()
+                           for unit in system.units if unit.owner == 'hacan')
+        fast_cruiser = Unit('hacan-agent-cruiser', 'cruiser', 'hacan',
+                            hacan_color,
+                            UnitLocation(Region.SPACE))
+        tile.units.extend((carrier, fast_cruiser))
+
+        granted_move = use_saar_agent(saar, sol, board, carrier.unit_id)
+
+        self.assertEqual(fast_cruiser.move_value, granted_move)
+        self.assertFalse(leader_available(saar, 'saaragent'))
+
+    def test_ghost_agent_requires_non_delta_wormhole_and_exhausts_on_use(self):
+        board, ghost, _ = self.game('ghost')
+        tile = next(tile for tile in board.values())
+        tile.definition = replace(tile.definition, wormholes=('DELTA',))
+        with self.assertRaises(ValueError):
+            use_ghost_agent(ghost, tile, board)
+        self.assertTrue(leader_available(ghost, 'ghostagent'))
+
+        tile.definition = replace(tile.definition, wormholes=('GAMMA',))
+        use_ghost_agent(ghost, tile, board)
+        self.assertFalse(leader_available(ghost, 'ghostagent'))
+
     def test_l1z1x_agent_does_not_exhaust_without_mech_in_reinforcements(self):
         board, l1z1x, _ = self.game('l1z1x')
         tile = next(tile for tile in board.values()
@@ -98,6 +129,7 @@ class PokEffectsTests(unittest.TestCase):
                         if unit.owner == 'l1z1x' and unit.kind == 'infantry')
         other = next(candidate for candidate in board.values()
                      if candidate is not tile and candidate.planets)
+        other.command_tokens.add('l1z1x')
         for index in range(4):
             other.units.append(Unit(f'l1z1x-reserve-mech-{index}', 'mech', 'l1z1x',
                                     l1z1x.color_code,
@@ -105,6 +137,32 @@ class PokEffectsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             use_l1z1x_agent(l1z1x, l1z1x, tile, infantry.unit_id, board)
         self.assertTrue(leader_available(l1z1x, 'l1z1xagent'))
+
+    def test_l1z1x_agent_redeploys_mech_from_unlocked_system_when_supply_is_empty(self):
+        board, l1z1x, _ = self.game('l1z1x')
+        tile = next(tile for tile in board.values()
+                    if any(unit.owner == 'l1z1x' and unit.kind == 'infantry'
+                           for unit in tile.units))
+        infantry = next(unit for unit in tile.units
+                        if unit.owner == 'l1z1x' and unit.kind == 'infantry')
+        other = next(candidate for candidate in board.values()
+                     if candidate is not tile and candidate.planets)
+        mechs = []
+        for index in range(4):
+            mech = Unit(f'l1z1x-deploy-mech-{index}', 'mech', 'l1z1x',
+                        l1z1x.color_code,
+                        UnitLocation(Region.PLANET, other.planets[0].planet_id))
+            other.units.append(mech)
+            mechs.append(mech)
+
+        self.assertTrue(l1z1x_agent_mech_available(l1z1x, tile, board))
+        replacement = use_l1z1x_agent(l1z1x, l1z1x, tile, infantry.unit_id, board)
+
+        self.assertIn(replacement, tile.units)
+        self.assertNotIn(infantry, tile.units)
+        self.assertNotIn(mechs[0], other.units)
+        self.assertEqual(4, sum(unit.owner == 'l1z1x' and unit.kind == 'mech'
+                                 for system in board.values() for unit in system.units))
 
     def test_arborec_agent_replaces_ship_and_keeps_legal_cargo_attached(self):
         board, arborec, sol = self.game('arborec')

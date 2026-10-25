@@ -132,8 +132,16 @@ def use_l1z1x_agent(owner, beneficiary, tile, infantry_id, board):
     mechs = [unit for system in board.values()
              for unit in system.units if unit.owner == beneficiary.faction and
              unit.kind == 'mech']
-    if len(mechs) >= 4:
-        raise ValueError('No mechs remain in that player’s reinforcements')
+    mech_to_redeploy = None
+    if len(mechs) >= UNIT_SUPPLY_LIMITS['mech']:
+        mech_to_redeploy = next((unit for system in board.values()
+                                 if system is not tile and
+                                 beneficiary.faction not in system.command_tokens
+                                 for unit in system.units
+                                 if unit.owner == beneficiary.faction and
+                                 unit.kind == 'mech'), None)
+        if mech_to_redeploy is None:
+            raise ValueError('No mechs remain in that player’s reinforcements or unlocked systems')
     if infantry.location.region == Region.TRANSPORT:
         carrier = next((unit for unit in tile.units
                         if unit.unit_id == infantry.location.carrier_id and
@@ -160,8 +168,49 @@ def use_l1z1x_agent(owner, beneficiary, tile, infantry_id, board):
                                beneficiary.technologies), None))
     exhaust_leader(owner, 'l1z1xagent')
     tile.units.remove(infantry)
+    if mech_to_redeploy is not None:
+        source = next(system for system in board.values()
+                      if mech_to_redeploy in system.units)
+        source.units.remove(mech_to_redeploy)
     tile.units.append(replacement)
     return replacement
+
+
+def l1z1x_agent_mech_available(beneficiary, tile, board):
+    """Whether I48S can place a mech from reinforcements or an unlocked system."""
+    mechs = [unit for system in board.values() for unit in system.units
+             if unit.owner == beneficiary.faction and unit.kind == 'mech']
+    if len(mechs) < UNIT_SUPPLY_LIMITS['mech']:
+        return True
+    return any(system is not tile and beneficiary.faction not in system.command_tokens
+               and any(unit.owner == beneficiary.faction and unit.kind == 'mech'
+                       for unit in system.units)
+               for system in board.values())
+
+
+def use_saar_agent(owner, beneficiary, board, ship_id):
+    """Return the move value Captain Mendosa grants for this activation."""
+    _require_agent(owner, 'saaragent')
+    ship = next((unit for tile in board.values() for unit in tile.units
+                 if unit.unit_id == ship_id), None)
+    if (ship is None or ship.owner != beneficiary.faction or
+            ship.location.region != Region.SPACE or
+            not UNIT_TYPES[ship.kind]['ship']):
+        raise ValueError('Choose one of the active player’s ships on the board')
+    highest = max((unit.move_value for tile in board.values() for unit in tile.units
+                   if unit.location.region == Region.SPACE and
+                   UNIT_TYPES[unit.kind]['ship']), default=0)
+    exhaust_leader(owner, 'saaragent')
+    return highest
+
+
+def use_ghost_agent(owner, tile, board):
+    """Exhaust the Ghost agent to link a wormhole system to all wormholes."""
+    _require_agent(owner, 'ghostagent')
+    if tile.position not in board or not any(
+            str(wormhole).upper() != 'DELTA' for wormhole in tile.wormholes):
+        raise ValueError('The activated system must contain a non-delta wormhole')
+    exhaust_leader(owner, 'ghostagent')
 
 
 def arborec_agent_replacements(target, ship, board):

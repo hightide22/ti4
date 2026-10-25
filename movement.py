@@ -321,6 +321,13 @@ class Session:
     foresight_destinations: tuple[tuple[int, int], ...] = ()
     foresight_affected: list[tuple[tuple[int, int], str]] = field(default_factory=list)
     foresight_next_stage: str | None = None
+    activation_agent_owner: str | None = None
+    activation_agent_alias: str | None = None
+    activation_agent_queue: list[tuple[str, str]] = field(default_factory=list)
+    activation_agent_resolved: bool = False
+    ai_move_plan: object | None = None
+    activation_move_values: dict[str, int] = field(default_factory=dict)
+    ghost_wormhole_adjacency: bool = False
 
     @property
     def choices(self):
@@ -488,6 +495,41 @@ class MovementController:
                     for unit in source.ships + source.passengers}
         session.selected.intersection_update(eligible)
         session.cargo_selected.intersection_update(eligible)
+
+    def refresh_activation_routes(self, session):
+        """Recalculate legal source fleets after an activation movement modifier."""
+        sources = {}
+        gravity_bonus_ids = set()
+        player = session.player
+        for origin in self.board.values():
+            routes = {}
+            ships = []
+            for unit in origin.units:
+                move_value = session.activation_move_values.get(unit.unit_id,
+                                                                 unit.move_value)
+                independent_fighter = (self._independent_fighter(unit, player) or
+                                       (unit.kind == 'fighter' and move_value > 0))
+                if unit.owner != player.faction or not (
+                        (mobile_ship(unit) and unit.kind != 'fighter') or
+                        independent_fighter):
+                    continue
+                path = ((session.target.position,) if origin is session.target else
+                        self.route(origin, session.target, unit, player,
+                                   session=session))
+                if not path and 'gd' in player.technologies:
+                    path = self.route(origin, session.target, unit, player,
+                                      bonus=1, session=session)
+                    if path:
+                        gravity_bonus_ids.add(unit.unit_id)
+                if path:
+                    ships.append(unit)
+                    routes[unit.unit_id] = path
+            if ships:
+                sources[origin.position] = Source(
+                    origin, ships, self._movement_passengers(origin, player), routes)
+        session.sources = sources
+        session.gravity_bonus_ids = gravity_bonus_ids
+        self._refresh_pickup_sources(session)
 
     @staticmethod
     def _selected_passengers(session):
@@ -752,16 +794,24 @@ class MovementController:
         session.rolled_any_dice = True
         return random.randint(1, 10)
 
-    def route(self, origin, target, unit, player, bonus=0, move_bonus=0, ignore_enemy=False):
+    def route(self, origin, target, unit, player, bonus=0, move_bonus=0,
+              ignore_enemy=False, session=None):
         nomad_hero_exit = (player.faction == 'nomad' and unit.kind == 'flagship' and
                            'nomad_command_token_exit' in player.hero_round_flags)
+        move_value = max(unit.move_value,
+                         getattr(session, 'activation_move_values', {}).get(
+                             unit.unit_id, unit.move_value))
         if ((player.faction in origin.command_tokens and not nomad_hero_exit) or
-                origin is target or unit.move_value <= 0):
+                origin is target or move_value <= 0):
             return None
-        slipstream = int(player.faction == 'ghost' and
-                         (origin.number == 51 or bool(set(origin.wormholes) & {'ALPHA', 'BETA'})))
-        budget = (min(unit.move_value, 1) if 'nebula' in origin.anomalies and
-                  player.faction != 'empyrean' else unit.move_value) + bonus + move_bonus + slipstream
+        # Slipstream applies from the Ghosts' actual home system (51), but not
+        # from the Creuss Gate (17), nor to the Hil Colish or gamma wormholes.
+        slipstream = int(player.faction == 'ghost' and origin.number != 17 and
+                         unit.kind != 'flagship' and
+                         (origin.number == 51 or
+                          bool(set(origin.wormholes) & {'ALPHA', 'BETA'})))
+        budget = (min(move_value, 1) if 'nebula' in origin.anomalies and
+                  player.faction != 'empyrean' else move_value) + bonus + move_bonus + slipstream
         queue = deque([(origin, (origin.position,))])
         seen = {(origin.position, self.is_gravity_rift(origin))}
         while queue:
@@ -770,6 +820,16 @@ class MovementController:
             if len(path) - 1 >= budget + rift_bonus:
                 continue
             adjacent = self.neighbors(tile, player.faction)
+            if session and session.ghost_wormhole_adjacency:
+                active = session.target
+                if tile is active:
+                    adjacent.extend(candidate for candidate in self.board.values()
+                                    if candidate is not active and candidate.wormholes and
+                                    candidate not in adjacent)
+                elif tile.wormholes and any(str(w).upper() != 'DELTA'
+                                            for w in active.wormholes):
+                    if active not in adjacent:
+                        adjacent.append(active)
             if player.faction == 'nomad' and unit.kind == 'flagship':
                 adjacent.extend(candidate for candidate in self.board.values()
                                 if candidate is not tile and candidate not in adjacent and
@@ -2632,10 +2692,17 @@ class MovementController:
             session.fighter_combat_modifiers.clear()
 
     def resolve_harrow(self, session):
-        if not any(unit.owner == 'l1z1x' and unit.location.region == Region.SPACE and
-                   capital_ship(unit) for unit in session.target.units):
+        if session.player.faction != 'l1z1x':
             return
         planet_id = session.combat_planet_id
+        has_bombarder = any(
+            unit.owner == 'l1z1x' and unit_profile(unit).get('bombardHitsOn') and
+            ((unit.location.region == Region.SPACE and capital_ship(unit)) or
+             (unit.kind == 'mech' and unit.location.region == Region.PLANET and
+              unit.location.planet_id != planet_id))
+            for unit in session.target.units)
+        if not has_bombarder:
+            return
         defenders = [unit for unit in session.target.units if unit.owner != 'l1z1x' and
                      self.ground_combatant(unit) and unit.location.region == Region.PLANET and
                      unit.location.planet_id == planet_id]
@@ -2644,12 +2711,16 @@ class MovementController:
                                 unit_profile(unit).get('planetaryShield')
                                 for unit in session.target.units):
             return
-        ships = [unit for unit in session.target.units if unit.owner == 'l1z1x' and
-                 unit.location.region == Region.SPACE and capital_ship(unit) and
-                 unit_profile(unit).get('bombardHitsOn')]
+        bombarding_units = [unit for unit in session.target.units
+                            if unit.owner == 'l1z1x' and
+                            unit_profile(unit).get('bombardHitsOn') and
+                            ((unit.location.region == Region.SPACE and capital_ship(unit)) or
+                             (unit.kind == 'mech' and
+                              unit.location.region == Region.PLANET and
+                              unit.location.planet_id != planet_id))]
         hits = 0
-        for ship in ships:
-            profile = unit_profile(ship)
+        for unit in bombarding_units:
+            profile = unit_profile(unit)
             threshold = int(profile['bombardHitsOn'])
             dice = int(profile.get('bombardDieCount') or 1)
             hits += sum(self.roll_d10(session) >= threshold for _ in range(dice))

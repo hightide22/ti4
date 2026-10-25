@@ -271,6 +271,16 @@ class GameAI:
                     w.frame_player_systems(turn.active_player)
             return
         if w.movement.session:
+            session = w.movement.session
+            if (getattr(w.leader_panel, 'open', False) and
+                    getattr(w.leader_panel, 'reaction_owner_faction', None)):
+                return
+            if not session.activation_agent_resolved:
+                if self.resolve_activation_agent_window(session):
+                    return
+            if session.ai_move_plan is not None:
+                self.apply_activation_plan(session)
+                return
             self.resolve_movement()
             advance = getattr(w, 'advance_hero_frontier', None)
             if advance:
@@ -711,14 +721,137 @@ class GameAI:
         _, target_position, source_position = move[:3]
         movement = self.window.movement
         session = movement.activate(player, target_position)
+        session.ai_move_plan = move
+        prompt = getattr(self.window, 'prompt_activation_agent', None)
+        if prompt is None:
+            # The lightweight AI harness has no UI reaction window.
+            session.activation_agent_resolved = True
+            self.apply_activation_plan(session)
+        else:
+            prompt(session)
+        self.window.frame_action_route(source_position, target_position)
+        self.focus_positions = (source_position, target_position)
+        self.activation_flash_position = target_position
+        self.activation_flash_duration = 1.3 / self.speed
+        self.activation_flash_remaining = self.activation_flash_duration
+        self.activation_flash_route = None
+        self.window.movement_panel.reset()
+
+    def resolve_activation_agent_window(self, session):
+        """Resolve the active activation agent, pausing for a human owner."""
+        from leaders import leader_available
+        from leader_effects import (use_ghost_agent, use_l1z1x_agent,
+                                    use_saar_agent, l1z1x_agent_mech_available)
+
+        movement = self.window.movement
+        if not session.activation_agent_owner:
+            prompt = getattr(self.window, 'prompt_activation_agent', None)
+            if prompt is None:
+                session.activation_agent_resolved = True
+                return False
+            if prompt(session):
+                return True
+            if session.activation_agent_resolved:
+                return False
+        faction = session.activation_agent_owner
+        alias = session.activation_agent_alias
+        owner = movement.faction_player(faction) if faction else None
+        player = session.player
+        if owner is None or not leader_available(owner, alias):
+            self.window.finish_activation_agent_reaction(session)
+            return self.resolve_activation_agent_window(session) if not session.activation_agent_resolved else False
+        if not self.is_bot(owner):
+            prompt = getattr(self.window, 'prompt_activation_agent', None)
+            return bool(prompt and prompt(session))
+
+        board = self.window.board
+        if alias == 'l1z1xagent':
+            if not l1z1x_agent_mech_available(player, session.target, board):
+                targets = []
+            else:
+                targets = [unit for unit in session.target.units
+                           if unit.owner == player.faction and unit.kind == 'infantry' and
+                           unit.location.region in (Region.PLANET, Region.TRANSPORT)]
+            targets.sort(key=lambda unit: (unit.location.region != Region.PLANET,
+                                           unit.location.planet_id or '', unit.unit_id))
+            for infantry in targets:
+                try:
+                    replacement = use_l1z1x_agent(owner, player, session.target,
+                                                  infantry.unit_id, board)
+                except ValueError:
+                    continue
+                if (session.ai_move_plan is not None and
+                        infantry.unit_id in session.ai_move_plan.passengers):
+                    session.ai_move_plan = session.ai_move_plan._replace(
+                        passengers=tuple(replacement.unit_id if unit_id == infantry.unit_id
+                                         else unit_id
+                                         for unit_id in session.ai_move_plan.passengers))
+                movement.refresh_activation_routes(session)
+                self.report(owner, f'I48S replaced infantry in {session.target.name} with a mech.', .3)
+                break
+        elif alias == 'ghostagent':
+            before = {unit_id: route for source in session.sources.values()
+                      for unit_id, route in source.routes.items()}
+            session.ghost_wormhole_adjacency = True
+            movement.refresh_activation_routes(session)
+            after = {unit_id: route for source in session.sources.values()
+                     for unit_id, route in source.routes.items()}
+            useful = any(unit_id not in before or len(route) < len(before[unit_id])
+                         for unit_id, route in after.items())
+            if useful:
+                use_ghost_agent(owner, session.target, board)
+                self.report(owner, f'Emissary Taivra opened wormhole routes to {session.target.name}.', .3)
+            else:
+                session.ghost_wormhole_adjacency = False
+                movement.refresh_activation_routes(session)
+        elif alias == 'saaragent':
+            highest = max((unit.move_value for tile in board.values() for unit in tile.units
+                           if unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']),
+                          default=0)
+            ships = sorted((unit for tile in board.values() for unit in tile.units
+                            if unit.owner == player.faction and
+                            unit.location.region == Region.SPACE and
+                            UNIT_TYPES[unit.kind]['ship']), key=lambda unit: unit.unit_id)
+            for ship in ships:
+                old_value = session.activation_move_values.get(ship.unit_id, ship.move_value)
+                if highest <= old_value:
+                    continue
+                before = next((source.routes[ship.unit_id]
+                               for source in session.sources.values()
+                               if ship.unit_id in source.routes), None)
+                session.activation_move_values[ship.unit_id] = highest
+                movement.refresh_activation_routes(session)
+                after = next((source.routes[ship.unit_id]
+                              for source in session.sources.values()
+                              if ship.unit_id in source.routes), None)
+                if after and (before is None or len(after) < len(before)):
+                    use_saar_agent(owner, player, board, ship.unit_id)
+                    self.report(owner, f'Captain Mendosa boosted a {ship.kind} to move {highest}.', .3)
+                    break
+                session.activation_move_values.pop(ship.unit_id, None)
+                movement.refresh_activation_routes(session)
+
+        self.window.finish_activation_agent_reaction(session)
+        if session.activation_agent_resolved:
+            return False
+        next_owner = movement.faction_player(session.activation_agent_owner)
+        if next_owner and self.is_bot(next_owner):
+            return self.resolve_activation_agent_window(session)
+        return bool(next_owner)
+
+    def apply_activation_plan(self, session):
+        """Apply the precomputed movement after all activation reactions resolve."""
+        movement = self.window.movement
+        move = session.ai_move_plan
+        session.ai_move_plan = None
         try:
             if move.flank_speed:
-                index = next((index for index, card in enumerate(player.action_cards)
+                index = next((index for index, card in enumerate(session.player.action_cards)
                               if canonical_action_card(card) == 'flank_speed' and
-                              self.window.action_cards.can_play(player.faction, card, session)), None)
+                              self.window.action_cards.can_play(session.player.faction, card, session)), None)
                 if index is None:
                     raise MovementError('Flank Speed was unavailable for the planned route.')
-                self.window.action_cards.play(player, index)
+                self.window.action_cards.play(session.player, index)
             choices = session.choices
             for unit_id in move.ships + move.passengers:
                 if unit_id not in choices:
@@ -727,27 +860,26 @@ class GameAI:
         except (MovementError, ValueError):
             movement.cancel()
             raise
+        source_position = move[2]
+        target_position = move[1]
         self.window.frame_action_route(source_position, target_position)
         self.focus_positions = (source_position, target_position)
-        self.activation_flash_position = target_position
-        self.activation_flash_duration = 1.3 / self.speed
-        self.activation_flash_remaining = self.activation_flash_duration
         source = session.sources.get(source_position)
         selected_routes = (source.routes.get(unit.unit_id) for unit in source.ships
                            if unit.unit_id in session.selected) if source else ()
         self.activation_flash_route = next((route for route in selected_routes if route), None)
-        self.window.movement_panel.reset()
         ships = sum(session.choices[unit_id].kind not in ('fighter', 'infantry', 'mech')
                     for unit_id in session.selected)
         cargo = len(session.selected) - ships
         target = session.target.name
         if not move.ships and not move.passengers:
-            self.report(player, f'Activated {target} to produce units.', .22)
+            self.report(session.player, f'Activated {target} to produce units.', .22)
         else:
             odds = move.odds or (None, None)
             chance = next((value for value in odds if value is not None), None)
             forecast = f' · win chance ~{chance:.0%}' if chance is not None else ''
-            self.report(player, f'Activated {target}: {ships} ships, {cargo} passengers{forecast}.', .22)
+            self.report(session.player,
+                        f'Activated {target}: {ships} ships, {cargo} passengers{forecast}.', .22)
 
     def _secondary_worthwhile(self, ctl, session):
         player = session.player

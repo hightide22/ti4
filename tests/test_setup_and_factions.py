@@ -206,6 +206,66 @@ class FactionAbilityTests(unittest.TestCase):
         self.assertEqual(sum(unit.owner == 'sol' and unit.kind == 'infantry' and
                              unit.location.planet_id == planet.planet_id for unit in target.units), before - 1)
 
+    def test_l1z1x_harrow_does_not_trigger_when_l1_is_not_active_player(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('l1z1x', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        l1z1x = next(player for player in players if player.faction == 'l1z1x')
+        sol = next(player for player in players if player.faction == 'sol')
+        target = next(tile for tile in board.values() if tile.planets and not tile.units)
+        planet = target.planets[0]
+        target.units.extend((
+            Unit('inactive-harrow-dread', 'dreadnought', 'l1z1x', l1z1x.color_code,
+                 UnitLocation(Region.SPACE)),
+            Unit('inactive-harrow-defender', 'infantry', 'sol', sol.color_code,
+                 UnitLocation(Region.PLANET, planet.planet_id)),
+        ))
+        movement = MovementController(board, players)
+        session = Session(sol, target, {}, Snapshot.capture(board, sol, players),
+                          combat_type='ground', combat_planet_id=planet.planet_id,
+                          combat_factions=('sol', 'l1z1x'), combat_round=1)
+        before = sum(unit.owner == 'sol' and unit.kind == 'infantry'
+                     for unit in target.units)
+
+        with patch('movement.random.randint', return_value=10) as roll:
+            movement.resolve_harrow(session)
+
+        roll.assert_not_called()
+        self.assertEqual(before, sum(unit.owner == 'sol' and unit.kind == 'infantry'
+                                     for unit in target.units))
+
+    def test_l1z1x_harrow_uses_an_annihilator_committed_to_another_planet(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('l1z1x', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        l1z1x = next(player for player in players if player.faction == 'l1z1x')
+        sol = next(player for player in players if player.faction == 'sol')
+        target = next(tile for tile in board.values() if len(tile.planets) > 1 and not tile.units)
+        active_planet, other_planet = target.planets[:2]
+        target.units.extend((
+            Unit('off-planet-annihilator', 'mech', 'l1z1x', l1z1x.color_code,
+                 UnitLocation(Region.PLANET, other_planet.planet_id),
+                 profile_id='l1z1x_mech'),
+            Unit('annihilator-harrow-attacker', 'infantry', 'l1z1x', l1z1x.color_code,
+                 UnitLocation(Region.PLANET, active_planet.planet_id)),
+            Unit('annihilator-harrow-defender', 'infantry', 'sol', sol.color_code,
+                 UnitLocation(Region.PLANET, active_planet.planet_id)),
+        ))
+        movement = MovementController(board, players)
+        session = Session(l1z1x, target, {}, Snapshot.capture(board, l1z1x, players),
+                          combat_type='ground', combat_planet_id=active_planet.planet_id,
+                          combat_factions=('l1z1x', 'sol'), combat_round=1)
+        before = sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                     unit.location.planet_id == active_planet.planet_id
+                     for unit in target.units)
+
+        with patch('movement.random.randint', return_value=10):
+            movement.resolve_harrow(session)
+
+        self.assertEqual(before - 1, sum(
+            unit.owner == 'sol' and unit.kind == 'infantry' and
+            unit.location.planet_id == active_planet.planet_id for unit in target.units))
+
     def test_muaat_star_forge_spends_strategy_token_and_is_reversible(self):
         config, board = load_board(ROOT / 'maps/four_player.json',
                                    ('muaat', 'sol', 'jolnar', 'hacan'))

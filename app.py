@@ -44,7 +44,8 @@ from leaders import (leader_available, ready_leaders, refresh_leader_unlocks,
 from leader_effects import (clear_round_hero_effects, use_cabal_hero,
                             use_arborec_agent, use_xxcha_agent,
                             use_empyrean_hero, use_keleres_harka_hero,
-                            use_l1z1x_agent, use_naaz_agent, use_naaz_hero, use_nomad_hero,
+                            use_ghost_agent, use_l1z1x_agent, use_naaz_agent, use_naaz_hero,
+                            use_nomad_hero, use_saar_agent, l1z1x_agent_mech_available,
                             use_titans_hero)
 from pok_factions import keleres_council_patronage, naaz_fabrication
 
@@ -823,6 +824,73 @@ class BoardWindow(arcade.Window):
             outcome = self.exploration.explore_frontier(player, self.board[position])
             self.movement.exploration_outcomes.append((player.faction, outcome))
 
+    def prompt_activation_agent(self, session):
+        """Open printed agent windows triggered by activating this system."""
+        from leaders import leader_available
+        if not session.activation_agent_queue and not session.activation_agent_resolved:
+            active = session.player
+            mahact = next((player for player in self.player_panel.players
+                           if player.faction == 'mahact'), None)
+            # Il Na Viroset suppresses all "when/after a player activates" abilities
+            # for a Mahact activation.
+            if mahact and active.faction == 'mahact' and leader_available(
+                    mahact, 'mahactcommander'):
+                session.activation_agent_resolved = True
+                return False
+            owners = {player.faction: player for player in self.player_panel.players}
+            infantry = any(unit.owner == active.faction and unit.kind == 'infantry' and
+                           unit.location.region in (Region.PLANET, Region.TRANSPORT)
+                           for unit in session.target.units)
+            active_ships = any(unit.owner == active.faction and
+                               UNIT_TYPES[unit.kind]['ship'] and
+                               unit.location.region == Region.SPACE
+                               for tile in self.board.values() for unit in tile.units)
+            for alias, faction, eligible in (
+                    ('saaragent', 'saar', active_ships),
+                    ('ghostagent', 'ghost', any(str(wormhole).upper() != 'DELTA'
+                                                for wormhole in session.target.wormholes)),
+                    ('l1z1xagent', 'l1z1x', infantry and
+                     l1z1x_agent_mech_available(active, session.target, self.board))):
+                owner = owners.get(faction)
+                if owner and eligible and leader_available(owner, alias):
+                    session.activation_agent_queue.append((faction, alias))
+        if not session.activation_agent_queue:
+            session.activation_agent_owner = None
+            session.activation_agent_alias = None
+            session.activation_agent_resolved = True
+            return False
+        faction, alias = session.activation_agent_queue[0]
+        owner = next((player for player in self.player_panel.players
+                      if player.faction == faction), None)
+        if owner is None:
+            session.activation_agent_queue.pop(0)
+            return self.prompt_activation_agent(session)
+        session.activation_agent_owner = faction
+        session.activation_agent_alias = alias
+        if self.ai.is_bot(owner):
+            return False
+        self.leader_panel.open_for_reaction(owner, alias)
+        return True
+
+    def skip_activation_agent_window(self):
+        """Decline the pending agent reaction and resume the activation."""
+        session = self.movement.session
+        if session and session.activation_agent_owner:
+            if session.activation_agent_queue:
+                session.activation_agent_queue.pop(0)
+            session.activation_agent_owner = None
+            session.activation_agent_alias = None
+            self.leader_panel.close()
+            self.prompt_activation_agent(session)
+
+    def finish_activation_agent_reaction(self, session):
+        if session.activation_agent_queue:
+            session.activation_agent_queue.pop(0)
+        session.activation_agent_owner = None
+        session.activation_agent_alias = None
+        self.leader_panel.close()
+        self.prompt_activation_agent(session)
+
     def resolve_leader_action(self, command):
         if not command:
             return
@@ -840,14 +908,16 @@ class BoardWindow(arcade.Window):
         if command[0] != 'use':
             return
         alias = command[1]
-        player = self.turn_order.active_player
+        player = next((candidate for candidate in self.player_panel.players
+                       if candidate.faction == self.leader_panel.reaction_owner_faction),
+                      self.turn_order.active_player)
         if alias == 'l1z1xagent':
             session = self.movement.session
             if (player is None or player.faction != 'l1z1x' or session is None or
-                    session.player is not player or session.stage != 'movement'):
+                    session.stage != 'movement'):
                 self.movement_error = 'I48S can be used after you activate a system.'
                 return
-            snapshot = Snapshot.capture(self.board, player, self.player_panel.players,
+            snapshot = Snapshot.capture(self.board, session.player, self.player_panel.players,
                                         self.action_cards, self.exploration)
             try:
                 use_l1z1x_agent(player, session.player, session.target,
@@ -856,8 +926,51 @@ class BoardWindow(arcade.Window):
                 snapshot.restore()
                 self.movement_error = str(error)
                 return
+            self.movement.refresh_activation_routes(session)
             self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
-            self.leader_panel.close()
+            self.finish_activation_agent_reaction(session)
+            self.movement_error = None
+            return
+        if alias == 'ghostagent':
+            session = self.movement.session
+            if (player is None or player.faction != 'ghost' or session is None or
+                    session.stage != 'movement'):
+                self.movement_error = 'The Ghost agent can be used after a system with a wormhole is activated.'
+                return
+            snapshot = Snapshot.capture(self.board, session.player, self.player_panel.players,
+                                        self.action_cards, self.exploration)
+            try:
+                use_ghost_agent(player, session.target, self.board)
+                session.ghost_wormhole_adjacency = True
+                self.movement.refresh_activation_routes(session)
+            except (ValueError, KeyError) as error:
+                snapshot.restore()
+                self.movement_error = str(error)
+                return
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            self.finish_activation_agent_reaction(session)
+            self.movement_error = None
+            return
+        if alias == 'saaragent':
+            session = self.movement.session
+            if (player is None or player.faction != 'saar' or session is None or
+                    session.stage != 'movement'):
+                self.movement_error = 'The Saar agent can be used when a player activates a system.'
+                return
+            snapshot = Snapshot.capture(self.board, session.player, self.player_panel.players,
+                                        self.action_cards, self.exploration)
+            try:
+                move_value = use_saar_agent(player, session.player, self.board, command[2])
+                ship = next(unit for tile in self.board.values() for unit in tile.units
+                            if unit.unit_id == command[2])
+                session.activation_move_values[ship.unit_id] = move_value
+                self.movement.refresh_activation_routes(session)
+            except (ValueError, KeyError, StopIteration) as error:
+                snapshot.restore()
+                self.movement_error = str(error)
+                return
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            self.finish_activation_agent_reaction(session)
             self.movement_error = None
             return
         if alias in ('arborecagent', 'xxchaagent'):
@@ -1379,15 +1492,29 @@ class BoardWindow(arcade.Window):
             if owner is not None and (self.smoke or not self.ai.is_bot(owner)):
                 self.exploration_panel.draw(self, owner, self.exploration)
         if self.leader_panel.open and self.turn_order.active_player:
-            player = self.turn_order.active_player
+            player = next((candidate for candidate in self.player_panel.players
+                           if candidate.faction == self.leader_panel.reaction_owner_faction),
+                          self.turn_order.active_player)
             available = set()
             if (player.faction == 'naaz' and self.turn_order.action_used and
                     self.movement.session is None and not self.strategy.session):
                 available.add('naazagent')
             session = self.movement.session
+            if (session is not None and session.stage == 'movement' and
+                    player.faction == session.activation_agent_owner and
+                    self.leader_panel.selected_id == session.activation_agent_alias):
+                if session.activation_agent_alias == 'saaragent':
+                    available.add('saaragent')
+                elif session.activation_agent_alias == 'ghostagent':
+                    available.add('ghostagent')
             if (player.faction == 'l1z1x' and session is not None and
-                    session.player is player and session.stage == 'movement' and
-                    any(unit.owner == player.faction and unit.kind == 'infantry'
+                    session.stage == 'movement' and
+                    player.faction == session.activation_agent_owner and
+                    session.activation_agent_alias == 'l1z1xagent' and
+                    leader_available(player, 'l1z1xagent') and
+                    l1z1x_agent_mech_available(session.player, session.target, self.board) and
+                    any(unit.owner == session.player.faction and unit.kind == 'infantry' and
+                        unit.location.region in (Region.PLANET, Region.TRANSPORT)
                         for unit in session.target.units)):
                 available.add('l1z1xagent')
             if (not self.movement.session and not self.strategy.session and
@@ -2671,8 +2798,13 @@ class BoardWindow(arcade.Window):
                 if action is None and self.leader_panel.drag_header(x, y):
                     self.dragging_modal = 'leader'
                 else:
+                    reaction = self.leader_panel.reaction_owner_faction
                     self.resolve_leader_action(self.leader_panel.handle_click(
-                        x, y, self.turn_order.active_player))
+                        x, y, next((candidate for candidate in self.player_panel.players
+                                    if candidate.faction == reaction),
+                                   self.turn_order.active_player)))
+                    if action == ('close',) and reaction:
+                        self.skip_activation_agent_window()
             return
         if self.legendary_modal:
             if button == arcade.MOUSE_BUTTON_LEFT:
@@ -3295,9 +3427,10 @@ class BoardWindow(arcade.Window):
                         raise MovementError('Allocate all new command tokens before taking an action.')
                     if not self.turn_order.can_take_action and not self.smoke:
                         raise MovementError('Your action is complete. Pass the turn to continue.')
-                    self.movement.activate(self.player_panel.player, picked)
+                    session = self.movement.activate(self.player_panel.player, picked)
                     self.movement_panel.reset()
                     self.movement_error = None
+                    self.prompt_activation_agent(session)
                 except MovementError as error:
                     self.movement_error = str(error)
                 self.last_click = (None, 0.0)
@@ -3461,7 +3594,10 @@ class BoardWindow(arcade.Window):
             return
         if self.leader_panel.open:
             if symbol == arcade.key.ESCAPE:
-                self.leader_panel.close()
+                if self.leader_panel.reaction_owner_faction:
+                    self.skip_activation_agent_window()
+                else:
+                    self.leader_panel.close()
             return
         if self.legendary_modal:
             if symbol == arcade.key.ESCAPE:
