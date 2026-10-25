@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from board import RESOURCES
 from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles
+from unit_supply import can_place_infantry
 
 
 COLORS = {'B': 'PROPULSION', 'G': 'BIOTIC', 'R': 'WARFARE', 'Y': 'CYBERNETIC'}
@@ -218,22 +219,25 @@ def restore_infantry_on_cards(player, board):
     options = [(tile, planet) for tile in board.values() for planet in tile.planets
                if planet.faction_homeworld == player.faction and
                tile.planet_owners.get(planet.planet_id) == player.faction]
+    count = sum(player.infantry_on_cards.values())
     if not options:
+        # Infantry II survivors return to reinforcements if the player controls
+        # no planet in their home system at the start of their turn.
+        player.infantry_on_cards.clear()
+        return count
+    destination = next(((tile, planet) for tile, planet in options
+                        if can_place_infantry(player, board, tile,
+                                              UnitLocation(Region.PLANET, planet.planet_id))), None)
+    if destination is None:
+        # The return effect resolves now. Infantry tokens without an available
+        # plastic anchor cannot remain on the technology card for a later turn.
+        player.infantry_on_cards.clear()
         return 0
-    tile, planet = options[0]
-    placed = sum(unit.owner == player.faction and unit.kind == 'infantry'
-                 for system in board.values() for unit in system.units)
-    count = min(sum(player.infantry_on_cards.values()), max(0, 12 - placed))
+    tile, planet = destination
     for _ in range(count):
         tile.units.append(Unit(f'{player.faction}-returned-{uuid4().hex}', 'infantry',
                                player.faction, player.color_code,
                                UnitLocation(Region.PLANET, planet.planet_id),
                                profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
-    remaining = count
-    for alias in tuple(player.infantry_on_cards):
-        taken = min(remaining, player.infantry_on_cards[alias])
-        remaining -= taken
-        player.infantry_on_cards[alias] -= taken
-        if not player.infantry_on_cards[alias]:
-            del player.infantry_on_cards[alias]
+    player.infantry_on_cards.clear()
     return count

@@ -11,7 +11,7 @@ from uuid import uuid4
 from player import PlanetCard
 from leaders import leader_available
 from units import Region, Unit, UnitLocation, UNIT_TYPES, mobile_ship, unit_profile, unit_profiles
-from unit_supply import INFANTRY_SUPPLY, infantry_count, infantry_remaining
+from unit_supply import can_place_infantry, can_transfer_infantry
 from technology import (production_allowed, upgrade_profile, copy_technology,
                         technology_catalog, is_unit_upgrade)
 
@@ -975,11 +975,11 @@ class MovementController:
             owner = self.faction_player(structure.owner)
             if owner is None or 'md' not in owner.technologies:
                 continue
-            if infantry_remaining(owner, self.board) <= 0:
-                continue
             location = (UnitLocation(Region.PLANET, structure.location.planet_id)
                         if structure.location.region == Region.PLANET else
                         UnitLocation(Region.TRANSPORT, carrier_id=structure.unit_id))
+            if not can_place_infantry(owner, self.board, tile, location):
+                continue
             tile.units.append(Unit(f'{owner.faction}-magen-{uuid4().hex}', 'infantry',
                                    owner.faction, owner.color_code, location,
                                    profile_id=(upgrade_profile(owner, 'infantry') or {}).get('id')))
@@ -1106,15 +1106,16 @@ class MovementController:
                        any(planet.planet_id == planet_id for planet in tile.planets)), None)
         if target is None:
             raise MovementError('Choose a planet you control')
-        if infantry_remaining(player, self.board) < 2:
-            raise MovementError('Orbital Drop needs 2 infantry in your reinforcements')
+        location = UnitLocation(Region.PLANET, planet_id=planet_id)
+        if not can_place_infantry(player, self.board, target, location):
+            raise MovementError('No plastic infantry remains to anchor this planet.')
         snapshot = Snapshot.capture(self.board, player, self.players,
                                     exploration=self.exploration)
         player.command_pools['strategic'] -= 1
         for _ in range(2):
             target.units.append(Unit(f'{player.faction}-orbital-{uuid4().hex}', 'infantry',
                                      player.faction, player.color_code,
-                                     UnitLocation(Region.PLANET, planet_id=planet_id),
+                                     location,
                                      profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
         self.history.append(UndoEntry(snapshot))
         return target
@@ -1156,15 +1157,16 @@ class MovementController:
     def mitosis(self, player, planet_id):
         if player.faction != 'arborec':
             raise MovementError('Mitosis is an Arborec faction ability')
-        if infantry_remaining(player, self.board) <= 0:
-            raise MovementError('No infantry remain in your reinforcements')
         target = next((tile for tile in self.board.values()
                        if tile.planet_owners.get(planet_id) == player.faction and
                        any(planet.planet_id == planet_id for planet in tile.planets)), None)
         if target is None:
             raise MovementError('Choose a planet you control')
+        location = UnitLocation(Region.PLANET, planet_id)
+        if not can_place_infantry(player, self.board, target, location):
+            raise MovementError('No plastic infantry remains to anchor this planet.')
         target.units.append(Unit(f'arborec-mitosis-{uuid4().hex}', 'infantry', player.faction,
-                                 player.color_code, UnitLocation(Region.PLANET, planet_id),
+                                 player.color_code, location,
                                  profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
         return target
 
@@ -1264,6 +1266,11 @@ class MovementController:
                     sum(candidate is unit for candidate in origin.units) != 1):
                 raise MovementError('A selected unit is no longer available in its source system. Cancel and reactivate.')
             transferred_ids.add(unit.unit_id)
+        if not can_transfer_infantry(
+                session.player, self.board,
+                [(origin, unit, session.target, location)
+                 for origin, unit, location in transfers]):
+            raise MovementError('Infantry tokens need a plastic infantry anchor in each planet or space area.')
         session.movement_checkpoint = SessionCheckpoint.capture(self, session, 'movement')
         session.gravity_rift_log.clear()
         lost_ships = set()
@@ -1319,6 +1326,12 @@ class MovementController:
                 not any(unit.owner == 'naalu' and unit.location.region == Region.SPACE and
                         UNIT_TYPES[unit.kind]['ship'] for unit in session.target.units)):
             return []
+        ships = [unit for unit in session.target.units if unit.owner == 'naalu' and
+                 unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+        ship_ids = {unit.unit_id for unit in ships}
+        moving = ships + [unit for unit in session.target.units
+                          if unit.owner == 'naalu' and unit.location.region == Region.TRANSPORT and
+                          unit.location.carrier_id in ship_ids]
         options = []
         for tile in self.neighbors(session.target, 'naalu'):
             if 'naalu' in tile.command_tokens:
@@ -1326,7 +1339,10 @@ class MovementController:
             if any(unit.owner != 'naalu' and unit.location.region == Region.SPACE and
                    UNIT_TYPES[unit.kind]['ship'] for unit in tile.units):
                 continue
-            options.append(tile)
+            if can_transfer_infantry(
+                    naalu, self.board,
+                    [(session.target, unit, tile, unit.location) for unit in moving]):
+                options.append(tile)
         return sorted(options, key=lambda tile: (tile.name, tile.position))
 
     def resolve_foresight(self, position=None):
@@ -1350,6 +1366,10 @@ class MovementController:
             moving = ships + [unit for unit in session.target.units
                               if unit.owner == 'naalu' and unit.location.region == Region.TRANSPORT and
                               unit.location.carrier_id in ship_ids]
+            if not can_transfer_infantry(
+                    naalu, self.board,
+                    [(session.target, unit, tile, unit.location) for unit in moving]):
+                raise MovementError('Infantry tokens need a plastic infantry anchor at the destination.')
             for unit in moving:
                 session.target.units.remove(unit)
                 tile.units.append(unit)
@@ -1949,6 +1969,10 @@ class MovementController:
         ship_ids = {unit.unit_id for unit in ships}
         retreating = ships + [unit for unit in session.target.units if unit.location.region == Region.TRANSPORT and
                               unit.location.carrier_id in ship_ids]
+        if not can_transfer_infantry(
+                self.faction_player(session.retreat_announced), self.board,
+                [(session.target, unit, destination, unit.location) for unit in retreating]):
+            raise MovementError('Infantry tokens need a plastic infantry anchor at the retreat destination.')
         for unit in retreating:
             session.target.units.remove(unit)
             destination.units.append(unit)
@@ -2325,13 +2349,15 @@ class MovementController:
                 influence += self.planet_influence(card.planet)
                 if influence >= 2:
                     break
-            if candidates and influence >= 2 and infantry_remaining(yin, self.board) > 0:
+            infantry_location = UnitLocation(Region.PLANET, planet_id)
+            if (candidates and influence >= 2 and
+                    can_place_infantry(yin, self.board, session.target, infantry_location)):
                 for card in payment:
                     card.exhausted = True
                 session.target.units.remove(candidates[0])
                 session.target.units.append(Unit(f'yin-indoctrination-{uuid4().hex}', 'infantry',
                                                  'yin', yin.color_code,
-                                                 UnitLocation(Region.PLANET, planet_id),
+                                                 infantry_location,
                                                  profile_id=(upgrade_profile(yin, 'infantry') or {}).get('id')))
                 from leaders import notify_leader_event
                 notify_leader_event(yin, 'used_faction_ability')
@@ -2931,6 +2957,28 @@ class MovementController:
                              if card.planet.planet_id in session.production_planets)
         return card_resources + session.trade_goods_to_spend
 
+    def _production_infantry_location(self, session):
+        """Return the shared destination used for infantry from this production."""
+        if not session.production_sites:
+            return None
+        site_planet = session.production_sites[0][0]
+        owned_planets = [planet.planet_id for planet in session.target.planets
+                         if session.target.planet_owners.get(planet.planet_id) == session.player.faction
+                         and (self.exploration is None or not (
+                             self.exploration.planet_is_blocked(planet.planet_id) or
+                             planet.planet_id in self.exploration.destroyed_planets))]
+        planet_id = site_planet if site_planet in owned_planets else next(iter(owned_planets), None)
+        if planet_id is not None:
+            return UnitLocation(Region.PLANET, planet_id=planet_id)
+        if session.player.faction == 'saar':
+            factory = next((unit for unit in session.target.units
+                            if unit.owner == 'saar' and unit.kind == 'spacedock' and
+                            unit.location.region == Region.SPACE and
+                            unit_profile(unit).get('productionValue') is not None), None)
+            if factory:
+                return UnitLocation(Region.TRANSPORT, carrier_id=factory.unit_id)
+        return None
+
     def adjust_production(self, kind, delta):
         session = self.session
         if not session or session.stage != 'production':
@@ -2963,15 +3011,13 @@ class MovementController:
                                       unit_profile(unit).get('productionValue')
                                       for unit in session.target.units)
                 addition = min(addition, max(0, letani_capacity - current))
+            if addition > remaining or addition <= 0:
+                return
             if kind == 'infantry':
-                supply_room = infantry_remaining(session.player, self.board) - current
-                if supply_room <= 0:
-                    raise MovementError('No infantry remain in your reinforcements.')
-                addition = min(addition, supply_room)
-            if addition > remaining:
-                return
-            if addition <= 0:
-                return
+                location = self._production_infantry_location(session)
+                if (location is None or not can_place_infantry(
+                        session.player, self.board, session.target, location)):
+                    raise MovementError('No plastic infantry anchor is available for another area.')
             session.production_choices[kind] = current + addition
         elif current:
             updated = current - 1
@@ -3012,9 +3058,11 @@ class MovementController:
             raise MovementError('Production is not active')
         if not session.production_choices:
             raise MovementError('Choose at least one unit or skip production')
-        if (infantry_count(session.player, self.board) +
-                session.production_choices.get('infantry', 0) > INFANTRY_SUPPLY):
-            raise MovementError('Production exceeds your 12 infantry supply.')
+        if session.production_choices.get('infantry', 0):
+            location = self._production_infantry_location(session)
+            if (location is None or not can_place_infantry(
+                    session.player, self.board, session.target, location)):
+                raise MovementError('No plastic infantry anchor is available for another area.')
         if self.production_total(session) > session.production_limit:
             raise MovementError('Production limit exceeded')
         if (self.ships_blocked_by_opponents(session) and
@@ -3159,6 +3207,14 @@ class MovementController:
                 session.custodian_payment_failed = True
                 session.custodian_payment_log.append(
                     'Ground forces assigned to Mecatol Rex remained aboard their ships.')
+        landing_transfers = []
+        for unit in self.landing_forces(session):
+            planet_id = session.landings.get(unit.unit_id)
+            if planet_id is not None:
+                landing_transfers.append((target, unit, target,
+                                          UnitLocation(Region.PLANET, planet_id)))
+        if not can_transfer_infantry(player, self.board, landing_transfers):
+            raise MovementError('Infantry tokens need a plastic infantry anchor on each landing planet.')
         landed_planets = []
         for unit in self.landing_forces(session):
             planet_id = session.landings.get(unit.unit_id)
@@ -3445,10 +3501,11 @@ class MovementController:
                     mahact_gain_fleet_token(mahact, defeated, self.board)
         if winner and self.has_tech(winner, 'dxa'):
             player = self.faction_player(winner)
-            if infantry_remaining(player, self.board) > 0:
+            infantry_location = UnitLocation(Region.PLANET, planet_id)
+            if can_place_infantry(player, self.board, session.target, infantry_location):
                 session.target.units.append(Unit(f'{winner}-dacxive-{uuid4().hex}', 'infantry',
                                                  winner, player.color_code,
-                                                 UnitLocation(Region.PLANET, planet_id),
+                                                 infantry_location,
                                                  profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
         session.ground_planet_index += 1
         while session.ground_planet_index < len(session.ground_planets):
@@ -3545,12 +3602,16 @@ class MovementController:
                  if card.planet.planet_id in owned and
                  card.planet.planet_id not in player.exhausted_legendary_abilities}
         options = {}
-        infantry_out = infantry_count(player, self.board)
         mech_out = sum(unit.owner == player.faction and unit.kind == 'mech'
                        for tile in self.board.values() for unit in tile.units)
-        if 'primor' in ready and infantry_out < 12:
-            options['primor'] = {'infantry': tuple(sorted(owned)),
-                                 'maximum': min(2, 12 - infantry_out)}
+        if 'primor' in ready:
+            destinations = tuple(sorted(
+                planet_id for tile in self.board.values() for planet_id in owned
+                if any(planet.planet_id == planet_id for planet in tile.planets) and
+                can_place_infantry(player, self.board, tile,
+                                   UnitLocation(Region.PLANET, planet_id))))
+            if destinations:
+                options['primor'] = {'infantry': destinations, 'maximum': 2}
         if 'hopesend' in ready:
             choices = {}
             if mech_out < 4:

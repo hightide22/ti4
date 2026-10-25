@@ -14,6 +14,7 @@ from player import command_tokens_in_reinforcements
 from units import (Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles,
                    unit_profile)
 from technology import upgrade_profile
+from unit_supply import can_transfer_infantry
 
 
 UNIT_SUPPLY_LIMITS = {
@@ -53,6 +54,12 @@ def use_argent_agent(owner, beneficiary, board, source_tile, produced_units,
                 unit.kind not in ('infantry', 'mech') or
                 unit not in source_tile.units or planet_id not in planets):
             raise ValueError('Argent agent can relocate only newly produced ground forces')
+    if not can_transfer_infantry(
+            beneficiary, board,
+            [(source_tile, produced[unit_id], planets[planet_id],
+              UnitLocation(Region.PLANET, planet_id))
+             for unit_id, planet_id in destinations.items()]):
+        raise ValueError('Infantry tokens need a plastic infantry anchor on each destination planet.')
     exhaust_leader(owner, 'argentagent')
     for unit_id, planet_id in destinations.items():
         unit = produced[unit_id]
@@ -327,6 +334,12 @@ def use_nomad_mercer(owner, beneficiary, board, active_tile,
            planet_id not in valid_planets
            for unit_id, planet_id in destinations.items() for _, unit in (found[unit_id],)):
         raise ValueError('Mercer requires owned ground forces and controlled planets')
+    if not can_transfer_infantry(
+            beneficiary, board,
+            [(found[unit_id][0], found[unit_id][1], active_tile,
+              UnitLocation(Region.PLANET, planet_id))
+             for unit_id, planet_id in destinations.items()]):
+        raise ValueError('Infantry tokens need a plastic infantry anchor on each destination planet.')
     exhaust_leader(owner, 'nomadagentmercer')
     for unit_id, planet_id in destinations.items():
         tile, unit = found[unit_id]
@@ -410,6 +423,12 @@ def use_mahact_hero(owner, board, source_tile, destination_tile, *, neighbors=No
     cargo = [unit for unit in source_tile.units
              if unit.location.region == Region.TRANSPORT and
              unit.location.carrier_id in carrier_ids]
+    for faction in {unit.owner for unit in cargo if unit.kind == 'infantry'}:
+        if not can_transfer_infantry(
+                faction, board,
+                [(source_tile, unit, destination_tile, unit.location)
+                 for unit in cargo if unit.owner == faction]):
+            raise ValueError('Infantry tokens need a plastic infantry anchor at the destination.')
     for unit in (*moving, *cargo):
         source_tile.units.remove(unit)
         destination_tile.units.append(unit)

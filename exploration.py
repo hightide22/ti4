@@ -21,7 +21,7 @@ from relics import RelicController, RelicOutcome
 from secret_objectives import SecretObjectiveController
 from technology import production_allowed, upgrade_profile
 from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile
-from unit_supply import infantry_remaining
+from unit_supply import can_place_infantry, can_transfer_infantry
 
 
 TRAITS = ('cultural', 'hazardous', 'industrial', 'frontier')
@@ -381,7 +381,8 @@ class ExplorationController:
     def _place_unit(self, player, tile, planet_id, kind):
         if kind not in UNIT_TYPES:
             return False
-        if kind == 'infantry' and infantry_remaining(player, self.board) <= 0:
+        if (kind == 'infantry' and not can_place_infantry(
+                player, self.board, tile, UnitLocation(Region.PLANET, planet_id))):
             return False
         if self.planet_is_blocked(planet_id):
             return False
@@ -403,6 +404,15 @@ class ExplorationController:
             return [{'type': 'fragment', 'alias': alias}]
         if card.resolution == 'attach':
             if alias == 'dmz':
+                displaced = tuple(unit for unit in tile.units
+                                  if unit.location.region == Region.PLANET and
+                                  unit.location.planet_id == planet_id and
+                                  unit.kind in {'infantry', 'mech'})
+                if not can_transfer_infantry(
+                        player, self.board,
+                        [(tile, unit, tile, UnitLocation(Region.SPACE_AREA))
+                         for unit in displaced]):
+                    raise ValueError('Infantry tokens need a plastic infantry anchor in the system space area.')
                 for unit in tuple(tile.units):
                     if unit.location.region != Region.PLANET or unit.location.planet_id != planet_id:
                         continue
@@ -527,8 +537,6 @@ class ExplorationController:
         """Return the payable cost of the single unit in a Freelancers offer."""
         if kind not in movement.PRODUCIBLE_KINDS or not production_allowed(player, kind):
             raise ValueError('This unit cannot be produced with Freelancers.')
-        if kind == 'infantry' and infantry_remaining(player, movement.board) <= 0:
-            raise ValueError('No infantry remain in reinforcements.')
         raw_cost = ceil(movement.unit_cost(kind, player))
         if kind == 'flagship' and player.faction == 'nomad' and \
                 leader_available(player, 'nomadcommander'):
@@ -578,6 +586,8 @@ class ExplorationController:
                 location = UnitLocation(Region.TRANSPORT, carrier_id=dock.unit_id)
             else:
                 raise ValueError('Choose a controlled, available planet in this system.')
+        if kind == 'infantry' and not can_place_infantry(player, self.board, tile, location):
+            raise ValueError('No plastic infantry remains to anchor this planet or system.')
         resources = tuple(resource_planets)
         influence = tuple(influence_planets)
         chosen = resources + influence

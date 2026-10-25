@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from movement import Snapshot, UndoEntry
 from units import Region, UNIT_TYPES, UnitLocation
+from unit_supply import can_transfer_infantry
 
 
 @dataclass
@@ -61,8 +62,12 @@ class TechnologyActions:
                             for unit in tile.units if unit.unit_id == state.selected_unit)
         target = next(tile for tile in self.board.values()
                       if any(planet.planet_id == planet_id for planet in tile.planets))
+        destination = UnitLocation(Region.PLANET, planet_id=planet_id)
+        if not can_transfer_infantry(
+                player, self.board, [(source, unit, target, destination)]):
+            raise ValueError('Infantry tokens need a plastic infantry anchor on the destination planet.')
         source.units.remove(unit)
-        unit.location = UnitLocation(Region.PLANET, planet_id=planet_id)
+        unit.location = destination
         target.units.append(unit)
         state.moved_ids.add(unit.unit_id)
         state.selected_unit = None

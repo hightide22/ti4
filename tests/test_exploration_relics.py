@@ -17,7 +17,7 @@ from relics import RelicController, relic_catalog
 from units import Region, Unit, UnitLocation, layout_units, system_inventory
 
 
-def setup(planet_tile=30):
+def make_game(planet_tile=30):
     tile = TILES.create(planet_tile, (0, 0))
     board = Board([tile])
     player = PlayerState('sol', 'The Federation of Sol', 'blu', 4,
@@ -29,7 +29,7 @@ def setup(planet_tile=30):
 
 class ExplorationDeckTests(unittest.TestCase):
     def _freelancers_offer(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         engine = ExplorationController(board, [player], decks={
             'cultural': ['frln1'], 'hazardous': [], 'industrial': [], 'frontier': []},
             relic_deck=[])
@@ -165,7 +165,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual('frontier', catalog['ent'].trait)
 
     def test_attachment_changes_values_and_stays_out_of_discard(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         planet = tile.planets[0]
         engine = ExplorationController(board, [player], decks={
             'cultural': ['ds'], 'hazardous': [], 'industrial': [], 'frontier': []},
@@ -181,7 +181,7 @@ class ExplorationDeckTests(unittest.TestCase):
         number = next(number for number, definition in TILES.by_number.items()
                       if any(planet.planet_type == 'INDUSTRIAL' and
                              not planet.tech_specialties for planet in definition.planets))
-        board, tile, player = setup(number)
+        board, tile, player = make_game(number)
         planet = next(planet for planet in tile.planets
                       if planet.planet_type == 'INDUSTRIAL' and not planet.tech_specialties)
         engine = ExplorationController(board, [player], relic_deck=[])
@@ -191,7 +191,7 @@ class ExplorationDeckTests(unittest.TestCase):
                          engine.planet_values(planet))
 
     def test_choice_is_not_spent_until_valid_resolution(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         planet = tile.planets[0]
         engine = ExplorationController(board, [player], decks={
             'cultural': ['mo1'], 'hazardous': [], 'industrial': [], 'frontier': []},
@@ -212,7 +212,7 @@ class ExplorationDeckTests(unittest.TestCase):
         number = next(number for number, definition in TILES.by_number.items()
                       if any(planet.planet_type == 'INDUSTRIAL'
                              for planet in definition.planets))
-        board, tile, player = setup(number)
+        board, tile, player = make_game(number)
         planet = next(planet for planet in tile.planets
                       if planet.planet_type == 'INDUSTRIAL')
         engine = ExplorationController(board, [player], decks={
@@ -224,7 +224,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual(1, player.commodities)
 
     def test_reshuffles_only_discarded_cards(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         engine = ExplorationController(board, [player], rng=random.Random(2), decks={
             'cultural': ['mo1'], 'hazardous': [], 'industrial': [], 'frontier': []},
             relic_deck=[])
@@ -236,7 +236,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual(2, len(tile.units))
 
     def test_distant_suns_chooses_one_of_two_drawn_cards(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         planet = tile.planets[0]
         engine = ExplorationController(board, [player], decks={
             'cultural': ['mo1', 'crf1'], 'hazardous': [], 'industrial': [], 'frontier': []},
@@ -249,7 +249,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual(['mo1'], engine.discards['cultural'])
 
     def test_distant_suns_selected_card_can_still_require_choice(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         planet = tile.planets[0]
         engine = ExplorationController(board, [player], decks={
             'cultural': ['crf1', 'mo1'], 'hazardous': [], 'industrial': [], 'frontier': []},
@@ -304,7 +304,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertIn('exp1', engine.discards['hazardous'])
 
     def test_demilitarized_zone_moves_ground_forces_to_space_area(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         planet = tile.planets[0]
         infantry = Unit('dmz-infantry', 'infantry', 'sol', 'blu',
                         UnitLocation(Region.PLANET, planet.planet_id))
@@ -332,7 +332,7 @@ class ExplorationDeckTests(unittest.TestCase):
     def test_frontier_token_is_consumed_and_card_discarded(self):
         number = next(number for number, definition in TILES.by_number.items()
                       if not definition.planets)
-        board, _, player = setup()
+        board, _, player = make_game()
         tile = TILES.create(number, (1, 0))
         board.add(tile)
         tile.units.append(Unit('test-carrier', 'carrier', 'sol', 'blu',
@@ -354,7 +354,7 @@ class ExplorationDeckTests(unittest.TestCase):
                 ('minent', 1, 1), ('ent', 1, 2), ('majent', 1, 3),
                 ('kel1', 2, 0), ('kel2', 2, 0)):
             with self.subTest(alias=alias):
-                board, _, player = setup()
+                board, _, player = make_game()
                 tile = TILES.create(empty_number, (1, 0))
                 board.add(tile)
                 tile.units.append(Unit('explorer', 'carrier', 'sol', 'blu',
@@ -374,7 +374,7 @@ class ExplorationDeckTests(unittest.TestCase):
     def test_frontier_command_gain_respects_physical_token_supply(self):
         empty_number = next(number for number, definition in TILES.by_number.items()
                             if not definition.planets)
-        board, _, player = setup()
+        board, _, player = make_game()
         player.command_pools.update(tactical=14, fleet=1, strategic=0)
         tile = TILES.create(empty_number, (1, 0))
         board.add(tile)
@@ -391,7 +391,7 @@ class ExplorationDeckTests(unittest.TestCase):
     def test_frontier_deepwater_draws_relic_and_applies_gain_effect(self):
         empty_number = next(number for number, definition in TILES.by_number.items()
                             if not definition.planets)
-        board, _, player = setup()
+        board, _, player = make_game()
         tile = TILES.create(empty_number, (1, 0))
         board.add(tile)
         tile.units.append(Unit('explorer', 'carrier', 'sol', 'blu',
@@ -407,7 +407,7 @@ class ExplorationDeckTests(unittest.TestCase):
     def test_frontier_deepwater_reports_empty_relic_deck(self):
         empty_number = next(number for number, definition in TILES.by_number.items()
                             if not definition.planets)
-        board, _, player = setup()
+        board, _, player = make_game()
         tile = TILES.create(empty_number, (1, 0))
         board.add(tile)
         tile.units.append(Unit('explorer', 'carrier', 'sol', 'blu',
@@ -423,7 +423,7 @@ class ExplorationDeckTests(unittest.TestCase):
         industrial_number = next(number for number, definition in TILES.by_number.items()
                                  if any(planet.planet_type == 'INDUSTRIAL'
                                         for planet in definition.planets))
-        board, tile, player = setup(industrial_number)
+        board, tile, player = make_game(industrial_number)
         planet = next(planet for planet in tile.planets
                       if planet.planet_type == 'INDUSTRIAL')
         player.commodities = player.commodity_limit
@@ -438,7 +438,7 @@ class ExplorationDeckTests(unittest.TestCase):
     def test_mirage_adds_controlled_planet_and_purges_card(self):
         number = next(number for number, definition in TILES.by_number.items()
                       if not definition.planets)
-        board, _, player = setup()
+        board, _, player = make_game()
         tile = TILES.create(number, (1, 0))
         board.add(tile)
         tile.units.append(Unit('test-carrier', 'carrier', 'sol', 'blu',
@@ -454,7 +454,7 @@ class ExplorationDeckTests(unittest.TestCase):
     def test_enigmatic_device_stays_in_play_until_purged(self):
         number = next(number for number, definition in TILES.by_number.items()
                       if not definition.planets)
-        board, _, player = setup()
+        board, _, player = make_game()
         tile = TILES.create(number, (1, 0))
         board.add(tile)
         tile.units.append(Unit('test-carrier', 'carrier', 'sol', 'blu',
@@ -467,7 +467,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual([], engine.discards['frontier'])
 
     def test_enigmatic_device_requires_payment_before_research(self):
-        board, _, player = setup()
+        board, _, player = make_game()
         engine = ExplorationController(board, [player], relic_deck=[])
         engine.kept_cards['sol'].append('ed1')
         with self.assertRaisesRegex(ValueError, '6 resources'):
@@ -480,7 +480,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual(0, player.trade_goods)
 
     def test_nano_forge_attaches_and_adds_legendary_values(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         engine = ExplorationController(board, [player], relic_deck=['nanoforge'])
         engine.relics.draw('sol')
         planet = tile.planets[0]
@@ -491,7 +491,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual('nanoforge', engine.attached_relics[planet.planet_id])
 
     def test_stellar_converter_requires_adjacent_bombardment_and_destroys_planet(self):
-        board, target, player = setup()
+        board, target, player = make_game()
         target.planet_owners.clear()
         player.planets.clear()
         adjacent = TILES.create(30, (1, 0))
@@ -511,7 +511,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertIn('stellarconverter', engine.relics.purged)
 
     def test_three_matching_fragments_gain_relic_and_are_purged(self):
-        board, tile, player = setup()
+        board, tile, player = make_game()
         engine = ExplorationController(board, [player], decks={
             'cultural': ['crf1', 'crf2'], 'hazardous': [], 'industrial': [],
             'frontier': ['urf1']}, relic_deck=['emelpar'])
@@ -523,7 +523,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual(['emelpar'], engine.relics.owned['sol'])
 
     def test_mixed_nonwild_fragments_cannot_gain_relic(self):
-        board, _, player = setup()
+        board, _, player = make_game()
         engine = ExplorationController(board, [player], relic_deck=['emelpar'])
         engine.fragments['sol'] = ['crf1', 'hrf1', 'urf1']
         with self.assertRaises(ValueError):
@@ -531,7 +531,7 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual(['crf1', 'hrf1', 'urf1'], engine.fragments['sol'])
 
     def test_fragments_can_be_transferred_but_relics_cannot(self):
-        board, _, sol = setup()
+        board, _, sol = make_game()
         hacan = PlayerState('hacan', 'Hacan', 'ylw', 6)
         engine = ExplorationController(board, [sol, hacan], relic_deck=['emelpar'])
         engine.fragments['sol'].append('crf1')
@@ -543,14 +543,14 @@ class ExplorationDeckTests(unittest.TestCase):
 
     @unittest.skipIf(ExplorationPanel is None, 'Arcade is unavailable')
     def test_panel_offers_legal_fragment_combinations(self):
-        board, _, sol = setup()
+        board, _, sol = make_game()
         engine = ExplorationController(board, [sol], relic_deck=[])
         engine.fragments['sol'] = ['crf1', 'crf2', 'urf1', 'hrf1']
         choices = ExplorationPanel.available_fragment_sets(engine, 'sol')
         self.assertEqual([('cultural', ('crf1', 'crf2', 'urf1'), 3)], choices)
 
     def test_titan_prototype_pay_or_decline(self):
-        board, tile, sol = setup()
+        board, tile, sol = make_game()
         hacan = PlayerState('hacan', 'Hacan', 'ylw', 6)
         engine = ExplorationController(board, [sol, hacan], relic_deck=['titanprototype'])
         engine.relics.draw('sol')
@@ -574,7 +574,7 @@ class RelicTests(unittest.TestCase):
         self.assertIn('dominusorb', catalog)
 
     def test_shard_transfers_its_point_with_owner(self):
-        _, _, sol = setup()
+        _, _, sol = make_game()
         hacan = PlayerState('hacan', 'Hacan', 'ylw', 6)
         relics = RelicController([sol, hacan], deck=['shard'])
         relics.draw('sol')
@@ -584,7 +584,7 @@ class RelicTests(unittest.TestCase):
         self.assertEqual(1, relics.victory_points['hacan'])
 
     def test_dynamis_core_action_uses_increased_commodity_value(self):
-        _, _, sol = setup()
+        _, _, sol = make_game()
         relics = RelicController([sol], deck=['dynamiscore'])
         relics.draw('sol')
         relics.use_dynamis_core(sol)
@@ -592,7 +592,7 @@ class RelicTests(unittest.TestCase):
         self.assertIn('dynamiscore', relics.purged)
 
     def test_snapshot_restores_deck_and_ownership(self):
-        board, tile, sol = setup()
+        board, tile, sol = make_game()
         engine = ExplorationController(board, [sol], decks={
             'cultural': ['ds'], 'hazardous': [], 'industrial': [], 'frontier': []},
             relic_deck=['shard'])
@@ -605,7 +605,7 @@ class RelicTests(unittest.TestCase):
         self.assertEqual(['shard'], engine.relics.deck)
 
     def test_prophets_tears_invalid_draw_keeps_relic_ready(self):
-        _, _, sol = setup()
+        _, _, sol = make_game()
         relics = RelicController([sol], deck=['prophetstears'])
         relics.draw('sol')
         with self.assertRaises(ValueError):
@@ -613,7 +613,7 @@ class RelicTests(unittest.TestCase):
         self.assertTrue(relics.is_ready('sol', 'prophetstears'))
 
     def test_codex_recovers_up_to_three_cards_from_discard(self):
-        _, _, sol = setup()
+        _, _, sol = make_game()
         relics = RelicController([sol], deck=['codex'])
         relics.draw('sol')
         class Cards:

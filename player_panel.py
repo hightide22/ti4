@@ -6,6 +6,8 @@ from ui_theme import (PANEL, SHELL, CARD, INK, MUTED, ACCENT, GOLD, BORDER, SELE
                       DASHBOARD_HEIGHT, VARIANT, surface, button)
 
 from board import RESOURCES
+from units import Region, UnitLocation
+from unit_supply import can_place_infantry
 
 
 
@@ -302,22 +304,35 @@ class PlayerPanel:
         paying_for_production = planet.planet_id in self.production_planets
         hit_y = y
         hovered = index == self.hovered_planet
+        mitosis_target = window.mitosis_player is self.player
+        mitosis_legal = True
+        if mitosis_target:
+            tile = next((tile for tile in window.board.values()
+                         if any(candidate.planet_id == planet.planet_id for candidate in tile.planets)), None)
+            mitosis_legal = bool(tile and tile.planet_owners.get(planet.planet_id) == self.player.faction and
+                                 can_place_infantry(
+                                     self.player, window.board, tile,
+                                     UnitLocation(Region.PLANET, planet.planet_id)))
         if hovered:
             y += 3
             arcade.draw_lrbt_rectangle_filled(x - 3, x + width + 3, y - 3, y + height + 3, (*ACCENT, 24))
         orbital_target = (window.orbital_drop_mode and self.player is window.turn_order.active_player)
-        background = (SELECTED if paying_for_production else
+        background = (DISABLED if mitosis_target and not mitosis_legal else
+                      SELECTED if paying_for_production else
                       SELECTED if orbital_target or hovered else DISABLED if exhausted else CARD)
         arcade.draw_lrbt_rectangle_filled(x, x + width, y, y + height, background)
         arcade.draw_lrbt_rectangle_outline(x, x + width, y, y + height,
+                                          BORDER if mitosis_target and not mitosis_legal else
                                           GOLD if paying_for_production or orbital_target else ACCENT if hovered else
                                           BORDER if exhausted else ACCENT,
                                           2 if paying_for_production or orbital_target or hovered else 1)
         window.text(('planet_name', index), planet.name, x + 8, y + height - 19, 12, INK, width - 16)
-        tint = (140, 150, 164, 170) if exhausted else None
+        tint = (140, 150, 164, 170) if exhausted or (mitosis_target and not mitosis_legal) else None
         self.image(self.trait_image(planet), x + 21, y + 43, 25, tint)
-        window.text(('planet_state', index), 'Paid' if paying_for_production else 'Exhausted' if exhausted else 'Ready',
-                    x + 39, y + 38, 10, MUTED if exhausted else ACCENT)
+        state = ('No anchor' if mitosis_target and not mitosis_legal else
+                 'Paid' if paying_for_production else 'Exhausted' if exhausted else 'Ready')
+        window.text(('planet_state', index), state, x + 39, y + 38, 10,
+                    MUTED if exhausted or (mitosis_target and not mitosis_legal) else ACCENT)
         suffix = 'exh' if exhausted else 'rdy'
         self.image(f'planet_cards/pc_res_{suffix}.png', x + 16, y + 15, 18)
         self.image(f'planet_cards/pc_inf_{suffix}.png', x + 70, y + 15, 18)
@@ -325,7 +340,8 @@ class PlayerPanel:
         window.text(('planet_inf', index), str(influence), x + 84, y + 9, 14, ACCENT if not exhausted else MUTED)
         if specialties:
             self.image(f'planet_cards/pc_tech_{specialties[0].lower()}_{suffix}.png', x + width - 12, y + 59, 13)
-        self.controls.append(Control(('planet', index), x, hit_y, width, height))
+        if not mitosis_target or mitosis_legal:
+            self.controls.append(Control(('planet', index), x, hit_y, width, height))
 
     def draw_details(self, window):
         card = self.player.planets[self.hovered_planet]

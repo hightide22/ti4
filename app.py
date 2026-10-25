@@ -31,6 +31,7 @@ from action_card_deck import ActionCardDeck
 from technology_panel import TechnologyPanel
 from technology_actions import TechnologyActions
 from technology import restore_infantry_on_cards
+from unit_supply import can_place_infantry
 
 from action_cards import ActionCardController
 from action_card_panel import ActionCardPanel
@@ -1169,14 +1170,18 @@ class BoardWindow(arcade.Window):
             self.exploration.relics.ready_all()
             arborec = next((player for player in self.turn_order.players
                             if player.faction == 'arborec' and
-                            any(tile.planet_owners.get(planet.planet_id) == 'arborec'
-                                for tile in self.board.values() for planet in tile.planets) and
-                            sum(unit.owner == 'arborec' and unit.kind == 'infantry'
-                                for tile in self.board.values() for unit in tile.units) < 12), None)
+                            any(tile.planet_owners.get(planet.planet_id) == 'arborec' and
+                                can_place_infantry(
+                                    player, self.board, tile,
+                                    UnitLocation(Region.PLANET, planet.planet_id))
+                                for tile in self.board.values() for planet in tile.planets)), None)
             if arborec:
                 if self.ai.is_bot(arborec):
                     options = [(tile, planet) for tile in self.board.values() for planet in tile.planets
-                               if tile.planet_owners.get(planet.planet_id) == 'arborec']
+                               if tile.planet_owners.get(planet.planet_id) == 'arborec' and
+                               can_place_infantry(
+                                   arborec, self.board, tile,
+                                   UnitLocation(Region.PLANET, planet.planet_id))]
                     if options:
                         tile, planet = min(options, key=lambda entry: sum(
                             unit.owner == 'arborec' and unit.kind == 'infantry' and
@@ -2924,8 +2929,9 @@ class BoardWindow(arcade.Window):
         if self.mitosis_player:
             if button == arcade.MOUSE_BUTTON_LEFT and x < left and y < self.player_panel.HEIGHT:
                 control = next((control for control in reversed(self.player_panel.controls)
-                                if control.action[0] == 'planet' and control.contains(x, y)), None)
-                if control:
+                                if control.contains(x, y) and
+                                control.action[0] in ('planet', 'cards')), None)
+                if control and control.action[0] == 'planet':
                     planet_id = self.mitosis_player.planets[control.action[1]].planet.planet_id
                     try:
                         self.movement.mitosis(self.mitosis_player, planet_id)
@@ -2936,6 +2942,8 @@ class BoardWindow(arcade.Window):
                         self.movement_error = None
                     except MovementError as error:
                         self.movement_error = str(error)
+                elif control and control.action[0] == 'cards':
+                    self.player_panel.handle_click(x, y)
             return
         if self.star_forge_target is not None:
             if button == arcade.MOUSE_BUTTON_LEFT:
