@@ -21,6 +21,7 @@ from relics import RelicController, RelicOutcome
 from secret_objectives import SecretObjectiveController
 from technology import production_allowed, upgrade_profile
 from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile
+from unit_supply import infantry_remaining
 
 
 TRAITS = ('cultural', 'hazardous', 'industrial', 'frontier')
@@ -380,6 +381,8 @@ class ExplorationController:
     def _place_unit(self, player, tile, planet_id, kind):
         if kind not in UNIT_TYPES:
             return False
+        if kind == 'infantry' and infantry_remaining(player, self.board) <= 0:
+            return False
         if self.planet_is_blocked(planet_id):
             return False
         # Use an ID namespace separate from production and starting fleets.
@@ -524,6 +527,8 @@ class ExplorationController:
         """Return the payable cost of the single unit in a Freelancers offer."""
         if kind not in movement.PRODUCIBLE_KINDS or not production_allowed(player, kind):
             raise ValueError('This unit cannot be produced with Freelancers.')
+        if kind == 'infantry' and infantry_remaining(player, movement.board) <= 0:
+            raise ValueError('No infantry remain in reinforcements.')
         raw_cost = ceil(movement.unit_cost(kind, player))
         if kind == 'flagship' and player.faction == 'nomad' and \
                 leader_available(player, 'nomadcommander'):

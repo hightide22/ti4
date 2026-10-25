@@ -11,6 +11,7 @@ from uuid import uuid4
 from player import PlanetCard
 from leaders import leader_available
 from units import Region, Unit, UnitLocation, UNIT_TYPES, mobile_ship, unit_profile, unit_profiles
+from unit_supply import INFANTRY_SUPPLY, infantry_count, infantry_remaining
 from technology import (production_allowed, upgrade_profile, copy_technology,
                         technology_catalog, is_unit_upgrade)
 
@@ -974,9 +975,7 @@ class MovementController:
             owner = self.faction_player(structure.owner)
             if owner is None or 'md' not in owner.technologies:
                 continue
-            deployed = sum(unit.owner == owner.faction and unit.kind == 'infantry'
-                           for system in self.board.values() for unit in system.units)
-            if deployed >= 12:
+            if infantry_remaining(owner, self.board) <= 0:
                 continue
             location = (UnitLocation(Region.PLANET, structure.location.planet_id)
                         if structure.location.region == Region.PLANET else
@@ -1107,9 +1106,7 @@ class MovementController:
                        any(planet.planet_id == planet_id for planet in tile.planets)), None)
         if target is None:
             raise MovementError('Choose a planet you control')
-        infantry_count = sum(unit.owner == player.faction and unit.kind == 'infantry'
-                             for tile in self.board.values() for unit in tile.units)
-        if infantry_count + 2 > 12:
+        if infantry_remaining(player, self.board) < 2:
             raise MovementError('Orbital Drop needs 2 infantry in your reinforcements')
         snapshot = Snapshot.capture(self.board, player, self.players,
                                     exploration=self.exploration)
@@ -1159,9 +1156,7 @@ class MovementController:
     def mitosis(self, player, planet_id):
         if player.faction != 'arborec':
             raise MovementError('Mitosis is an Arborec faction ability')
-        infantry_count = sum(unit.owner == player.faction and unit.kind == 'infantry'
-                             for tile in self.board.values() for unit in tile.units)
-        if infantry_count >= 12:
+        if infantry_remaining(player, self.board) <= 0:
             raise MovementError('No infantry remain in your reinforcements')
         target = next((tile for tile in self.board.values()
                        if tile.planet_owners.get(planet_id) == player.faction and
@@ -2330,9 +2325,7 @@ class MovementController:
                 influence += self.planet_influence(card.planet)
                 if influence >= 2:
                     break
-            owned_infantry = sum(unit.owner == 'yin' and unit.kind == 'infantry'
-                                 for tile in self.board.values() for unit in tile.units)
-            if candidates and influence >= 2 and owned_infantry < 12:
+            if candidates and influence >= 2 and infantry_remaining(yin, self.board) > 0:
                 for card in payment:
                     card.exhausted = True
                 session.target.units.remove(candidates[0])
@@ -2970,6 +2963,11 @@ class MovementController:
                                       unit_profile(unit).get('productionValue')
                                       for unit in session.target.units)
                 addition = min(addition, max(0, letani_capacity - current))
+            if kind == 'infantry':
+                supply_room = infantry_remaining(session.player, self.board) - current
+                if supply_room <= 0:
+                    raise MovementError('No infantry remain in your reinforcements.')
+                addition = min(addition, supply_room)
             if addition > remaining:
                 return
             if addition <= 0:
@@ -3014,6 +3012,9 @@ class MovementController:
             raise MovementError('Production is not active')
         if not session.production_choices:
             raise MovementError('Choose at least one unit or skip production')
+        if (infantry_count(session.player, self.board) +
+                session.production_choices.get('infantry', 0) > INFANTRY_SUPPLY):
+            raise MovementError('Production exceeds your 12 infantry supply.')
         if self.production_total(session) > session.production_limit:
             raise MovementError('Production limit exceeded')
         if (self.ships_blocked_by_opponents(session) and
@@ -3444,9 +3445,7 @@ class MovementController:
                     mahact_gain_fleet_token(mahact, defeated, self.board)
         if winner and self.has_tech(winner, 'dxa'):
             player = self.faction_player(winner)
-            deployed = sum(unit.owner == winner and unit.kind == 'infantry'
-                           for tile in self.board.values() for unit in tile.units)
-            if deployed < 12:
+            if infantry_remaining(player, self.board) > 0:
                 session.target.units.append(Unit(f'{winner}-dacxive-{uuid4().hex}', 'infantry',
                                                  winner, player.color_code,
                                                  UnitLocation(Region.PLANET, planet_id),
@@ -3546,9 +3545,7 @@ class MovementController:
                  if card.planet.planet_id in owned and
                  card.planet.planet_id not in player.exhausted_legendary_abilities}
         options = {}
-        infantry_out = sum(unit.owner == player.faction and unit.kind == 'infantry'
-                           for tile in self.board.values() for unit in tile.units)
-        infantry_out += sum(player.infantry_on_cards.values())
+        infantry_out = infantry_count(player, self.board)
         mech_out = sum(unit.owner == player.faction and unit.kind == 'mech'
                        for tile in self.board.values() for unit in tile.units)
         if 'primor' in ready and infantry_out < 12:
