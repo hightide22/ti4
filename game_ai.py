@@ -1172,7 +1172,13 @@ class GameAI:
             return (3 * owned + self._force(friendly) - 8 * overflow -
                     .25 * hostile_neighbors, tile.position)
 
-        ctl.resolve_retreat(max(options, key=safety).position)
+        destination = max(options, key=safety)
+        token_pool = None
+        if (faction not in destination.command_tokens and
+                command_tokens_in_reinforcements(player, self.window.board) <= 0):
+            token_pool = max(player.command_pools,
+                             key=lambda pool: (player.command_pools[pool], pool == 'fleet'))
+        ctl.resolve_retreat(destination.position, token_pool)
 
     def resolve_movement(self):
         w = self.window

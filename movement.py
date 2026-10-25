@@ -8,7 +8,7 @@ from math import ceil
 import random
 from uuid import uuid4
 
-from player import PlanetCard
+from player import PlanetCard, command_tokens_in_reinforcements
 from leaders import leader_available
 from units import Region, Unit, UnitLocation, UNIT_TYPES, mobile_ship, unit_profile, unit_profiles
 from unit_supply import (can_place_fighter, can_place_infantry,
@@ -238,6 +238,7 @@ class Session:
     retreat_blocked_round: int | None = None
     retreat_declined_round: int | None = None
     retreat_log: str = ''
+    retreat_destination_pending: tuple | None = None
     combat_winner: str | None = None
     pending_direct_hits: dict[str, list[str]] = field(default_factory=dict)
     pending_courageous: dict[str, list[dict]] = field(default_factory=dict)
@@ -1932,36 +1933,100 @@ class MovementController:
                     roll.get('bonus_source') == 'argentcommander' for roll in rolls) else ''))
         session.afb_resolved = True
 
-    def retreat_options(self, session, faction):
-        fleet = self.combat_units(session, faction)
-        if not fleet:
+    def _retreat_ships(self, session, faction, skilled=None):
+        skilled = session.skilled_retreat if skilled is None else skilled
+        return [unit for unit in session.target.units
+                if unit.owner == faction and unit.location.region == Region.SPACE and
+                (mobile_ship(unit) or unit.profile_id == 'naaz_mech_space') and
+                (skilled or unit.move_value > 0)]
+
+    def _retreat_bundle(self, session, faction, destination, skilled=None):
+        """Return ships and cargo that can move during a retreat."""
+        skilled = session.skilled_retreat if skilled is None else skilled
+        ships = self._retreat_ships(session, faction, skilled)
+        ship_ids = {unit.unit_id for unit in ships}
+        cargo = [unit for unit in session.target.units
+                 if unit.owner == faction and unit.location.region == Region.TRANSPORT and
+                 unit.location.carrier_id in ship_ids]
+        moving = ships + cargo
+
+        fighter_carriers = {}
+        if not skilled:
+            # Fighter I cannot move on its own. It can retreat only when a moving
+            # ship has spare capacity; any others are removed from the space area.
+            fighters = [unit for unit in session.target.units
+                        if unit.owner == faction and unit.kind == 'fighter' and
+                        unit.location.region == Region.SPACE and unit.move_value <= 0]
+            spare_by_carrier = {unit.unit_id: max(0, unit.capacity)
+                                for unit in ships if unit.capacity > 0}
+            for unit in cargo:
+                carrier_id = unit.location.carrier_id
+                if carrier_id in spare_by_carrier:
+                    spare_by_carrier[carrier_id] = max(
+                        0, spare_by_carrier[carrier_id] -
+                        int(unit_profile(unit).get('capacityUsed') or 0))
+            carried_fighters = []
+            for fighter in fighters:
+                carrier_id = next((candidate for candidate, spare in spare_by_carrier.items()
+                                   if spare > 0), None)
+                if carrier_id is None:
+                    break
+                spare_by_carrier[carrier_id] -= 1
+                carried_fighters.append(fighter)
+                fighter_carriers[fighter.unit_id] = carrier_id
+            moving.extend(carried_fighters)
+        else:
+            carried_fighters = []
+
+        # Fighter I units that cannot be transported are removed when a normal
+        # retreat is resolved; they are deliberately not part of the moving bundle.
+        return moving, ships, fighter_carriers
+
+    def _retreat_destination_legal(self, session, faction, tile, skilled):
+        enemy_ships = any(unit.owner != faction and unit.location.region == Region.SPACE and
+                          mobile_ship(unit) for unit in tile.units)
+        if enemy_ships:
+            return False
+        if 'asteroid_field' in tile.anomalies and not self.has_tech(faction, 'amd'):
+            return False
+        if 'supernova' in tile.anomalies and not self.has_tech(faction, 'mr'):
+            return False
+        if 'nebula' in tile.anomalies and (skilled or faction != 'empyrean'):
+            return False
+        if skilled:
+            return True
+
+        has_friendly_unit = any(unit.owner == faction for unit in tile.units)
+        controls_planet = any(owner == faction for owner in tile.planet_owners.values())
+        if has_friendly_unit or controls_planet or self.has_tech(faction, 'det'):
+            return True
+        return False
+
+    def retreat_options(self, session, faction, skilled=None):
+        if not self.combat_units(session, faction):
             return []
-        ship_ids = {unit.unit_id for unit in fleet}
-        retreating = fleet + [unit for unit in session.target.units
-                              if unit.owner == faction and
-                              unit.location.region == Region.TRANSPORT and
-                              unit.location.carrier_id in ship_ids]
+        skilled = session.skilled_retreat if skilled is None else skilled
+        moving_ships = self._retreat_ships(session, faction, skilled)
+        moves_units = bool(moving_ships)
+        # A player with only Fighter I may still retreat; those fighters are
+        # removed instead of moving, and no command token is placed.
+        if not skilled and not moving_ships:
+            moves_units = False
+        player = self.faction_player(faction) or session.player
         options = []
         for tile in self.neighbors(session.target):
-            hostile_fleet = any(unit.owner != faction and unit.location.region == Region.SPACE and
-                                UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
-            has_friendly = any(unit.owner == faction and unit.location.region == Region.SPACE and
-                               UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
-            if session.skilled_retreat:
-                retreating_player = next((player for player in self.players if player.faction == faction),
-                                         session.player)
-                legal = (not hostile_fleet and faction not in tile.command_tokens and
-                         self.action_cards and self.action_cards.has_reinforcement(retreating_player))
-            else:
-                # A fleet may retreat into a system that already carries its faction's
-                # command token. Retreat does not spend another token.
-                legal = (not hostile_fleet and (has_friendly or
-                         (self.has_tech(faction, 'det') and
-                          not any(unit.owner != faction for unit in tile.units))))
-            transfers = [(session.target, unit, tile, unit.location) for unit in retreating]
-            if (legal and can_transfer_infantry(
-                    self.faction_player(faction), self.board, transfers) and
-                    can_transfer_fighters(self.faction_player(faction), self.board, transfers)):
+            if not self._retreat_destination_legal(session, faction, tile, skilled):
+                continue
+            needs_token = moves_units and faction not in tile.command_tokens
+            has_reinforcement = command_tokens_in_reinforcements(player, self.board) > 0
+            has_sheet_token = any(player.command_pools.values())
+            if needs_token and not has_reinforcement and not has_sheet_token:
+                continue
+            moving, _, _ = self._retreat_bundle(session, faction, tile, skilled)
+            transfers = [(session.target, unit, tile, unit.location) for unit in moving]
+            if (self._retreat_destination_legal(session, faction, tile, skilled) and
+                    can_transfer_infantry(player, self.board, transfers) and
+                    can_transfer_fighters(player, self.board, transfers)):
                 options.append(tile)
         return options
 
@@ -1991,29 +2056,67 @@ class MovementController:
             raise MovementError('No adjacent system with your ships is available for retreat')
         session.retreat_declined_round = session.combat_round + 1
 
-    def resolve_retreat(self, position):
+    def resolve_retreat(self, position, token_pool=None):
         session = self.session
-        if not session or session.stage != 'retreat_selection' or not session.retreat_announced:
+        if not session or session.stage not in ('retreat_selection', 'retreat_token_pool') or not session.retreat_announced:
             raise MovementError('No retreat destination is being selected')
+        if session.stage == 'retreat_token_pool':
+            position = session.retreat_destination_pending
         destination = self.board[position]
         if destination not in self.retreat_options(session, session.retreat_announced):
             raise MovementError('This system is not a valid retreat destination')
-        ships = [unit for unit in session.target.units if unit.owner == session.retreat_announced and
-                 unit.location.region == Region.SPACE and
-                 (UNIT_TYPES[unit.kind]['ship'] or unit.profile_id == 'naaz_mech_space')]
-        ship_ids = {unit.unit_id for unit in ships}
-        retreating = ships + [unit for unit in session.target.units if unit.location.region == Region.TRANSPORT and
-                              unit.location.carrier_id in ship_ids]
+        faction = session.retreat_announced
+        retreating, ships, fighter_carriers = self._retreat_bundle(
+            session, faction, destination)
+        retreating_player = self.faction_player(faction) or session.player
+        places_token = bool(retreating) and faction not in destination.command_tokens
+        has_reinforcement = command_tokens_in_reinforcements(retreating_player, self.board) > 0
+        if places_token and not has_reinforcement:
+            if token_pool is None:
+                session.retreat_destination_pending = destination.position
+                session.stage = 'retreat_token_pool'
+                return
+            if token_pool not in retreating_player.command_pools or not retreating_player.command_pools[token_pool]:
+                raise MovementError('Choose a non-empty command pool for the retreat token.')
+        elif token_pool is not None:
+            raise MovementError('A command-pool token is not needed for this retreat.')
         if not can_transfer_infantry(
-                self.faction_player(session.retreat_announced), self.board,
+                retreating_player, self.board,
                 [(session.target, unit, destination, unit.location) for unit in retreating]):
             raise MovementError('Infantry tokens need a plastic infantry anchor at the retreat destination.')
         if not can_transfer_fighters(
-                self.faction_player(session.retreat_announced), self.board,
+                retreating_player, self.board,
                 [(session.target, unit, destination, unit.location) for unit in retreating]):
             raise MovementError('Fighter tokens need a plastic fighter anchor at the retreat destination.')
+
+        lost_ships = set()
+        if self.is_gravity_rift(session.target):
+            for ship in ships:
+                if self.ignores_gravity_rift(ship, session.target):
+                    continue
+                roll = self.roll_d10(session)
+                if roll <= 3:
+                    lost_ships.add(ship.unit_id)
+                session.gravity_rift_log.append(
+                    f'{faction.upper()} {ship.kind.title()} leaving tile {session.target.system_id}: '
+                    f'gravity rift roll {roll} — {"removed" if roll <= 3 else "survived"}.')
+
+        if not session.skilled_retreat:
+            moved_ids = {unit.unit_id for unit in retreating}
+            # Fighter I units that did not fit into a moving ship's spare capacity
+            # are removed from the active system under the retreat rules.
+            for fighter in session.target.units[:]:
+                if (fighter.owner == faction and fighter.kind == 'fighter' and
+                        fighter.location.region == Region.SPACE and
+                        fighter.move_value <= 0 and fighter.unit_id not in moved_ids):
+                    session.target.units.remove(fighter)
         for unit in retreating:
             session.target.units.remove(unit)
+            carrier_id = (unit.location.carrier_id if unit.location.region == Region.TRANSPORT
+                          else fighter_carriers.get(unit.unit_id))
+            removed_with_carrier = carrier_id in lost_ships
+            if unit.unit_id in lost_ships or removed_with_carrier:
+                continue
             destination.units.append(unit)
         self._reset_naaz_space_mechs(session)
         for unit in destination.units:
@@ -2021,14 +2124,17 @@ class MovementController:
                     unit.profile_id == 'naaz_mech_space':
                 unit.profile_id = 'naaz_mech'
                 unit.location = UnitLocation(Region.SPACE_AREA)
-        retreating_player = next((player for player in self.players
-                                  if player.faction == session.retreat_announced), session.player)
-        if (session.skilled_retreat and session.retreat_announced not in destination.command_tokens and
-                self.action_cards and self.action_cards.has_reinforcement(retreating_player)):
-            destination.command_tokens.add(session.retreat_announced)
-        elif not session.skilled_retreat and session.retreat_announced not in destination.command_tokens:
-            destination.command_tokens.add(session.retreat_announced)
-        session.retreat_log = f'{session.retreat_announced.upper()} retreated to tile {destination.system_id}.'
+        moved_any = any(unit in destination.units for unit in retreating)
+        if places_token and moved_any:
+            if not has_reinforcement:
+                if token_pool not in retreating_player.command_pools or not retreating_player.command_pools[token_pool]:
+                    raise MovementError('The chosen command pool no longer has a token.')
+                retreating_player.command_pools[token_pool] -= 1
+            destination.command_tokens.add(faction)
+        session.retreat_destination_pending = None
+        session.retreat_log = f'{faction.upper()} retreated to tile {destination.system_id}.'
+        if session.gravity_rift_log:
+            session.retreat_log += ' ' + ' '.join(session.gravity_rift_log)
         session.space_combat_resolved = True
         factions = {session.retreat_announced, *session.combat_factions}
         affected = [(tile.position, faction) for tile in (session.target, destination)

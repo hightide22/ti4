@@ -464,14 +464,10 @@ class ActionCardController:
                           for unit in session.target.units)
             return bool(damaged and (combat_start or session.stage == 'combat_end'))
         if effect == 'skilled_retreat':
-            destination_exists = any(
-                not any(unit.owner != faction and unit.location.region == Region.SPACE and
-                        UNIT_TYPES[unit.kind]['ship'] for unit in tile.units) and
-                faction not in tile.command_tokens
-                for tile in self.movement.neighbors(session.target))
+            destination_exists = bool(self.movement.retreat_options(
+                session, faction, skilled=True))
             return (combat_start and session.combat_type == 'space' and bool(own_units) and
-                    destination_exists and
-                    self.has_reinforcement(player))
+                    destination_exists)
         if effect == 'bunker':
             bombers = any(unit.owner == session.player.faction and unit.location.region == Region.SPACE and
                           unit_profile(unit).get('bombardHitsOn') for unit in session.target.units)

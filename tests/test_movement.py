@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 from board import load_board
 from movement import MovementController, MovementError, Session, Snapshot
-from player import PlanetCard, PlayerState, create_players
+from player import (PlanetCard, PlayerState, command_tokens_in_play,
+                    create_players)
 from technology import research_technology
 from units import Region, Unit, UnitLocation
 
@@ -964,6 +965,91 @@ class MovementTests(unittest.TestCase):
         self.assertIn('sol', self.home.command_tokens)
         self.assertEqual(self.player.command_pools['tactical'], tactical - 1)
         self.assertTrue(session.space_combat_resolved)
+
+    def test_fighter_i_only_is_removed_on_retreat_without_placing_a_token(self):
+        fighter = Unit('sol-retreat-fighter-i', 'fighter', 'sol', self.player.color_code,
+                       UnitLocation(Region.SPACE))
+        enemy = next(player for player in self.players if player.faction == 'hacan')
+        opponent = Unit('hacan-retreat-carrier', 'carrier', enemy.faction,
+                        enemy.color_code, UnitLocation(Region.SPACE))
+        self.target.units.extend((fighter, opponent))
+        session = Session(self.player, self.target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='retreat_selection', combat_factions=('sol', 'hacan'),
+                          retreat_announced='sol')
+        self.controller.session = session
+        tactical = self.player.command_pools['tactical']
+
+        self.assertIn(self.home, self.controller.retreat_options(session, 'sol'))
+        self.controller.resolve_retreat(self.home.position)
+
+        self.assertNotIn(fighter, self.target.units)
+        self.assertNotIn(fighter, self.home.units)
+        self.assertNotIn('sol', self.home.command_tokens)
+        self.assertEqual(self.player.command_pools['tactical'], tactical)
+        self.assertTrue(session.space_combat_resolved)
+
+    def test_retreat_from_gravity_rift_can_remove_ships_without_placing_token(self):
+        target = next(tile for tile in self.board.values()
+                      if tile.is_gravity_rift and 'gravity_rift' in tile.anomalies)
+        destination = next(tile for tile in self.controller.neighbors(target)
+                           if not any(unit.owner != 'sol' and unit.location.region == Region.SPACE
+                                      for unit in tile.units))
+        ship = Unit('sol-retreat-rift-cruiser', 'cruiser', 'sol', self.player.color_code,
+                    UnitLocation(Region.SPACE))
+        enemy = next(player for player in self.players if player.faction == 'hacan')
+        opponent = Unit('hacan-retreat-rift-cruiser', 'cruiser', enemy.faction,
+                        enemy.color_code, UnitLocation(Region.SPACE))
+        refuge = Unit('sol-retreat-rift-refuge', 'cruiser', 'sol', self.player.color_code,
+                      UnitLocation(Region.SPACE))
+        target.units.extend((ship, opponent))
+        destination.units.append(refuge)
+        session = Session(self.player, target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='retreat_selection', combat_factions=('sol', 'hacan'),
+                          retreat_announced='sol')
+        self.controller.session = session
+
+        with patch('movement.random.randint', return_value=3) as roll:
+            self.controller.resolve_retreat(destination.position)
+
+        roll.assert_called_once_with(1, 10)
+        self.assertNotIn(ship, target.units)
+        self.assertNotIn(ship, destination.units)
+        self.assertNotIn('sol', destination.command_tokens)
+        self.assertIn('removed', session.retreat_log)
+
+    def test_retreat_moves_command_token_from_sheet_when_reinforcements_are_empty(self):
+        enemy = next(player for player in self.players if player.faction == 'hacan')
+        ship = Unit('sol-retreat-pool-cruiser', 'cruiser', 'sol', self.player.color_code,
+                    UnitLocation(Region.SPACE))
+        opponent = Unit('hacan-retreat-pool-cruiser', 'cruiser', enemy.faction,
+                        enemy.color_code, UnitLocation(Region.SPACE))
+        self.target.units.extend((ship, opponent))
+        session = Session(self.player, self.target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='retreat_selection', combat_factions=('sol', 'hacan'),
+                          retreat_announced='sol')
+        self.controller.session = session
+        token_tiles = [tile for tile in self.board.values()
+                       if tile not in (self.target, self.home)]
+        for tile in token_tiles[:8]:
+            tile.command_tokens.add('sol')
+        self.assertEqual(command_tokens_in_play(self.player, self.board), 16)
+        self.assertIn(self.home, self.controller.retreat_options(session, 'sol'))
+        fleet_before = self.player.command_pools['fleet']
+
+        self.controller.resolve_retreat(self.home.position)
+
+        self.assertEqual(session.stage, 'retreat_token_pool')
+        self.assertEqual(session.retreat_destination_pending, self.home.position)
+        self.assertIn(ship, self.target.units)
+        self.controller.resolve_retreat(self.home.position, 'fleet')
+
+        self.assertIn(ship, self.home.units)
+        self.assertIn('sol', self.home.command_tokens)
+        self.assertEqual(self.player.command_pools['fleet'], fleet_before - 1)
+        self.assertEqual(command_tokens_in_play(self.player, self.board), 16)
 
     def test_bombardment_assigns_planet_and_removes_enemy_ground_force(self):
         planet = self.target.planets[0]

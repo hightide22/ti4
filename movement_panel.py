@@ -129,7 +129,7 @@ class MovementPanel:
         ground_current = stage == 'ground_combat'
         production_current = stage == 'production'
         has_production = bool(window.movement.production_sites(session))
-        combat_current = stage in ('space_combat', 'retreat_selection')
+        combat_current = stage in ('space_combat', 'retreat_selection', 'retreat_token_pool')
         cannon_current = stage in ('space_cannon_action', 'space_cannon_choose_target',
                                    'space_cannon_response', 'space_cannon_assign',
                                    'space_cannon_direct_hit')

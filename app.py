@@ -1535,7 +1535,7 @@ class BoardWindow(arcade.Window):
             self.roster.draw_details(self)
         if self.player_panel.hovered_planet is not None:
             self.player_panel.draw_details(self)
-        if self.movement.session and self.movement.session.stage in ('space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won'):
+        if self.movement.session and self.movement.session.stage in ('space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'retreat_token_pool', 'assault_choice', 'space_combat_won'):
             self.combat_panel.draw(self, self.movement.session)
         if self.strategy_modal and not self.technology_modal:
             self.strategy_panel.draw(self, self.turn_order)
@@ -2977,7 +2977,7 @@ class BoardWindow(arcade.Window):
                 foresight_human = (self.movement.session.stage == 'foresight' and
                                    self.movement.session.foresight_faction not in self.ai.bot_factions)
                 combat_stage = self.movement.session.stage in (
-                    'space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection',
+                    'space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'retreat_token_pool',
                     'assault_choice', 'space_combat_won')
                 human_card = any(not self.ai.is_bot(player) for player in
                                  self.action_cards.participants(self.movement.session))
@@ -2991,7 +2991,7 @@ class BoardWindow(arcade.Window):
                     response = self.combat_panel.hit_test(x, y)
                     retreating_player = (next((player for player in self.player_panel.players
                                                if player.faction == self.movement.session.retreat_announced), None)
-                                         if self.movement.session.stage == 'retreat_selection' else None)
+                                         if self.movement.session.stage in ('retreat_selection', 'retreat_token_pool') else None)
                     cannon_event = (self.movement.session.space_cannon_events[0]
                                     if self.movement.session.space_cannon_events else {})
                     cannon_target = next((player for player in self.player_panel.players
@@ -3009,6 +3009,9 @@ class BoardWindow(arcade.Window):
                         (response[0] == 'assault_victim' and assault_victim_owner is not None and
                          assault_victim_owner not in self.ai.bot_factions) or
                         (response[0] == 'retreat_to' and retreating_player and
+                         not self.ai.is_bot(retreating_player)) or
+                        (response[0] == 'retreat_token_pool' and retreating_player and
+                         len(response) > 1 and response[1] == retreating_player.faction and
                          not self.ai.is_bot(retreating_player)) or
                         (response[0] in ('announce_retreat', 'decline_retreat') and
                          len(response) > 1 and response[1] not in self.ai.bot_factions) or
@@ -3146,7 +3149,7 @@ class BoardWindow(arcade.Window):
                     self.action_card_panel.open = False
                 self.sync_turn_action()
             return
-        if self.movement.session and self.movement.session.stage in ('space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won'):
+        if self.movement.session and self.movement.session.stage in ('space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'retreat_token_pool', 'assault_choice', 'space_combat_won'):
             if button != arcade.MOUSE_BUTTON_LEFT:
                 return
             if self.combat_panel.drag_header(x, y):
@@ -3196,6 +3199,10 @@ class BoardWindow(arcade.Window):
                         self.movement.decline_retreat(action[1])
                     elif action[0] == 'retreat_to':
                         self.movement.resolve_retreat(action[1])
+                        self.movement_panel.reset()
+                    elif action[0] == 'retreat_token_pool':
+                        self.movement.resolve_retreat(
+                            session.retreat_destination_pending, action[2])
                         self.movement_panel.reset()
                     elif action[0] == 'assault_victim':
                         self.movement.choose_assault_victim(action[1])
@@ -3581,7 +3588,7 @@ class BoardWindow(arcade.Window):
                 self.relic_action_panel.open or self.leader_panel.open or
                 self.strategy_modal or self.technology_modal or
                 (self.movement.session and self.movement.session.stage in
-                 ('space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'assault_choice', 'space_combat_won')) or
+                 ('space_cannon_choose_target', 'space_cannon_assign', 'space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'retreat_token_pool', 'assault_choice', 'space_combat_won')) or
                 x < self.roster.WIDTH):
             return
 
@@ -3618,7 +3625,7 @@ class BoardWindow(arcade.Window):
             self.combat_panel.space_cannon_page = max(
                 0, min(pages - 1, self.combat_panel.space_cannon_page - int(scroll_y)))
             return
-        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'space_combat_won'):
+        if self.movement.session and self.movement.session.stage in ('space_combat', 'ground_combat', 'combat_end', 'retreat_selection', 'retreat_token_pool', 'space_combat_won'):
             self.combat_panel.scroll_by(x, -scroll_y * 42)
             return
         if self.strategy_modal:

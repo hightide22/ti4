@@ -450,32 +450,60 @@ class CombatPanel:
                                              bottom + 44, bottom + 73))
             return
 
-        if session.stage == 'retreat_selection':
-            window.text('retreat_title', 'RETREAT TO AN ADJACENT SYSTEM', left + 24, bottom + 77, 10, ACCENT)
+        if session.stage in ('retreat_selection', 'retreat_token_pool'):
             retreating_player = next((player for player in window.player_panel.players
                                       if player.faction == session.retreat_announced), None)
-            options = window.movement.retreat_options(session, session.retreat_announced)
-            columns = min(6, max(1, len(options)))
-            cell_width = (width - 48) / columns
             human_selecting = retreating_player is not None and not window.ai.is_bot(retreating_player)
-            for index, tile in enumerate(options if human_selecting else ()):
-                row, column = divmod(index, 6)
-                bx = left + 24 + column * cell_width
-                by = bottom + 24 - row * 27
-                arcade.draw_lrbt_rectangle_filled(bx, bx + cell_width - 5, by, by + 23, SELECTED)
-                label = f'Tile {tile.system_id} · {tile.name}'
-                window.text(('retreat_option', tile.position), label, bx + 6, by + 7, 8, INK,
-                            cell_width - 14)
-                self.action_hits.append((('retreat_to', tile.position), bx, bx + cell_width - 5, by, by + 23))
-            if not options:
-                window.text('retreat_no_options', 'No legal adjacent system remains.', left + 24,
-                            bottom + 52, 10, MUTED)
-            elif human_selecting:
-                window.text('combat_help', 'Choose where your fleet will retreat.',
+            if session.retreat_destination_pending:
+                window.text('retreat_title', 'CHOOSE A COMMAND TOKEN POOL',
+                            left + 24, bottom + 77, 10, ACCENT)
+                window.text('combat_help', 'Your reinforcements are empty. Move one token from a pool.',
                             left + 24, bottom + 99, 11, MUTED, width - 48)
+                if human_selecting:
+                    pools = retreating_player.command_pools
+                    buttons = [('tactical', 'TACTICAL'), ('fleet', 'FLEET'),
+                               ('strategic', 'STRATEGY')]
+                    button_width = min(190, (width - 60) / 3)
+                    gap = 12
+                    total = 3 * button_width + 2 * gap
+                    start_x = left + (width - total) / 2
+                    for index, (pool, label) in enumerate(buttons):
+                        bx = start_x + index * (button_width + gap)
+                        by = bottom + 30
+                        enabled = pools[pool] > 0
+                        arcade.draw_lrbt_rectangle_filled(
+                            bx, bx + button_width, by, by + 36,
+                            SELECTED if enabled else DISABLED)
+                        window.text(('retreat_pool', pool), f'{label} · {pools[pool]}',
+                                    bx + 8, by + 12, 9, INK if enabled else MUTED,
+                                    button_width - 16)
+                        if enabled:
+                            self.action_hits.append((('retreat_token_pool', session.retreat_announced, pool),
+                                                     bx, bx + button_width, by, by + 36))
             else:
-                window.text('combat_help', 'AI is choosing a retreat destination…',
-                            left + 24, bottom + 99, 11, MUTED, width - 48)
+                options = window.movement.retreat_options(session, session.retreat_announced)
+                columns = min(6, max(1, len(options)))
+                cell_width = (width - 48) / columns
+                window.text('retreat_title', 'RETREAT TO AN ADJACENT SYSTEM',
+                            left + 24, bottom + 77, 10, ACCENT)
+                for index, tile in enumerate(options if human_selecting else ()):
+                    row, column = divmod(index, 6)
+                    bx = left + 24 + column * cell_width
+                    by = bottom + 24 - row * 27
+                    arcade.draw_lrbt_rectangle_filled(bx, bx + cell_width - 5, by, by + 23, SELECTED)
+                    label = f'Tile {tile.system_id} · {tile.name}'
+                    window.text(('retreat_option', tile.position), label, bx + 6, by + 7, 8, INK,
+                                cell_width - 14)
+                    self.action_hits.append((('retreat_to', tile.position), bx, bx + cell_width - 5, by, by + 23))
+                if not options:
+                    window.text('retreat_no_options', 'No legal adjacent system remains.', left + 24,
+                                bottom + 52, 10, MUTED)
+                elif human_selecting:
+                    window.text('combat_help', 'Choose where your fleet will retreat.',
+                                left + 24, bottom + 99, 11, MUTED, width - 48)
+                else:
+                    window.text('combat_help', 'AI is choosing a retreat destination…',
+                                left + 24, bottom + 99, 11, MUTED, width - 48)
         elif session.combat_needs_resolution:
             complete = window.movement.combat_assignments_complete(session)
             units_label = 'ground forces' if session.combat_type == 'ground' else 'ships'
@@ -494,7 +522,7 @@ class CombatPanel:
             complete = False
             label = 'Resolve Fire Team rerolls first'
             color = DISABLED
-        elif session.stage == 'retreat_selection':
+        elif session.stage in ('retreat_selection', 'retreat_token_pool'):
             self.advance_hit = None
         elif not window.ai.is_bot(session.player) or playable_cards:
             bx, by, bw, bh = left + width - 320, bottom + 24, 296, 42
@@ -600,7 +628,7 @@ class CombatPanel:
         if window.movement_error:
             window.text('combat_error', window.movement_error, left + width / 2, bottom + 76, 10,
                         DANGER, width - 40)
-        if session.stage == 'retreat_selection':
+        if session.stage in ('retreat_selection', 'retreat_token_pool'):
             pass
         elif session.combat_needs_resolution:
             remaining = sum(max(0, min(session.combat_hits.get(faction, 0),

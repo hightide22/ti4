@@ -8,7 +8,7 @@ from action_card_deck import ActionCardDeck
 from action_card_panel import CARD_ART, CARD_IMAGES
 from board import ROOT, load_board
 from movement import MovementController, Session, Snapshot, capital_ship
-from player import create_players
+from player import command_tokens_in_play, create_players
 from strategic_action import StrategyController
 from turn_order import TurnOrder
 from units import Region, Unit, UnitLocation
@@ -387,6 +387,42 @@ class ActionCardTests(unittest.TestCase):
         self.assertIn('sol', destination.command_tokens)
         self.assertNotIn(ship, target.units)
         self.assertTrue(session.space_combat_resolved)
+
+    def test_skilled_retreat_uses_a_command_sheet_pool_if_reinforcements_are_empty(self):
+        target = next(tile for tile in self.board.values()
+                      if not tile.planets and len(self.movement.neighbors(tile)) >= 2)
+        enemy = next(player for player in self.players if player.faction == 'hacan')
+        ship = Unit('action-sol-retreat-pool-cruiser', 'cruiser', 'sol', self.sol.color_code,
+                    UnitLocation(Region.SPACE))
+        opponent = Unit('action-hacan-retreat-pool-destroyer', 'destroyer', enemy.faction,
+                        enemy.color_code, UnitLocation(Region.SPACE))
+        target.units.extend((ship, opponent))
+        session = Session(self.sol, target, {}, Snapshot.capture(self.board, self.sol, self.players),
+                          stage='space_combat', combat_factions=('sol', 'hacan'))
+        self.movement.session = session
+        self.sol.action_cards.append('skilled_retreat')
+        destination = next(tile for tile in self.movement.neighbors(target)
+                           if not any(unit.owner != 'sol' and unit.location.region == Region.SPACE
+                                      for unit in tile.units))
+        token_tiles = [tile for tile in self.board.values()
+                       if tile not in (target, destination)]
+        for tile in token_tiles[:8]:
+            tile.command_tokens.add('sol')
+        self.assertEqual(command_tokens_in_play(self.sol, self.board), 16)
+        pool_before = self.sol.command_pools['strategic']
+
+        self.assertTrue(self.cards.can_play('sol', 'skilled_retreat', session))
+        self.cards.play(self.sol, 0)
+        self.movement.resolve_retreat(destination.position)
+
+        self.assertEqual(session.stage, 'retreat_token_pool')
+        self.assertIn(ship, target.units)
+        self.movement.resolve_retreat(destination.position, 'strategic')
+
+        self.assertIn(ship, destination.units)
+        self.assertIn('sol', destination.command_tokens)
+        self.assertEqual(self.sol.command_pools['strategic'], pool_before - 1)
+        self.assertEqual(command_tokens_in_play(self.sol, self.board), 16)
 
     def test_politics_draws_two_cards_and_status_draw_is_limited_to_seven(self):
         self.cards.deck[:] = ['flank_speed', 'morale_boost', 'shields_holding']
