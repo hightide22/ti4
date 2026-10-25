@@ -47,7 +47,7 @@ from leader_effects import (clear_round_hero_effects, use_cabal_hero,
                             use_empyrean_hero, use_keleres_harka_hero,
                             use_ghost_agent, use_l1z1x_agent, use_naaz_agent, use_naaz_hero,
                             use_nomad_hero, use_saar_agent, l1z1x_agent_mech_available,
-                            use_muaat_agent, use_titans_hero)
+                            use_hacan_agent, use_muaat_agent, use_titans_hero)
 from pok_factions import keleres_council_patronage, naaz_fabrication
 
 ROOT = Path(__file__).resolve().parent
@@ -930,6 +930,33 @@ class BoardWindow(arcade.Window):
         player = next((candidate for candidate in self.player_panel.players
                        if candidate.faction == self.leader_panel.reaction_owner_faction),
                       self.turn_order.active_player)
+        if alias == 'hacanagent':
+            snapshot = None
+            try:
+                if player is None or player.faction != 'hacan' or len(command) < 3:
+                    raise ValueError('Carth can be used by the active Hacan player.')
+                snapshot = self._component_action_snapshot()
+                effect = command[2]
+                if not isinstance(effect, tuple) or len(effect) < 2 or effect[0] != 'hacan':
+                    raise ValueError('Choose a Hacan agent effect.')
+                beneficiary = None
+                if effect[1] == 'replenish' and len(effect) == 3:
+                    beneficiary = next(candidate for candidate in self.player_panel.players
+                                       if candidate.faction == effect[2])
+                elif effect[1] != 'gain':
+                    raise ValueError('Choose whether to gain or replenish commodities.')
+                use_hacan_agent(
+                    player, replenish_player=beneficiary,
+                    commodity_limit=self.exploration.relics.commodity_limit)
+            except (ValueError, KeyError, StopIteration) as error:
+                if snapshot is not None:
+                    snapshot.restore()
+                self.movement_error = str(error) or 'That Hacan agent choice is no longer available.'
+                return
+            self.leader_panel.close()
+            self._finish_component_action(snapshot)
+            self.movement_error = None
+            return
         if alias == 'muaatagent':
             if (player is None or player.faction != 'muaat' or len(command) < 3 or
                     not isinstance(command[2], tuple) or len(command[2]) != 3):
@@ -1569,6 +1596,8 @@ class BoardWindow(arcade.Window):
                 available.add('l1z1xagent')
             if (not self.movement.session and not self.strategy.session and
                     self.turn_order.can_take_action):
+                if player.faction == 'hacan' and leader_available(player, 'hacanagent'):
+                    available.add('hacanagent')
                 if player.faction == 'muaat' and leader_available(player, 'muaatagent'):
                     available.add('muaatagent')
                 if player.faction == 'arborec' and leader_available(player, 'arborecagent'):
@@ -2676,7 +2705,27 @@ class BoardWindow(arcade.Window):
             assert sum(unit.owner == 'arborec' and unit.kind == 'infantry' and
                        unit.location.planet_id == planet_id
                        for tile in self.board.values() for unit in tile.units) == infantry_before + 1
-            print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, refresh, and command allocation checked')
+            self.configure_game(ROOT / 'maps/four_player.json',
+                                ('hacan', 'sol', 'jolnar', 'letnev'))
+            hacan = self.turn_order.active_player
+            hacan.commodities = hacan.commodity_limit - 1
+            self.leader_panel.open = True
+            self.leader_panel.select('hacanagent', hacan)
+            self.on_draw()
+            use_hit = next(hit for hit in self.leader_panel.hits
+                           if hit[0] == ('use', 'hacanagent'))
+            self.on_mouse_press((use_hit[1] + use_hit[2]) / 2,
+                                (use_hit[3] + use_hit[4]) / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            self.on_draw()
+            gain_hit = next(hit for hit in self.leader_panel.hits
+                            if hit[0] == ('use', 'hacanagent', ('hacan', 'gain')))
+            self.on_mouse_press((gain_hit[1] + gain_hit[2]) / 2,
+                                (gain_hit[3] + gain_hit[4]) / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            assert hacan.commodities == hacan.commodity_limit
+            assert not leader_available(hacan, 'hacanagent')
+            print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, command allocation, faction abilities, and Hacan agent checked')
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):

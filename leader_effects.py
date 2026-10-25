@@ -112,6 +112,21 @@ def use_mahact_agent(owner, active_player, board, token_tile):
     token_tile.command_tokens.remove(active_player.faction)
 
 
+def use_hacan_agent(owner, *, replenish_player=None, commodity_limit=None):
+    """Use Carth of Golden Sands to gain or replenish commodities."""
+    _require_agent(owner, 'hacanagent')
+    if replenish_player is not None and replenish_player is owner:
+        raise ValueError('Carth can replenish another player, not the Hacan player.')
+    if commodity_limit is None:
+        commodity_limit = lambda player: player.commodity_limit
+    if replenish_player is None:
+        owner.commodities = min(commodity_limit(owner), owner.commodities + 2)
+    else:
+        replenish_player.commodities = commodity_limit(replenish_player)
+    exhaust_leader(owner, 'hacanagent')
+    return owner.commodities if replenish_player is None else replenish_player.commodities
+
+
 def muaat_agent_systems(beneficiary, board):
     """Systems where Umbat can enable production for this player."""
     return tuple(tile for tile in board.values() if any(

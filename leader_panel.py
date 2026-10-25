@@ -27,7 +27,7 @@ MANUAL_ACTION_HEROES = frozenset({
     'cabalhero', 'empyreanhero', 'keleresheroharka', 'naazhero',
     'nomadhero', 'titanshero',
 })
-MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'l1z1xagent', 'muaatagent',
+MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'hacanagent', 'l1z1xagent', 'muaatagent',
                                   'saaragent', 'xxchaagent'})
 
 
@@ -82,6 +82,7 @@ class LeaderPanel:
         self.agent_mode = None
         self.agent_ship_id = None
         self.agent_planet_id = None
+        self.agent_player_faction = None
 
     def select(self, leader_id: str, player) -> bool:
         if leader_id not in player.leaders:
@@ -423,6 +424,27 @@ class LeaderPanel:
                     self.hits.append((('use', alias,
                                        ('muaat', beneficiary.faction, tile.position)),
                                       x, x + width, by, by + 27))
+        elif alias == 'hacanagent':
+            button(window, 'hacan_agent_gain', 'GAIN UP TO 2 COMMODITIES', x,
+                   bottom + 138, width, 27, size=8)
+            self.hits.append((('use', alias, ('hacan', 'gain')),
+                              x, x + width, bottom + 138, bottom + 165))
+            beneficiaries = [candidate for candidate in window.player_panel.players
+                             if candidate.faction != player.faction]
+            pages = max(1, (len(beneficiaries) + page_size - 1) // page_size)
+            self.target_page = min(self.target_page, pages - 1)
+            visible = beneficiaries[self.target_page * page_size:
+                                    (self.target_page + 1) * page_size]
+            window.text('hacan_agent_replenish_label', 'OR REPLENISH ANOTHER PLAYER',
+                        x, bottom + 122, 8, ACCENT)
+            for index, beneficiary in enumerate(visible):
+                by = bottom + 88 - index * 31
+                button(window, ('hacan_agent_replenish', beneficiary.faction),
+                       f'{beneficiary.faction.upper()} · REPLENISH COMMODITIES',
+                       x, by, width, 27, size=8)
+                self.hits.append((('use', alias,
+                                   ('hacan', 'replenish', beneficiary.faction)),
+                                  x, x + width, by, by + 27))
         elif alias == 'arborecagent':
             if self.agent_ship_id is None:
                 targets = [(tile, unit) for tile in board.values() for unit in tile.units
@@ -501,7 +523,7 @@ class LeaderPanel:
                 self.hits.append((('agent_back',), x, x + min(145, width),
                                   bottom + 20, bottom + 45))
 
-        if alias == 'muaatagent':
+        if alias in ('muaatagent', 'hacanagent'):
             if self.agent_player_faction is not None:
                 button(window, 'leader_agent_back', 'BACK TO PLAYERS', x,
                        bottom + 20, min(140, width), 25, size=8)
