@@ -6,7 +6,7 @@ from action_cards import (ACTION_CARD_DEFS, ActionCardController,
                           canonical_action_card)
 from action_card_deck import ActionCardDeck
 from action_card_panel import CARD_ART, CARD_IMAGES
-from board import load_board
+from board import ROOT, load_board
 from movement import MovementController, Session, Snapshot, capital_ship
 from player import create_players
 from strategic_action import StrategyController
@@ -45,6 +45,116 @@ class ActionCardTests(unittest.TestCase):
                             for unit in system.units))
         self.assertTrue(turns.action_used)
         self.assertEqual(self.sol.action_cards, [])
+
+    def test_keleres_can_spend_a_trade_good_after_a_component_action_card(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('keleresm', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        keleres = next(player for player in players if player.faction == 'keleresm')
+        movement = MovementController(board, players)
+        turns = TurnOrder([keleres], strategy_enabled=False)
+        cards = ActionCardController(players, movement, deck=[], turn=turns)
+        system = next(tile for tile in board.values() if any(
+            unit.owner == keleres.faction and unit.location.region == Region.SPACE
+            for unit in tile.units))
+        keleres.action_cards[:] = ['war_effort']
+        keleres.trade_goods = 1
+
+        cards.play(keleres, 0)
+        cards.resolve_pending(system.position)
+
+        self.assertEqual('keleres_unlock', cards.pending['effect'])
+        self.assertFalse(keleres.leaders['kelerescommander'].unlocked)
+        self.assertEqual(1, keleres.trade_goods)
+        self.assertEqual([(('spend',), 'Spend 1 trade good · unlock Suffi An'),
+                          (('decline',), 'Keep the trade good')], cards.pending_choices())
+
+        cards.resolve_pending(('spend',))
+
+        self.assertTrue(keleres.leaders['kelerescommander'].unlocked)
+        self.assertEqual(0, keleres.trade_goods)
+        self.assertTrue(turns.action_used)
+
+    def test_keleres_can_decline_unlock_cost_and_keep_trade_good(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('keleresm', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        keleres = next(player for player in players if player.faction == 'keleresm')
+        movement = MovementController(board, players)
+        turns = TurnOrder([keleres], strategy_enabled=False)
+        cards = ActionCardController(players, movement, deck=[], turn=turns)
+        system = next(tile for tile in board.values() if any(
+            unit.owner == keleres.faction and unit.location.region == Region.SPACE
+            for unit in tile.units))
+        keleres.action_cards[:] = ['war_effort']
+        keleres.trade_goods = 1
+
+        cards.play(keleres, 0)
+        cards.resolve_pending(system.position)
+        cards.resolve_pending(('decline',))
+
+        self.assertFalse(keleres.leaders['kelerescommander'].unlocked)
+        self.assertEqual(1, keleres.trade_goods)
+
+    def test_war_effort_has_no_destination_when_cruiser_supply_is_empty(self):
+        for tile in self.board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == self.sol.faction and
+                                     unit.kind == 'cruiser')]
+        for index in range(8):
+            tile = list(self.board.values())[index]
+            tile.units.append(Unit(f'war-effort-supply-{index}', 'cruiser',
+                                   self.sol.faction, self.sol.color_code,
+                                   UnitLocation(Region.SPACE)))
+        self.cards.turn = TurnOrder([self.sol], strategy_enabled=False)
+        self.sol.action_cards[:] = ['war_effort']
+
+        self.assertTrue(self.cards.can_play(self.sol.faction, 'war_effort'))
+        self.cards.play(self.sol, 0)
+        self.assertEqual([], self.cards.pending_choices())
+        self.cards.cancel_pending()
+        self.assertEqual(['war_effort'], self.sol.action_cards)
+
+    def test_war_effort_refreshes_commander_unlocks_after_placing_the_cruiser(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('mentak', 'sol', 'jolnar', 'hacan'))
+        from player import create_players
+        players = create_players(board, config)
+        mentak = next(player for player in players if player.faction == 'mentak')
+        movement = MovementController(board, players)
+        turns = TurnOrder([mentak], strategy_enabled=False)
+        cards = ActionCardController(players, movement, deck=[], turn=turns)
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == mentak.faction and unit.kind == 'cruiser')]
+        system = next(tile for tile in board.values() if any(
+            unit.owner == mentak.faction and unit.location.region == Region.SPACE
+            for unit in tile.units))
+        system.units.extend(Unit(f'mentak-cruiser-{index}', 'cruiser', mentak.faction,
+                                 mentak.color_code, UnitLocation(Region.SPACE))
+                            for index in range(3))
+        mentak.action_cards[:] = ['war_effort']
+
+        cards.play(mentak, 0)
+        cards.resolve_pending(system.position)
+
+        self.assertEqual(4, sum(unit.owner == mentak.faction and unit.kind == 'cruiser'
+                                for tile in board.values() for unit in tile.units))
+        self.assertTrue(mentak.leaders['mentakcommander'].unlocked)
+
+    def test_fighter_conscription_checks_the_ten_system_anchor_limit(self):
+        for tile in self.board.values():
+            tile.units.clear()
+        for index, tile in enumerate(list(self.board.values())[:11]):
+            tile.units.append(Unit(f'fighter-conscription-anchor-{index}', 'carrier',
+                                   self.sol.faction, self.sol.color_code,
+                                   UnitLocation(Region.SPACE)))
+        self.cards.turn = TurnOrder([self.sol], strategy_enabled=False)
+        self.sol.action_cards[:] = ['fighter_conscription']
+
+        self.assertEqual(11, len(self.cards.fighter_conscription_systems(self.sol)))
+        self.assertFalse(self.cards.can_resolve_fighter_conscription(self.sol))
+        self.assertFalse(self.cards.can_play(self.sol.faction, 'fighter_conscription'))
 
     def test_upgrade_prompts_for_a_cruiser_and_replaces_it_with_a_dreadnought(self):
         system = next(iter(self.board.values()))

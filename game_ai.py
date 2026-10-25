@@ -1370,7 +1370,8 @@ class GameAI:
         if not planned:
             ctl.skip_production()
             return
-        discount = int('st' in player.technologies and not s.integrated_current)
+        discount = int('st' in player.technologies and not s.integrated_current
+                       and not s.agent_production)
         total_cost = max(0, ceil(sum(ctl.unit_cost(k, player) * n for k, n in planned.items())) -
                          discount)
         payment = payment_plan(
@@ -1381,6 +1382,17 @@ class GameAI:
             ctl.skip_production()
             return
         s.production_choices.update(planned)
+        for kind in planned:
+            required = ctl.production_reclaim_required(s, kind)
+            if required:
+                candidates = ctl.production_reclaim_candidates(s, kind)
+                candidates.sort(key=lambda row: (
+                    -sum(unit.owner == player.faction and unit.kind == kind
+                         for unit in row[0].units),
+                    self._tile_threat(row[0], player.faction),
+                    row[0].name, row[1].unit_id))
+                for _, unit in candidates[:required]:
+                    ctl.toggle_production_reclaim(kind, unit.unit_id)
         for planet_id in payment[0]:
             ctl.toggle_production_planet(planet_id)
         s.trade_goods_to_spend = payment[1]

@@ -7,6 +7,7 @@ from uuid import uuid4
 from leaders import refresh_leader_unlocks
 from player import command_tokens_in_reinforcements
 from units import Region, Unit, UnitLocation, unit_profile
+from unit_supply import planet_structure_count
 
 
 SLEEPER_TOKEN_SUPPLY = 5
@@ -114,7 +115,8 @@ def titans_place_sleeper(player, board, tile, planet_id: str,
     tile.sleeper_tokens.add(planet_id)
 
 
-def titans_awaken(player, board, tile, *, planet_ids: tuple[str, ...]):
+def titans_awaken(player, board, tile, *, planet_ids: tuple[str, ...],
+                  exploration=None):
     """Replace selected sleeper tokens that were present at activation with PDS units."""
     if player.faction != 'titans' or tile.position not in board:
         raise ValueError('Only Titans can awaken sleeper tokens')
@@ -138,14 +140,15 @@ def titans_awaken(player, board, tile, *, planet_ids: tuple[str, ...]):
     planned = []
     reserved_for_move = set()
     pds_on_target = {
-        planet_id: sum(unit.owner == player.faction and unit.kind == 'pds' and
-                       unit.location.region == Region.PLANET and
-                       unit.location.planet_id == planet_id
-                       for unit in tile.units)
+        planet_id: planet_structure_count(tile, planet_id, 'pds', player.faction)
         for planet_id in selected
     }
     for planet_id in sorted(selected):
-        # The unit limit is two PDS of a faction on any one planet.
+        if exploration is not None and (
+                exploration.planet_is_blocked(planet_id) or
+                planet_id in exploration.destroyed_planets):
+            continue
+        # Each faction can have at most two PDS on a planet.
         if pds_on_target[planet_id] >= 2:
             continue
         if reserve:

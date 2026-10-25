@@ -3,8 +3,9 @@ from __future__ import annotations
 import random
 import unittest
 
-from board import Board, TILES
+from board import Board, ROOT, TILES, load_board
 from exploration import ExplorationController, exploration_catalog
+from leaders import leader_available
 from movement import MovementController, Session, Snapshot
 try:
     from exploration_panel import ExplorationPanel
@@ -12,7 +13,7 @@ except ModuleNotFoundError as exc:
     if exc.name != 'arcade':
         raise
     ExplorationPanel = None
-from player import PlanetCard, PlayerState
+from player import PlanetCard, PlayerState, create_players
 from relics import RelicController, relic_catalog
 from units import Region, Unit, UnitLocation, layout_units, system_inventory
 
@@ -39,6 +40,27 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertEqual('production', result.events[0]['type'])
         return board, tile, player, engine, movement
 
+    def test_freelancers_war_sun_production_unlocks_muaat_commander(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('muaat', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        muaat = next(player for player in players if player.faction == 'muaat')
+        home = next(tile for tile in board.values()
+                    if 'muaat' in tile.planet_owners.values())
+        planet_id = next(planet_id for planet_id, owner in home.planet_owners.items()
+                         if owner == 'muaat')
+        engine = ExplorationController(board, players, relic_deck=[], decks={
+            'cultural': [], 'hazardous': [], 'industrial': [], 'frontier': []})
+        movement = MovementController(board, players)
+        engine.freelancer_offer = ('muaat', home.position, planet_id)
+        muaat.trade_goods = 12
+
+        self.assertFalse(leader_available(muaat, 'muaatcommander'))
+        engine.produce_freelancers(muaat, movement, 'warsun',
+                                   planet_id=planet_id, trade_goods=12)
+
+        self.assertTrue(leader_available(muaat, 'muaatcommander'))
+
     def test_freelancers_produces_one_ship_using_influence(self):
         board, tile, player, engine, movement = self._freelancers_offer()
         event = engine.produce_freelancers(player, movement, 'cruiser',
@@ -52,6 +74,21 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertIsNone(engine.freelancer_offer)
         with self.assertRaises(ValueError):
             engine.produce_freelancers(player, movement, 'cruiser', trade_goods=2)
+
+    def test_freelancers_cannot_exceed_finite_ship_supply(self):
+        board, tile, player, engine, movement = self._freelancers_offer()
+        tile.units.extend(Unit(f'freelancers-carrier-{index}', 'carrier', player.faction,
+                               player.color_code, UnitLocation(Region.SPACE))
+                          for index in range(4))
+        player.trade_goods = 10
+
+        with self.assertRaisesRegex(ValueError, 'No unit of this type remains'):
+            engine.produce_freelancers(player, movement, 'carrier', trade_goods=3)
+
+        self.assertEqual(4, sum(unit.owner == player.faction and unit.kind == 'carrier'
+                                for unit in tile.units))
+        self.assertEqual(10, player.trade_goods)
+        self.assertIsNotNone(engine.freelancer_offer)
 
     def test_freelancers_payment_validation_is_atomic(self):
         board, tile, player, engine, movement = self._freelancers_offer()

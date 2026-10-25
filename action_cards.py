@@ -7,6 +7,8 @@ from uuid import uuid4
 from player import command_tokens_in_reinforcements
 from units import Region, UNIT_TYPES, Unit, UnitLocation, unit_profile
 from technology import copy_technology, technology_catalog, upgrade_profile
+from unit_supply import (can_place_fighter, fighter_area_counts,
+                         fighter_areas_remaining, unit_supply_remaining)
 
 
 ACTION_CARD_DEFS = {
@@ -323,6 +325,14 @@ class ActionCardController:
                         unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']
                         for unit in tile.units)]
 
+    def can_resolve_fighter_conscription(self, player):
+        systems = self.fighter_conscription_systems(player)
+        if not systems:
+            return False
+        anchored = fighter_area_counts(player, self.movement.board)
+        new_anchors = sum(tile.position not in anchored for tile in systems)
+        return new_anchors <= fighter_areas_remaining(player, self.movement.board)
+
     def _next_fighter_conscription_overflow(self):
         pending = self.pending
         player = pending['player']
@@ -338,6 +348,14 @@ class ActionCardController:
                 pending['overflow_kind'] = 'fleet'
                 return
         self.pending = None
+        self.refresh_leader_unlocks()
+        self._offer_keleres_commander(player, pending['alias'])
+
+    def refresh_leader_unlocks(self):
+        from leaders import refresh_leader_unlocks
+        for player in self.players:
+            refresh_leader_unlocks(player, self.movement.board, self.players,
+                                   self.movement.exploration)
 
     def can_play(self, faction, alias, session=None):
         effect = canonical_action_card(alias)
@@ -367,7 +385,7 @@ class ActionCardController:
                 return bool(self.plagiarize_targets(player) and
                             available + player.trade_goods >= 5)
             if effect == 'fighter_conscription':
-                return bool(self.fighter_conscription_systems(player))
+                return self.can_resolve_fighter_conscription(player)
             if effect == 'refit':
                 return (self._mechs_in_play(player) < 4 and any(
                     unit.owner == faction and unit.kind == 'infantry'
@@ -568,13 +586,28 @@ class ActionCardController:
         return [(index, alias) for index, alias in enumerate(player.action_cards)
                 if self.can_play(player.faction, alias, session)]
 
-    def _consume(self, player, hand_index, alias, window, session):
+    def _consume(self, player, hand_index, alias, window, session, *, refresh_leaders=True):
         player.action_cards.pop(hand_index)
         self.discard.append(alias)
         if window is not None and session is not None:
             session.played_action_windows.add(window)
         elif self.turn is not None:
             self.turn.mark_action_completed()
+        if refresh_leaders:
+            self.refresh_leader_unlocks()
+            if self.pending is None:
+                self._offer_keleres_commander(player, alias)
+
+    def _offer_keleres_commander(self, player, alias):
+        """Offer Suffi An's printed unlock cost after a component-action card resolves."""
+        from leaders import leader_available
+        if (ACTION_CARD_DEFS.get(canonical_action_card(alias), {}).get('window') != 'As an action' or
+                not player.faction.startswith('keleres') or player.trade_goods < 1 or
+                leader_available(player, 'kelerescommander')):
+            return False
+        self.pending = {'player': player, 'effect': 'keleres_unlock', 'alias': alias,
+                        'window': None}
+        return True
 
     def _pending_choices(self):
         pending = self.pending
@@ -583,6 +616,10 @@ class ActionCardController:
         session = self.movement.session
         player = pending['player']
         effect = pending['effect']
+        if effect == 'keleres_unlock':
+            choices = [(('spend',), 'Spend 1 trade good · unlock Suffi An'),
+                       (('decline',), 'Keep the trade good')]
+            return choices if player.trade_goods > 0 else choices[1:]
         if effect == 'plagiarize':
             if 'technology' not in pending:
                 targets = self.plagiarize_targets(player)
@@ -643,6 +680,8 @@ class ActionCardController:
                 visible.append(('__next_refit__', 'More infantry →'))
             return ([('__finish_refit__', 'Finish with one mech')] if selected else []) + visible
         if effect in ('war_effort',):
+            if unit_supply_remaining(player, self.movement.board, 'cruiser') <= 0:
+                return []
             return [(tile.position, f'Tile {tile.system_id} · {tile.name}')
                     for tile in self.movement.board.values() if any(
                         unit.owner == player.faction and unit.location.region == Region.SPACE and
@@ -656,6 +695,8 @@ class ActionCardController:
         if effect == 'forward_supply_base':
             return [(other.faction, other.name) for other in self.players if other is not player]
         if effect == 'upgrade':
+            if unit_supply_remaining(player, self.movement.board, 'dreadnought') <= 0:
+                return []
             return [(unit.unit_id, f'{UNIT_TYPES[unit.kind]["name"]} · {unit.unit_id[-6:]}')
                     for unit in session.target.units if unit.owner == player.faction and
                     unit.kind == 'cruiser' and unit.location.region == Region.SPACE]
@@ -688,6 +729,15 @@ class ActionCardController:
         session = self.movement.session
         if choice not in {value for value, _ in self._pending_choices()}:
             raise ValueError('This action-card choice is no longer available.')
+        if effect == 'keleres_unlock':
+            if choice[0] == 'spend':
+                if player.trade_goods < 1:
+                    raise ValueError('You no longer have a trade good to spend.')
+                player.trade_goods -= 1
+                from leaders import notify_leader_event
+                notify_leader_event(player, 'keleres_action_card_trade_good')
+            self.pending = None
+            return
         if effect == 'plagiarize':
             if choice[0] == 'page':
                 pending['page'] += choice[1]
@@ -720,6 +770,7 @@ class ActionCardController:
                 self._consume(player, player.action_cards.index(pending['alias']),
                               pending['alias'], pending['window'], session)
                 self.pending = None
+                self._offer_keleres_commander(player, pending['alias'])
                 return
         if effect == 'fighter_conscription':
             tile = self.movement.board[pending['overflow_position']]
@@ -733,6 +784,7 @@ class ActionCardController:
             self._consume(player, player.action_cards.index(pending['alias']), pending['alias'],
                           pending['window'], session)
             self.pending = None
+            self._offer_keleres_commander(player, pending['alias'])
             return
         if effect == 'refit':
             selected = pending.setdefault('selected', [])
@@ -753,6 +805,7 @@ class ActionCardController:
             self._consume(player, player.action_cards.index(pending['alias']),
                           pending['alias'], pending['window'], session)
             self.pending = None
+            self._offer_keleres_commander(player, pending['alias'])
             return
         if effect == 'forward_supply_base':
             beneficiary = next(other for other in self.players if other.faction == choice)
@@ -813,10 +866,17 @@ class ActionCardController:
             pending['remaining'] -= 1
             if pending['remaining'] <= 0 or not self._pending_choices():
                 self.pending = None
+                self.refresh_leader_unlocks()
             return
         raise ValueError('This action-card choice is no longer available.')
 
     def _place_ship(self, tile, player, kind, prefix):
+        remaining = unit_supply_remaining(player, self.movement.board, kind)
+        if remaining is not None and remaining <= 0:
+            raise ValueError(f'No {kind} units remain in your reinforcements.')
+        if kind == 'fighter' and not can_place_fighter(
+                player, self.movement.board, tile, UnitLocation(Region.SPACE)):
+            raise ValueError('No plastic fighter anchor is available for another system.')
         unit = Unit(f'{prefix}-{random.randrange(1_000_000_000)}', kind, player.faction,
                     player.color_code, UnitLocation(Region.SPACE),
                     profile_id=(upgrade_profile(player, kind) or {}).get('id'))
@@ -849,9 +909,12 @@ class ActionCardController:
             return ACTION_CARD_DEFS[effect]
         if effect == 'fighter_conscription':
             systems = self.fighter_conscription_systems(player)
+            if not self.can_resolve_fighter_conscription(player):
+                raise ValueError('Fighter Conscription has more eligible systems than fighter anchors.')
             for tile in systems:
                 self._place_ship(tile, player, 'fighter', f'fighter-conscription-{player.faction}')
-            self._consume(player, hand_index, alias, window, session)
+            self._consume(player, hand_index, alias, window, session,
+                          refresh_leaders=False)
             self.pending = {'player': player, 'effect': effect, 'alias': alias,
                             'mandatory': True,
                             'positions': [tile.position for tile in systems]}
@@ -862,7 +925,8 @@ class ActionCardController:
             threshold = trigger['threshold']
             rolls = [self.movement.roll_d10(session) for _ in range(2)]
             hits = sum(value >= threshold for value in rolls)
-            self._consume(player, hand_index, alias, window, session)
+            self._consume(player, hand_index, alias, window, session,
+                          refresh_leaders=False)
             self.pending = {'player': player, 'effect': effect, 'alias': alias,
                             'remaining': hits, 'rolls': rolls,
                             'opponents': trigger['opponents']}

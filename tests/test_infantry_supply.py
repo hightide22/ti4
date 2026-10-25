@@ -8,8 +8,12 @@ from movement import MovementController, Session, Snapshot
 from player import create_players
 from technology import restore_infantry_on_cards
 from units import Region, Unit, UnitLocation, layout_units
-from unit_supply import (INFANTRY_SUPPLY, can_place_infantry, can_transfer_infantry,
-                         infantry_area_counts, infantry_count, infantry_remaining)
+from unit_supply import (FIGHTER_SUPPLY, INFANTRY_SUPPLY, can_place_fighter,
+                         can_place_infantry, can_transfer_fighters,
+                         can_transfer_infantry,
+                         fighter_area_counts, fighter_areas_remaining,
+                         infantry_area_counts, infantry_count, infantry_remaining,
+                         unit_supply_remaining)
 
 
 class InfantrySupplyTests(unittest.TestCase):
@@ -86,6 +90,80 @@ class InfantrySupplyTests(unittest.TestCase):
         self.assertFalse(can_place_infantry(
             sol, board, planets[INFANTRY_SUPPLY][0],
             UnitLocation(Region.PLANET, planets[INFANTRY_SUPPLY][1].planet_id)))
+
+    def test_fighter_tokens_need_one_of_ten_plastic_anchors_per_system(self):
+        board, players, _movement = self.game()
+        sol = self.player(players, 'sol')
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == sol.faction and unit.kind == 'fighter')]
+        systems = list(board.values())
+        self.assertGreaterEqual(len(systems), FIGHTER_SUPPLY + 1)
+        for index, tile in enumerate(systems[:FIGHTER_SUPPLY]):
+            tile.units.append(Unit(f'fighter-anchor-{index}', 'fighter', sol.faction,
+                                   sol.color_code, UnitLocation(Region.SPACE)))
+
+        self.assertEqual(len(fighter_area_counts(sol, board)), FIGHTER_SUPPLY)
+        self.assertEqual(fighter_areas_remaining(sol, board), 0)
+        self.assertTrue(can_place_fighter(sol, board, systems[0], UnitLocation(Region.SPACE)))
+        self.assertFalse(can_place_fighter(
+            sol, board, systems[FIGHTER_SUPPLY], UnitLocation(Region.SPACE)))
+
+    def test_fighter_tokens_in_an_anchored_system_do_not_use_extra_anchors(self):
+        board, players, _movement = self.game()
+        sol = self.player(players, 'sol')
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == sol.faction and unit.kind == 'fighter')]
+        tile = next(iter(board.values()))
+        tile.units.extend(Unit(f'fighter-stack-{index}', 'fighter', sol.faction,
+                               sol.color_code, UnitLocation(Region.SPACE))
+                          for index in range(10))
+
+        self.assertEqual(len(fighter_area_counts(sol, board)), 1)
+        self.assertEqual(fighter_areas_remaining(sol, board), FIGHTER_SUPPLY - 1)
+        self.assertTrue(can_place_fighter(sol, board, tile, UnitLocation(Region.SPACE)))
+
+    def test_moving_fighters_cannot_create_an_eleventh_anchored_system(self):
+        board, players, _movement = self.game()
+        sol = self.player(players, 'sol')
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == sol.faction and unit.kind == 'fighter')]
+        systems = list(board.values())
+        self.assertGreaterEqual(len(systems), FIGHTER_SUPPLY + 1)
+        for index, tile in enumerate(systems[:FIGHTER_SUPPLY]):
+            tile.units.append(Unit(f'fighter-transfer-{index}', 'fighter', sol.faction,
+                                   sol.color_code, UnitLocation(Region.SPACE)))
+        source, destination = systems[0], systems[FIGHTER_SUPPLY]
+        fighter = next(unit for unit in source.units if unit.owner == sol.faction and
+                       unit.kind == 'fighter')
+        transfer = [(source, fighter, destination, UnitLocation(Region.TRANSPORT,
+                                                                carrier_id='carrier'))]
+
+        self.assertTrue(can_transfer_fighters(sol, board, transfer))
+
+        source.units.append(Unit('second-source-fighter', 'fighter', sol.faction,
+                                 sol.color_code, UnitLocation(Region.SPACE)))
+        self.assertFalse(can_transfer_fighters(sol, board, transfer))
+
+    def test_other_unit_reinforcements_use_their_component_limits(self):
+        board, players, _movement = self.game()
+        sol = self.player(players, 'sol')
+        self.assertEqual(unit_supply_remaining(sol, board, 'carrier'), 4 - sum(
+            unit.owner == sol.faction and unit.kind == 'carrier'
+            for tile in board.values() for unit in tile.units))
+        limit = 5
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == sol.faction and unit.kind == 'dreadnought')]
+        home = next(tile for tile in board.values() if any(unit.owner == sol.faction
+                                                            for unit in tile.units))
+        home.units.extend(Unit(f'dreadnought-supply-{index}', 'dreadnought', sol.faction,
+                               sol.color_code, UnitLocation(Region.SPACE))
+                          for index in range(limit))
+
+        self.assertEqual(unit_supply_remaining(sol, board, 'dreadnought'), 0)
 
     def test_transported_infantry_and_space_area_share_an_anchor(self):
         board, players, _movement = self.game()

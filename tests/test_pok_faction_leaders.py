@@ -120,6 +120,83 @@ class LeaderLifecycleTests(unittest.TestCase):
         self.assertIn('argentcommander', refresh_leader_unlocks(self.argent, self.board))
         self.assertTrue(leader_available(self.argent, 'argentcommander'))
 
+    def test_ghost_commander_requires_units_in_three_wormhole_systems(self):
+        from units import Unit, UnitLocation
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('ghost', 'sol', 'jolnar', 'hacan'))
+        ghost = create_players(board, config)[0]
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units if unit.owner != ghost.faction]
+            tile.planet_owners = {planet_id: owner for planet_id, owner in tile.planet_owners.items()
+                                  if owner != ghost.faction}
+        wormhole_systems = [tile for tile in board.values()
+                            if {'ALPHA', 'BETA'} & set(tile.wormholes)]
+        self.assertGreaterEqual(len(wormhole_systems), 3)
+        planet_system = next(tile for tile in wormhole_systems if tile.planets)
+        ship_systems = [tile for tile in wormhole_systems if tile is not planet_system][:2]
+        self.assertEqual(len(ship_systems), 2)
+        for index, tile in enumerate(ship_systems):
+            tile.units.append(Unit(f'ghost-ship-{index}', 'cruiser', ghost.faction,
+                                   ghost.color_code, UnitLocation(Region.SPACE)))
+        planet_system.planet_owners[planet_system.planets[0].planet_id] = ghost.faction
+
+        self.assertEqual([], refresh_leader_unlocks(ghost, board))
+        self.assertFalse(leader_available(ghost, 'ghostcommander'))
+
+        planet_system.units.append(Unit('ghost-third-ship', 'cruiser', ghost.faction,
+                                        ghost.color_code, UnitLocation(Region.SPACE)))
+        self.assertIn('ghostcommander', refresh_leader_unlocks(ghost, board))
+        self.assertTrue(leader_available(ghost, 'ghostcommander'))
+
+    def test_sol_and_xxcha_commander_unlocks_include_exploration_attachments(self):
+        from exploration import ExplorationController
+
+        for faction, leader_id, value_index, attachment in (
+                ('sol', 'solcommander', 0, 'ds'),
+                ('xxcha', 'xxchacommander', 1, 'pw')):
+            with self.subTest(faction=faction):
+                config, board = load_board(ROOT / 'maps/four_player.json',
+                                           (faction, 'sol', 'jolnar', 'hacan')
+                                           if faction != 'sol' else
+                                           ('sol', 'jolnar', 'hacan', 'argent'))
+                players = create_players(board, config)
+                player = next(item for item in players if item.faction == faction)
+                exploration = ExplorationController(
+                    board, players, relic_deck=[],
+                    decks={'cultural': [], 'hazardous': [],
+                           'industrial': [], 'frontier': []})
+                planets = [planet for tile in board.values() for planet in tile.planets]
+                values = [planet.resources if value_index == 0 else planet.influence
+                          for planet in planets]
+                subsets = {0: []}
+                for index, value in enumerate(values):
+                    for total, indexes in tuple(subsets.items()):
+                        new_total = total + value
+                        if value and new_total < 12 and new_total not in subsets:
+                            subsets[new_total] = indexes + [index]
+                qualifying = next((indexes for total, indexes in subsets.items()
+                                   if indexes and total + 2 * len(indexes) >= 12), None)
+                self.assertIsNotNone(qualifying, 'map must offer a near-threshold planet set')
+                selected_ids = {planets[index].planet_id for index in qualifying}
+                for tile in board.values():
+                    for planet_id, owner in tuple(tile.planet_owners.items()):
+                        if owner == faction:
+                            del tile.planet_owners[planet_id]
+                    for planet in tile.planets:
+                        if planet.planet_id in selected_ids:
+                            tile.planet_owners[planet.planet_id] = faction
+                total_before = sum(values[index] for index in qualifying)
+                self.assertLess(total_before, 12)
+                self.assertFalse(leader_available(player, leader_id))
+                self.assertEqual([], refresh_leader_unlocks(player, board, players))
+
+                for planet_id in selected_ids:
+                    exploration.attachments[planet_id] = [attachment]
+
+                self.assertIn(leader_id, refresh_leader_unlocks(
+                    player, board, players, exploration))
+                self.assertTrue(leader_available(player, leader_id))
+
     def test_cabal_commander_counts_dimensional_tears_and_unlocks_on_construction(self):
         config, board = load_board(ROOT / 'maps/four_player.json',
                                    ('cabal', 'sol', 'jolnar', 'hacan'))

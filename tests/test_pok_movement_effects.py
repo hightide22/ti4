@@ -10,6 +10,7 @@ from leaders import leader_available
 from movement import MovementController, MovementError, Session, Snapshot
 from player import PlanetCard, create_players
 from units import Region, Unit, UnitLocation, layout_units, unit_profile
+from unit_supply import unit_supply_remaining
 
 
 def game(faction='sol'):
@@ -471,6 +472,32 @@ class PokMovementEffectsTests(unittest.TestCase):
         self.assertEqual(1, sum(unit.owner == 'cabal' and unit.kind == 'carrier' and
                                 unit.unit_id.startswith('cabal-built-') for unit in home.units))
 
+    def test_cabal_can_amalgamate_a_captured_unit_when_own_supply_is_empty(self):
+        board, players, movement = game('cabal')
+        cabal = players[0]
+        home = next(tile for tile in board.values()
+                    if cabal.faction in tile.planet_owners.values())
+        dock = next(unit for unit in home.units if unit.owner == 'cabal' and
+                    unit.kind == 'spacedock')
+        other_systems = [tile for tile in board.values() if tile is not home]
+        for index in range(7):
+            tile = other_systems[index]
+            tile.units.append(Unit(f'cabal-cruiser-reserve-{index}', 'cruiser', 'cabal',
+                                   cabal.color_code, UnitLocation(Region.SPACE)))
+        cabal.captured_units['cruiser'] = 1
+        self.assertEqual(0, unit_supply_remaining(cabal, board, 'cruiser'))
+
+        movement.start_strategy_production(cabal, home, dock)
+        movement.adjust_production('cruiser', 1)
+        self.assertEqual(2, movement.production_cost(movement.session))
+        self.assertEqual(1, movement.adjust_amalgamation('cruiser', 1))
+        self.assertEqual(0, movement.production_cost(movement.session))
+        movement.produce()
+
+        self.assertNotIn('cruiser', cabal.captured_units)
+        self.assertEqual(9, sum(unit.owner == 'cabal' and unit.kind == 'cruiser'
+                                for tile in board.values() for unit in tile.units))
+
     def test_cabal_flagship_captures_own_destroyed_ship(self):
         board, players, movement = game('cabal')
         cabal = players[0]
@@ -634,6 +661,53 @@ class PokMovementEffectsTests(unittest.TestCase):
                                  UnitLocation(Region.SPACE)))
         session = Session(xxcha, target, {}, Snapshot.capture(board, xxcha, players))
         self.assertIn(mech, [unit for _, unit, _ in movement._space_cannon_shooters(session)])
+
+    def test_l1z1x_assimilate_does_not_exceed_structure_supply(self):
+        for kind, limit in (('pds', 6), ('spacedock', 3)):
+            with self.subTest(kind=kind):
+                board, players, movement = game('l1z1x')
+                l1z1x, sol = players[:2]
+                target = next(tile for tile in board.values()
+                              if tile.planets and not tile.custodians_present and
+                              not any(planet.faction_homeworld for planet in tile.planets))
+                planet = target.planets[0]
+                target.units.append(Unit(f'enemy-{kind}', kind, sol.faction,
+                                         sol.color_code,
+                                         UnitLocation(Region.PLANET, planet.planet_id)))
+
+                reserve_planets = [candidate for tile in board.values() if tile is not target
+                                   for candidate in tile.planets]
+                placed = sum(unit.owner == l1z1x.faction and unit.kind == kind
+                             for tile in board.values() for unit in tile.units)
+                per_planet = 2 if kind == 'pds' else 1
+                for reserve_planet in reserve_planets:
+                    board_tile = next(tile for tile in board.values()
+                                      if reserve_planet in tile.planets)
+                    on_planet = sum(unit.owner == l1z1x.faction and unit.kind == kind and
+                                    unit.location.region == Region.PLANET and
+                                    unit.location.planet_id == reserve_planet.planet_id
+                                    for unit in board_tile.units)
+                    for _ in range(min(per_planet - on_planet, limit - placed)):
+                        board_tile.units.append(Unit(
+                            f'l1z1x-{kind}-{placed}', kind, l1z1x.faction,
+                            l1z1x.color_code,
+                            UnitLocation(Region.PLANET, reserve_planet.planet_id)))
+                        placed += 1
+                    if placed == limit:
+                        break
+                self.assertEqual(limit, placed)
+
+                session = Session(l1z1x, target, {},
+                                  Snapshot.capture(board, l1z1x, players))
+                self.assertTrue(movement.capture_planet(session, planet.planet_id))
+                self.assertFalse(any(unit.owner == 'sol' and unit.kind == kind and
+                                     unit.location.planet_id == planet.planet_id
+                                     for unit in target.units))
+                self.assertFalse(any(unit.owner == 'l1z1x' and unit.kind == kind and
+                                     unit.location.planet_id == planet.planet_id
+                                     for unit in target.units))
+                self.assertEqual(limit, sum(unit.owner == 'l1z1x' and unit.kind == kind
+                                            for tile in board.values() for unit in tile.units))
 
     def test_l1z1x_mech_bombards_from_other_planet(self):
         board, players, movement = game('l1z1x')

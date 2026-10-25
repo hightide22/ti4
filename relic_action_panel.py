@@ -12,6 +12,7 @@ import arcade
 
 from ui_theme import ACCENT, BORDER, CARD, GOLD, INK, MUTED, SELECTED, button, modal, surface
 from units import Region, unit_profile
+from unit_supply import can_place_structure
 
 
 ACTION_RELICS = frozenset({'codex', 'dynamiscore', 'nanoforge',
@@ -146,10 +147,9 @@ class RelicActionPanel:
                     for system in exploration.board.values() for unit in system.units)
         if total >= {'pds': 6, 'spacedock': 3}[kind]:
             return False
-        here = [unit for unit in tile.units if unit.owner == player.faction and
-                unit.location.region == Region.PLANET and
-                unit.location.planet_id == planet_id and unit.kind == kind]
-        return len(here) < (2 if kind == 'pds' else 1)
+        if kind == 'spacedock' and player.faction == 'saar':
+            return True
+        return can_place_structure(tile, planet_id, player.faction, kind)
 
     def _targets(self, exploration):
         player = (exploration.players[self.owner_faction]

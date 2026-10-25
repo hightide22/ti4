@@ -47,7 +47,7 @@ from leader_effects import (clear_round_hero_effects, use_cabal_hero,
                             use_empyrean_hero, use_keleres_harka_hero,
                             use_ghost_agent, use_l1z1x_agent, use_naaz_agent, use_naaz_hero,
                             use_nomad_hero, use_saar_agent, l1z1x_agent_mech_available,
-                            use_titans_hero)
+                            use_muaat_agent, use_titans_hero)
 from pok_factions import keleres_council_patronage, naaz_fabrication
 
 ROOT = Path(__file__).resolve().parent
@@ -100,6 +100,7 @@ class BoardWindow(arcade.Window):
 
     def configure_game(self, map_path, factions):
         self.immediate_command_allocation = False
+        self.agent_production_owner = None
         map_config = json.loads(Path(map_path).read_text(encoding='utf-8'))
         slot_count = sum(bool(entry.get('faction')) for entry in map_config['tiles'])
         self.map_config, self.board = load_board(
@@ -484,6 +485,17 @@ class BoardWindow(arcade.Window):
         self.turn_history_size = history_size
         self.turn_history_action_count = action_count
 
+    def restore_agent_production_view(self):
+        if self.agent_production_owner is None or self.movement.session:
+            return
+        self.agent_production_owner = None
+        active = self.turn_order.active_player
+        if active is not None:
+            self.player_panel.active = self.player_panel.players.index(active)
+            self.player_panel.card_offset = 0
+            self.frame_player_systems(active)
+            self.system_panel.reset()
+
     def restore_infantry_on_cards(self):
         turn = self.turn_order
         if (turn.strategy_selection or turn.command_allocation or
@@ -750,6 +762,9 @@ class BoardWindow(arcade.Window):
     def _finish_component_action(self, snapshot):
         self.movement.history.append(UndoEntry(snapshot))
         self.sync_turn_action()
+        for player in self.player_panel.players:
+            refresh_leader_unlocks(player, self.board, self.player_panel.players,
+                                   self.exploration)
 
     def use_relic_action(self, alias):
         try:
@@ -890,6 +905,9 @@ class BoardWindow(arcade.Window):
         session.activation_agent_owner = None
         session.activation_agent_alias = None
         self.leader_panel.close()
+        for player in self.player_panel.players:
+            refresh_leader_unlocks(player, self.board, self.player_panel.players,
+                                   self.exploration)
         self.prompt_activation_agent(session)
 
     def resolve_leader_action(self, command):
@@ -912,6 +930,33 @@ class BoardWindow(arcade.Window):
         player = next((candidate for candidate in self.player_panel.players
                        if candidate.faction == self.leader_panel.reaction_owner_faction),
                       self.turn_order.active_player)
+        if alias == 'muaatagent':
+            if (player is None or player.faction != 'muaat' or len(command) < 3 or
+                    not isinstance(command[2], tuple) or len(command[2]) != 3):
+                self.movement_error = 'Umbat needs a player and a system containing their War Sun or flagship.'
+                return
+            snapshot = None
+            try:
+                snapshot = self._component_action_snapshot()
+                _effect, beneficiary_faction, position = command[2]
+                beneficiary = next(candidate for candidate in self.player_panel.players
+                                   if candidate.faction == beneficiary_faction)
+                target = self.board[position]
+                use_muaat_agent(player, beneficiary, target)
+                self.movement.start_agent_production(beneficiary, target, snapshot)
+            except (ValueError, KeyError, StopIteration) as error:
+                if snapshot is not None:
+                    snapshot.restore()
+                self.movement_error = str(error) or 'Umbat target is no longer available.'
+                return
+            self.agent_production_owner = player.faction
+            self.player_panel.active = self.player_panel.players.index(beneficiary)
+            self.player_panel.card_offset = 0
+            self.frame_player_systems(beneficiary)
+            self.selected = target.position
+            self.leader_panel.close()
+            self.movement_error = None
+            return
         if alias == 'l1z1xagent':
             session = self.movement.session
             if (player is None or player.faction != 'l1z1x' or session is None or
@@ -1524,6 +1569,8 @@ class BoardWindow(arcade.Window):
                 available.add('l1z1xagent')
             if (not self.movement.session and not self.strategy.session and
                     self.turn_order.can_take_action):
+                if player.faction == 'muaat' and leader_available(player, 'muaatagent'):
+                    available.add('muaatagent')
                 if player.faction == 'arborec' and leader_available(player, 'arborecagent'):
                     available.add('arborecagent')
                 if (player.faction == 'xxcha' and leader_available(player, 'xxchaagent') and
@@ -1762,6 +1809,7 @@ class BoardWindow(arcade.Window):
         self.frames += 1
         if self.ai.bot_factions and not self.smoke:
             self.ai.update(delta_time)
+        self.restore_agent_production_view()
         if self.technology_smoke_test and self.frames == 3:
             preview_dir = ROOT / 'previews'
             preview_dir.mkdir(exist_ok=True)
@@ -3264,6 +3312,8 @@ class BoardWindow(arcade.Window):
                             self.movement_panel.reset()
                         elif action[0] == 'production_unit':
                             self.movement.adjust_production(action[1], action[2])
+                        elif action[0] == 'production_reclaim':
+                            self.movement.toggle_production_reclaim(action[1], action[2])
                         elif action[0] == 'production_trade_goods':
                             self.movement.change_production_trade_goods(action[1])
                         elif action[0] == 'aida_discount':
@@ -3286,6 +3336,7 @@ class BoardWindow(arcade.Window):
                             self.selected_units = ()
                     except ValueError as error:
                         self.movement_error = str(error)
+                self.restore_agent_production_view()
                 self.sync_turn_action()
             return
         if x < left and y < self.player_panel.HEIGHT:

@@ -137,6 +137,35 @@ class RemainingFactionTests(unittest.TestCase):
         movement.destroy_unit(target, second, session)
         self.assertEqual(set(nekro.technologies), copied_technologies)
 
+    def test_nekro_can_gain_once_in_space_combat_and_again_in_each_ground_combat(self):
+        board, players, by_faction = self.game(('nekro', 'sol', 'jolnar', 'hacan'))
+        nekro, sol = by_faction['nekro'], by_faction['sol']
+        sol.technologies = sol.technologies | {'ac2', 'gd', 'st'}
+        starting_technologies = len(nekro.technologies)
+        target = next(tile for tile in board.values() if tile.planets and tile.number != 18)
+        planet = target.planets[0]
+        target.planet_owners[planet.planet_id] = 'sol'
+        session = Session(nekro, target, {}, Snapshot.capture(board, nekro, players),
+                          combat_type='space', combat_factions=('nekro', 'sol'),
+                          stage='space_combat')
+        movement = MovementController(board, players)
+
+        first_victim = Unit('nekro-space-tech-victim', 'carrier', 'sol', sol.color_code,
+                            UnitLocation(Region.SPACE))
+        target.units.append(first_victim)
+        movement.destroy_unit(target, first_victim, session)
+        self.assertIn('nekro', session.nekro_tech_gained)
+        self.assertEqual(len(nekro.technologies), starting_technologies + 1)
+
+        target.units.append(Unit('sol-ground-combatant', 'infantry', 'sol', sol.color_code,
+                                 UnitLocation(Region.PLANET, planet.planet_id)))
+        movement.start_ground_combat(session, planet.planet_id)
+        self.assertNotIn('nekro', session.nekro_tech_gained)
+        second_victim = next(unit for unit in target.units
+                             if unit.owner == 'sol' and unit.kind == 'infantry')
+        movement.destroy_unit(target, second_victim, session)
+        self.assertEqual(len(nekro.technologies), starting_technologies + 2)
+
     def test_mentak_can_pillage_a_neighbor_commodity_after_transaction(self):
         board, players, by_faction = self.game(('mentak', 'sol', 'jolnar', 'hacan'))
         mentak, sol = by_faction['mentak'], by_faction['sol']

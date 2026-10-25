@@ -7,6 +7,7 @@ from technology import (ai_development_skip_required, available_technologies,
                         can_use_specialty_planet, missing_prerequisites,
                         research_technology, unit_upgrade_kind, upgrade_profile)
 from units import Unit, UnitLocation, Region
+from unit_supply import can_place_structure
 
 
 @dataclass
@@ -125,6 +126,10 @@ class StrategyController:
             raise ValueError('Allocate all new command tokens first.')
         if (s.card == 2 and s.stage != 'offer' and s.player.faction == 'xxcha'):
             self.movement.peace_accords(s.player)
+        from leaders import refresh_leader_unlocks
+        for participant in self.turn.players:
+            refresh_leader_unlocks(participant, self.board, self.turn.players,
+                                   self.exploration)
         if not s.primary and not s.hero_secondary:
             self.turn.strategy_secondary_used[s.player.faction].add(s.card)
         if s.remaining:
@@ -456,12 +461,16 @@ class StrategyController:
                  for unit in tile.units if unit.owner == s.player.faction and unit.kind == kind]
         if len(owned) >= (6 if kind == 'pds' else 3):
             return []
-        per_planet_limit = 2 if kind == 'pds' else 1
         return [card for card in s.player.planets
                 if (tile := self.planet_system(card.planet.planet_id)) is not None
                 and (not selected_only or s.selected_system is None or tile.position == s.selected_system)
                 and tile.planet_owners.get(card.planet.planet_id) == s.player.faction
-                and sum(unit.location.planet_id == card.planet.planet_id for unit in owned) < per_planet_limit]
+                and (self.exploration is None or not (
+                    self.exploration.planet_is_blocked(card.planet.planet_id) or
+                    card.planet.planet_id in self.exploration.destroyed_planets))
+                and (kind == 'spacedock' and s.player.faction == 'saar' or
+                     can_place_structure(tile, card.planet.planet_id,
+                                         s.player.faction, kind))]
 
     def select_warfare_token(self, position, faction):
         s = self.session
@@ -531,7 +540,8 @@ class StrategyController:
                                s.player.color_code, location,
                                profile_id=(upgrade_profile(s.player, kind) or {}).get('id')))
         from leaders import refresh_leader_unlocks
-        refresh_leader_unlocks(s.player, self.board, self.turn.players)
+        refresh_leader_unlocks(s.player, self.board, self.turn.players,
+                               self.exploration)
         s.builds_left -= 1
         if s.builds_left:
             s.structure = 'pds'

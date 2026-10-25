@@ -261,6 +261,41 @@ class PokEffectsTests(unittest.TestCase):
         self.assertIn('elysium', titans.hero_attachments)
         self.assertEqual(titans_hero_space_cannon(titans, home), (5, 3))
 
+    def test_titans_pds_limit_is_per_player_and_cannot_be_exceeded(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('titans', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        by_faction = {player.faction: player for player in players}
+        titans, sol, jolnar = (by_faction[faction] for faction in
+                               ('titans', 'sol', 'jolnar'))
+        target = next(tile for tile in board.values()
+                      if any(planet.faction_homeworld == 'titans'
+                             for planet in tile.planets))
+        planet = target.planets[0]
+        titans_place_sleeper(titans, board, target, planet.planet_id)
+        target.units.extend((
+            Unit('sol-pds-on-titans-planet', 'pds', sol.faction, sol.color_code,
+                 UnitLocation(Region.PLANET, planet.planet_id)),
+            Unit('jolnar-pds-on-titans-planet', 'pds', jolnar.faction, jolnar.color_code,
+                 UnitLocation(Region.PLANET, planet.planet_id)),
+        ))
+
+        placed = titans_awaken(titans, board, target, planet_ids=(planet.planet_id,))
+
+        self.assertEqual(1, len(placed), 'foreign PDS do not count against Titans limit')
+        self.assertNotIn(planet.planet_id, target.sleeper_tokens)
+        titans_place_sleeper(titans, board, target, planet.planet_id)
+        target.units.append(Unit('titans-second-pds', 'pds', titans.faction,
+                                 titans.color_code,
+                                 UnitLocation(Region.PLANET, planet.planet_id)))
+        placed = titans_awaken(titans, board, target, planet_ids=(planet.planet_id,))
+        self.assertEqual((), placed)
+        self.assertIn(planet.planet_id, target.sleeper_tokens)
+        self.assertEqual(2, sum(unit.kind == 'pds' and unit.owner == titans.faction and
+                                unit.location.region == Region.PLANET and
+                                unit.location.planet_id == planet.planet_id
+                                for unit in target.units))
+
     def test_mahact_foreign_token_changes_fleet_supply_and_enemy_reserve(self):
         board, mahact, sol = self.game('mahact')
         before = mahact_fleet_limit(mahact)

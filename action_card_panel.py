@@ -227,7 +227,11 @@ class ActionCardPanel:
     def _draw_pending(self, window, session):
         pending = window.action_cards.pending
         player = pending['player']
-        card = ACTION_CARD_DEFS[pending['effect']]
+        card = ACTION_CARD_DEFS.get(pending['effect'], {
+            'name': 'Suffi An · Commander',
+            'window': 'After you play a component-action card',
+            'effect': 'Spend 1 trade good to unlock Suffi An.',
+        })
         choices = window.action_cards.pending_choices()
         width = min(620, window.width - 48)
         columns = 2 if len(choices) > 4 else 1
@@ -257,6 +261,8 @@ class ActionCardPanel:
                      if pending['effect'] == 'experimental_battlestation' else
                      'Choose the cruiser to replace with a dreadnought.'
                      if pending['effect'] == 'upgrade' else
+                     'Choose whether to spend 1 trade good to unlock the Keleres commander.'
+                     if pending['effect'] == 'keleres_unlock' else
                      'Choose the ship to destroy with Direct Hit.')
         window.text('action_pending_help', help_text, left + 22, top - 62, 10, MUTED, width - 44)
         for index, (value, label) in enumerate(choices):

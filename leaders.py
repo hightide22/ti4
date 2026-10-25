@@ -95,7 +95,7 @@ def notify_leader_event(player, event: str) -> None:
         unlock_leader(player, leader)
 
 
-def refresh_leader_unlocks(player, board, players=()) -> list[str]:
+def refresh_leader_unlocks(player, board, players=(), exploration=None) -> list[str]:
     """Unlock commanders whose printed board-state requirements are now met."""
     if not player.leaders:
         return []
@@ -108,6 +108,11 @@ def refresh_leader_unlocks(player, board, players=()) -> list[str]:
     owned_tiles = set(unit_tiles)
     owned_tiles.update(tile.position for tile, _ in owned_planets)
     unit_count = lambda kind: sum(unit.kind == kind for _, unit in units)
+    planet_values = getattr(exploration, 'planet_values', None)
+    resource_value = lambda planet: (planet_values(planet)[0] if planet_values
+                                     else planet.resources)
+    influence_value = lambda planet: (planet_values(planet)[1] if planet_values
+                                      else planet.influence)
     checks = {
         'arboreccommander': lambda: sum(unit.kind in ('infantry', 'mech') and
                                       unit.location.region == Region.PLANET and
@@ -119,7 +124,7 @@ def refresh_leader_unlocks(player, board, players=()) -> list[str]:
         'cabalcommander': lambda: sum(tile.is_gravity_rift and tile.position in unit_tiles
                                      for tile in board.values()) >= 3,
         'ghostcommander': lambda: sum(bool({'ALPHA', 'BETA'} & set(tile.wormholes)) and
-                                      tile.position in owned_tiles for tile in board.values()) >= 3,
+                                      tile.position in unit_tiles for tile in board.values()) >= 3,
         'empyreancommander': lambda: bool(players) and all(
             other is player or any(
                 neighbor.position in {occupied.position for occupied in board.values()
@@ -146,11 +151,13 @@ def refresh_leader_unlocks(player, board, players=()) -> list[str]:
         'saarcommander': lambda: unit_count('spacedock') >= 3,
         'sardakkcommander': lambda: sum(tile.definition.is_home_system is False
                                       for tile, _ in owned_planets) >= 5,
-        'solcommander': lambda: sum(planet.resources for _, planet in owned_planets) >= 12,
+        'solcommander': lambda: sum(resource_value(planet)
+                                     for _, planet in owned_planets) >= 12,
         'titanscommander': lambda: sum(unit.kind in ('pds', 'spacedock')
                                      for _, unit in units) >= 5,
         'winnucommander': lambda: any(tile.number == 18 for tile, _ in owned_planets),
-        'xxchacommander': lambda: sum(planet.influence for _, planet in owned_planets) >= 12,
+        'xxchacommander': lambda: sum(influence_value(planet)
+                                      for _, planet in owned_planets) >= 12,
         'yssarilcommander': lambda: len(player.action_cards) >= 7,
     }
     unlocked = []

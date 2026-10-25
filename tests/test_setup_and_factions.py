@@ -291,6 +291,43 @@ class FactionAbilityTests(unittest.TestCase):
         self.assertEqual(sum(unit.owner == 'muaat' and unit.kind == 'fighter'
                              for tile in board.values() for unit in tile.units), before_fighters)
 
+    def test_muaat_star_forge_triggers_an_already_unlocked_commander(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('muaat', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        muaat = next(player for player in players if player.faction == 'muaat')
+        muaat.leaders['muaatcommander'].unlocked = True
+        movement = MovementController(board, players)
+        home = next(tile for tile in board.values()
+                    if any(unit.owner == 'muaat' and unit.kind == 'warsun' and
+                           unit.location.region == Region.SPACE for unit in tile.units))
+        before_goods = muaat.trade_goods
+
+        movement.star_forge(muaat, home.position, 'destroyer')
+
+        self.assertEqual(before_goods + 1, muaat.trade_goods)
+
+    def test_muaat_star_forge_can_add_fighter_tokens_to_an_anchored_system(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('muaat', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        muaat = next(player for player in players if player.faction == 'muaat')
+        home = next(tile for tile in board.values()
+                    if any(unit.owner == 'muaat' and unit.kind == 'warsun' and
+                           unit.location.region == Region.SPACE for unit in tile.units))
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == 'muaat' and unit.kind == 'fighter')]
+        home.units.extend(Unit(f'muaat-fighter-token-{index}', 'fighter', 'muaat',
+                               muaat.color_code, UnitLocation(Region.SPACE))
+                          for index in range(10))
+        movement = MovementController(board, players)
+
+        movement.star_forge(muaat, home.position, 'fighter')
+
+        self.assertEqual(sum(unit.owner == 'muaat' and unit.kind == 'fighter'
+                             for unit in home.units), 12)
+
     def test_sol_versatile_grants_one_extra_command_each_round(self):
         config, board = load_board()
         players = create_players(board, config)

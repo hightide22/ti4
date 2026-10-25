@@ -11,7 +11,8 @@ import textwrap
 import arcade
 
 from leaders import leader_available, leader_catalog
-from leader_effects import arborec_agent_replacements, xxcha_agent_remove_options
+from leader_effects import (arborec_agent_replacements, muaat_agent_systems,
+                            xxcha_agent_remove_options)
 from ui_theme import (ACCENT, BORDER, CARD, GOLD, INK, MUTED, PANEL,
                       SELECTED, button, modal, surface)
 from units import Region, UNIT_TYPES
@@ -26,7 +27,8 @@ MANUAL_ACTION_HEROES = frozenset({
     'cabalhero', 'empyreanhero', 'keleresheroharka', 'naazhero',
     'nomadhero', 'titanshero',
 })
-MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'l1z1xagent', 'saaragent', 'xxchaagent'})
+MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'l1z1xagent', 'muaatagent',
+                                  'saaragent', 'xxchaagent'})
 
 
 class LeaderPanel:
@@ -53,6 +55,7 @@ class LeaderPanel:
         self.agent_mode: str | None = None
         self.agent_ship_id: str | None = None
         self.agent_planet_id: str | None = None
+        self.agent_player_faction: str | None = None
         self.reaction_owner_faction: str | None = None
 
     def close(self) -> None:
@@ -72,6 +75,7 @@ class LeaderPanel:
         self.agent_mode = leader_id
         self.agent_ship_id = None
         self.agent_planet_id = None
+        self.agent_player_faction = None
         self.target_page = 0
 
     def cancel_agent_action(self) -> None:
@@ -110,9 +114,13 @@ class LeaderPanel:
         elif action[0] == 'agent_planet_select':
             self.agent_planet_id = action[1]
             self.target_page = 0
+        elif action[0] == 'agent_player_select':
+            self.agent_player_faction = action[1]
+            self.target_page = 0
         elif action[0] == 'agent_back':
             self.agent_ship_id = None
             self.agent_planet_id = None
+            self.agent_player_faction = None
             self.target_page = 0
         elif action[0] == 'agent_cancel':
             self.cancel_agent_action()
@@ -377,6 +385,44 @@ class LeaderPanel:
                        x, by, width, 27, size=8)
                 self.hits.append((('use', alias, ship.unit_id), x, x + width,
                                   by, by + 27))
+        elif alias == 'muaatagent':
+            if self.agent_player_faction is None:
+                beneficiaries = list(window.player_panel.players)
+                pages = max(1, (len(beneficiaries) + page_size - 1) // page_size)
+                self.target_page = min(self.target_page, pages - 1)
+                visible = beneficiaries[self.target_page * page_size:
+                                        (self.target_page + 1) * page_size]
+                for index, beneficiary in enumerate(visible):
+                    by = bottom + 138 - index * 31
+                    button(window, ('agent_beneficiary', beneficiary.faction),
+                           f'{beneficiary.faction.upper()} · CHOOSE PLAYER',
+                           x, by, width, 27, size=8)
+                    self.hits.append((('agent_player_select', beneficiary.faction),
+                                      x, x + width, by, by + 27))
+            else:
+                beneficiary = next((candidate for candidate in window.player_panel.players
+                                    if candidate.faction == self.agent_player_faction), None)
+                systems = muaat_agent_systems(beneficiary, board) if beneficiary else []
+                pages = max(1, (len(systems) + page_size - 1) // page_size)
+                self.target_page = min(self.target_page, pages - 1)
+                visible = systems[self.target_page * page_size:
+                                  (self.target_page + 1) * page_size]
+                if not systems:
+                    window.text('muaat_agent_no_system',
+                                'That player has no War Sun or flagship on the board.',
+                                x, bottom + 128, 9, MUTED, width)
+                for index, tile in enumerate(visible):
+                    ships = [unit.kind for unit in tile.units
+                             if unit.owner == beneficiary.faction and
+                             unit.kind in ('warsun', 'flagship') and
+                             unit.location.region == Region.SPACE]
+                    label = f'TILE {tile.number} · {tile.name} · {", ".join(kind.title() for kind in ships)}'
+                    by = bottom + 138 - index * 31
+                    button(window, ('muaat_agent_system', tile.position), label,
+                           x, by, width, 27, size=8)
+                    self.hits.append((('use', alias,
+                                       ('muaat', beneficiary.faction, tile.position)),
+                                      x, x + width, by, by + 27))
         elif alias == 'arborecagent':
             if self.agent_ship_id is None:
                 targets = [(tile, unit) for tile in board.values() for unit in tile.units
@@ -455,7 +501,28 @@ class LeaderPanel:
                 self.hits.append((('agent_back',), x, x + min(145, width),
                                   bottom + 20, bottom + 45))
 
-        if alias == 'arborecagent' and self.agent_ship_id is not None or \
+        if alias == 'muaatagent':
+            if self.agent_player_faction is not None:
+                button(window, 'leader_agent_back', 'BACK TO PLAYERS', x,
+                       bottom + 20, min(140, width), 25, size=8)
+                self.hits.append((('agent_back',), x, x + min(140, width),
+                                  bottom + 20, bottom + 45))
+            if pages > 1:
+                for direction, label, bx in ((-1, '‹', x + width - 184),
+                                              (1, '›', x + width - 144)):
+                    if 0 <= self.target_page + direction < pages:
+                        button(window, ('leader_agent_page', direction), label,
+                               bx, bottom + 20, 34, 25, size=10)
+                        self.hits.append((('target_page', direction), bx, bx + 34,
+                                          bottom + 20, bottom + 45))
+                window.text('leader_agent_target_page',
+                            f'{self.target_page + 1}/{pages}', x + width - 112,
+                            bottom + 28, 8, MUTED)
+            button(window, 'leader_agent_cancel', 'CANCEL', x + width - 96,
+                   bottom + 20, 96, 25, size=8)
+            self.hits.append((('agent_cancel',), x + width - 96,
+                              x + width, bottom + 20, bottom + 45))
+        elif alias == 'arborecagent' and self.agent_ship_id is not None or \
                 alias == 'xxchaagent' and self.agent_planet_id is not None:
             button(window, 'leader_agent_cancel', 'CANCEL', x + width - 96,
                    bottom + 20, 96, 25, size=8)

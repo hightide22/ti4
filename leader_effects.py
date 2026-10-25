@@ -112,6 +112,23 @@ def use_mahact_agent(owner, active_player, board, token_tile):
     token_tile.command_tokens.remove(active_player.faction)
 
 
+def muaat_agent_systems(beneficiary, board):
+    """Systems where Umbat can enable production for this player."""
+    return tuple(tile for tile in board.values() if any(
+        unit.owner == beneficiary.faction and unit.kind in ('warsun', 'flagship') and
+        unit.location.region == Region.SPACE for unit in tile.units))
+
+
+def use_muaat_agent(owner, beneficiary, tile):
+    """Validate Umbat's player/system choice and exhaust the agent."""
+    _require_agent(owner, 'muaatagent')
+    if not any(unit.owner == beneficiary.faction and unit.kind in ('warsun', 'flagship') and
+               unit.location.region == Region.SPACE for unit in tile.units):
+        raise ValueError('Choose a system with the selected player’s War Sun or flagship.')
+    exhaust_leader(owner, 'muaatagent')
+    return True
+
+
 def use_naaz_agent(owner, beneficiary, exploration, tile, planet_id,
                    *, auto_resolve=False):
     """Explore a controlled non-home planet at the end of a turn."""

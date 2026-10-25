@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import dataclass, field
 from itertools import combinations
 from math import ceil
@@ -11,7 +11,9 @@ from uuid import uuid4
 from player import PlanetCard
 from leaders import leader_available
 from units import Region, Unit, UnitLocation, UNIT_TYPES, mobile_ship, unit_profile, unit_profiles
-from unit_supply import can_place_infantry, can_transfer_infantry
+from unit_supply import (can_place_fighter, can_place_infantry,
+                         can_transfer_fighters, can_transfer_infantry,
+                         unit_supply_remaining)
 from technology import (production_allowed, upgrade_profile, copy_technology,
                         technology_catalog, is_unit_upgrade)
 
@@ -175,6 +177,7 @@ class SessionCheckpoint:
             session.bombardment_resolved = False
         elif self.stage == 'production':
             session.production_choices.clear()
+            session.production_reclaims.clear()
             session.production_planets.clear()
             session.trade_goods_to_spend = 0
             session.self_assembly_planet = None
@@ -206,6 +209,10 @@ class Session:
     sources: dict
     snapshot: Snapshot
     strategic_production: bool = False
+    component_action: bool = False
+    agent_production: bool = False
+    production_unit_cost_cap: float | None = None
+    ground_forces_in_space: bool = False
     selected: set[str] = field(default_factory=set)
     cargo_selected: set[str] = field(default_factory=set)
     pickup_sources: dict = field(default_factory=dict)
@@ -261,6 +268,7 @@ class Session:
     production_limit: int = 0
     production_sites: list[tuple[str, int]] = field(default_factory=list)
     production_choices: dict[str, int] = field(default_factory=dict)
+    production_reclaims: dict[str, set[str]] = field(default_factory=dict)
     production_planets: set[str] = field(default_factory=set)
     self_assembly_planet: str | None = None
     aida_production_discount: bool = False
@@ -688,7 +696,7 @@ class MovementController:
             self.resolve_exploration_queue()
         from leaders import refresh_leader_unlocks
         for participant in self.players:
-            refresh_leader_unlocks(participant, self.board, self.players)
+            refresh_leader_unlocks(participant, self.board, self.players, self.exploration)
 
     def has_tech(self, faction, alias):
         player = self.faction_player(faction)
@@ -915,7 +923,7 @@ class MovementController:
             raise MovementError('No sleeper tokens in this system were present at activation.')
         from pok_factions import titans_awaken
         placed = titans_awaken(session.player, self.board, session.target,
-                               planet_ids=eligible)
+                               planet_ids=eligible, exploration=self.exploration)
         if not placed:
             raise MovementError('No legal PDS placement is available for these sleeper tokens.')
         remaining = len(eligible) - len(placed)
@@ -1106,6 +1114,8 @@ class MovementController:
                        any(planet.planet_id == planet_id for planet in tile.planets)), None)
         if target is None:
             raise MovementError('Choose a planet you control')
+        if not self.planet_allows_landing(planet_id):
+            raise MovementError('Units cannot be placed on a blocked or destroyed planet.')
         location = UnitLocation(Region.PLANET, planet_id=planet_id)
         if not can_place_infantry(player, self.board, target, location):
             raise MovementError('No plastic infantry remains to anchor this planet.')
@@ -1134,14 +1144,17 @@ class MovementController:
                                      unit.location.region == Region.SPACE for unit in target.units):
             raise MovementError('Choose a system with one of your War Suns')
         count = 2 if kind == 'fighter' else 1
-        available = {'fighter': 10, 'destroyer': 8}[kind] - sum(
-            unit.owner == player.faction and unit.kind == kind
-            for tile in self.board.values() for unit in tile.units)
-        if available < count:
+        if kind == 'fighter':
+            if not can_place_fighter(player, self.board, target, UnitLocation(Region.SPACE)):
+                raise MovementError('No plastic fighter anchor is available for another system.')
+        elif (unit_supply_remaining(player, self.board, kind) or 0) < count:
             raise MovementError(f'Not enough {kind} units in reinforcements')
         snapshot = Snapshot.capture(self.board, player, self.players,
                                     self.action_cards, self.exploration)
         player.command_pools['strategic'] -= 1
+        if leader_available(player, 'muaatcommander'):
+            player.trade_goods += 1
+            self.resolve_pillage(player)
         for _ in range(count):
             target.units.append(Unit(f'{player.faction}-star-forge-{uuid4().hex}', kind,
                                      player.faction, player.color_code, UnitLocation(Region.SPACE),
@@ -1162,6 +1175,8 @@ class MovementController:
                        any(planet.planet_id == planet_id for planet in tile.planets)), None)
         if target is None:
             raise MovementError('Choose a planet you control')
+        if not self.planet_allows_landing(planet_id):
+            raise MovementError('Infantry cannot be placed on a blocked or destroyed planet.')
         location = UnitLocation(Region.PLANET, planet_id)
         if not can_place_infantry(player, self.board, target, location):
             raise MovementError('No plastic infantry remains to anchor this planet.')
@@ -1271,6 +1286,11 @@ class MovementController:
                 [(origin, unit, session.target, location)
                  for origin, unit, location in transfers]):
             raise MovementError('Infantry tokens need a plastic infantry anchor in each planet or space area.')
+        if not can_transfer_fighters(
+                session.player, self.board,
+                [(origin, unit, session.target, location)
+                 for origin, unit, location in transfers]):
+            raise MovementError('Fighter tokens need a plastic fighter anchor in each system.')
         session.movement_checkpoint = SessionCheckpoint.capture(self, session, 'movement')
         session.gravity_rift_log.clear()
         lost_ships = set()
@@ -1341,7 +1361,10 @@ class MovementController:
                 continue
             if can_transfer_infantry(
                     naalu, self.board,
-                    [(session.target, unit, tile, unit.location) for unit in moving]):
+                    [(session.target, unit, tile, unit.location) for unit in moving]) and \
+                    can_transfer_fighters(
+                        naalu, self.board,
+                        [(session.target, unit, tile, unit.location) for unit in moving]):
                 options.append(tile)
         return sorted(options, key=lambda tile: (tile.name, tile.position))
 
@@ -1370,6 +1393,10 @@ class MovementController:
                     naalu, self.board,
                     [(session.target, unit, tile, unit.location) for unit in moving]):
                 raise MovementError('Infantry tokens need a plastic infantry anchor at the destination.')
+            if not can_transfer_fighters(
+                    naalu, self.board,
+                    [(session.target, unit, tile, unit.location) for unit in moving]):
+                raise MovementError('Fighter tokens need a plastic fighter anchor at the destination.')
             for unit in moving:
                 session.target.units.remove(unit)
                 tile.units.append(unit)
@@ -1909,6 +1936,11 @@ class MovementController:
         fleet = self.combat_units(session, faction)
         if not fleet:
             return []
+        ship_ids = {unit.unit_id for unit in fleet}
+        retreating = fleet + [unit for unit in session.target.units
+                              if unit.owner == faction and
+                              unit.location.region == Region.TRANSPORT and
+                              unit.location.carrier_id in ship_ids]
         options = []
         for tile in self.neighbors(session.target):
             hostile_fleet = any(unit.owner != faction and unit.location.region == Region.SPACE and
@@ -1918,15 +1950,18 @@ class MovementController:
             if session.skilled_retreat:
                 retreating_player = next((player for player in self.players if player.faction == faction),
                                          session.player)
-                if (not hostile_fleet and faction not in tile.command_tokens and
-                        self.action_cards and self.action_cards.has_reinforcement(retreating_player)):
-                    options.append(tile)
-                continue
-            # A fleet may retreat into a system that already carries its faction's
-            # command token.  Retreat does not spend another token.
-            if not hostile_fleet and (has_friendly or
-                                      (self.has_tech(faction, 'det') and
-                                       not any(unit.owner != faction for unit in tile.units))):
+                legal = (not hostile_fleet and faction not in tile.command_tokens and
+                         self.action_cards and self.action_cards.has_reinforcement(retreating_player))
+            else:
+                # A fleet may retreat into a system that already carries its faction's
+                # command token. Retreat does not spend another token.
+                legal = (not hostile_fleet and (has_friendly or
+                         (self.has_tech(faction, 'det') and
+                          not any(unit.owner != faction for unit in tile.units))))
+            transfers = [(session.target, unit, tile, unit.location) for unit in retreating]
+            if (legal and can_transfer_infantry(
+                    self.faction_player(faction), self.board, transfers) and
+                    can_transfer_fighters(self.faction_player(faction), self.board, transfers)):
                 options.append(tile)
         return options
 
@@ -1973,6 +2008,10 @@ class MovementController:
                 self.faction_player(session.retreat_announced), self.board,
                 [(session.target, unit, destination, unit.location) for unit in retreating]):
             raise MovementError('Infantry tokens need a plastic infantry anchor at the retreat destination.')
+        if not can_transfer_fighters(
+                self.faction_player(session.retreat_announced), self.board,
+                [(session.target, unit, destination, unit.location) for unit in retreating]):
+            raise MovementError('Fighter tokens need a plastic fighter anchor at the retreat destination.')
         for unit in retreating:
             session.target.units.remove(unit)
             destination.units.append(unit)
@@ -2206,6 +2245,7 @@ class MovementController:
     def start_combat(self, session):
         session.combat_type = 'space'
         session.stage = 'space_combat'
+        session.nekro_tech_gained.clear()
         session.space_combat_resolved = False
         session.skilled_retreat = False
         session.combat_planet_id = None
@@ -2318,6 +2358,7 @@ class MovementController:
     def start_ground_combat(self, session, planet_id):
         session.combat_type = 'ground'
         session.combat_planet_id = planet_id
+        session.nekro_tech_gained.clear()
         defenders = tuple(sorted({unit.owner for unit in session.target.units
                                   if unit.owner != session.player.faction and
                                   unit.location.region == Region.PLANET and
@@ -2819,6 +2860,7 @@ class MovementController:
         session.production_limit = sum(value for _, value in sites)
         session.production_checkpoint = SessionCheckpoint.capture(self, session, 'production')
         session.production_choices.clear()
+        session.production_reclaims.clear()
         session.production_planets.clear()
         session.trade_goods_to_spend = 0
         session.self_assembly_planet = None
@@ -2839,6 +2881,7 @@ class MovementController:
             session.production_sites = [(planet_id, 9999)]
             session.production_limit = 9999
             session.production_choices.clear()
+            session.production_reclaims.clear()
             session.production_planets.clear()
             session.trade_goods_to_spend = 0
             session.self_assembly_planet = None
@@ -2871,9 +2914,31 @@ class MovementController:
         self.session = session
         return session
 
+    def start_agent_production(self, player, target, snapshot):
+        """Open Umbat's two-unit production without requiring a Production unit."""
+        if self.session:
+            raise MovementError('Finish the current action first.')
+        if not any(unit.owner == player.faction and unit.kind in ('warsun', 'flagship') and
+                   unit.location.region == Region.SPACE for unit in target.units):
+            raise MovementError('Umbat requires the selected player’s War Sun or flagship in that system.')
+        planet_id = next((planet.planet_id for planet in target.planets
+                          if target.planet_owners.get(planet.planet_id) == player.faction and
+                          (self.exploration is None or not (
+                              self.exploration.planet_is_blocked(planet.planet_id) or
+                              planet.planet_id in self.exploration.destroyed_planets))), None)
+        session = Session(player, target, {}, snapshot, component_action=True,
+                          agent_production=True, production_unit_cost_cap=4,
+                          ground_forces_in_space=True)
+        session.production_sites = [(planet_id, 2)]
+        session.production_limit = 2
+        session.stage = 'production'
+        session.production_checkpoint = SessionCheckpoint.capture(self, session, 'production')
+        self.session = session
+        return session
+
     def production_total(self, session):
         total = sum(session.production_choices.values())
-        if (session.player.faction == 'cabal' and
+        if (not session.agent_production and session.player.faction == 'cabal' and
                 leader_available(session.player, 'cabalcommander')):
             total -= min(2, session.production_choices.get('fighter', 0) +
                          session.production_choices.get('infantry', 0))
@@ -2883,22 +2948,25 @@ class MovementController:
         raw_cost = ceil(sum(self.unit_cost(kind, session.player) *
                             (count - session.amalgamation_choices.get(kind, 0))
                             for kind, count in session.production_choices.items()))
-        if (session.player.faction == 'nomad' and
+        if (not session.agent_production and session.player.faction == 'nomad' and
                 leader_available(session.player, 'nomadcommander')):
             raw_cost = max(0, raw_cost - self.unit_cost('flagship', session.player) *
                            min(1, session.production_choices.get('flagship', 0)))
         if session.integrated_current:
             return raw_cost
-        sarween = int('st' in session.player.technologies and bool(session.production_choices))
+        sarween = int('st' in session.player.technologies and bool(session.production_choices)
+                       and not session.agent_production)
         aida = (sum(is_unit_upgrade(technology_catalog()[alias])
                     for alias in session.player.technologies if alias in technology_catalog())
-                if session.aida_production_discount else 0)
-        return max(0, raw_cost - sarween - getattr(session, 'war_machine_discount', 0) - aida)
+                if session.aida_production_discount and not session.agent_production else 0)
+        war_machine = 0 if session.agent_production else getattr(session, 'war_machine_discount', 0)
+        return max(0, raw_cost - sarween - war_machine - aida)
 
     def toggle_ai_development_discount(self):
         """Choose whether to exhaust AI Development Algorithm for this production."""
         session = self.session
-        if not session or session.stage != 'production' or session.integrated_current:
+        if (not session or session.stage != 'production' or session.integrated_current or
+                session.agent_production):
             raise MovementError('AI Development Algorithm needs unit production.')
         if ('aida' not in session.player.technologies or
                 'aida' in session.player.exhausted_technologies or
@@ -2912,6 +2980,7 @@ class MovementController:
         """Legal destinations for the free Self-Assembly Routines mech."""
         session = self.session
         if (not session or session.stage != 'production' or session.integrated_current or
+                session.agent_production or
                 'sar' not in session.player.technologies or
                 'sar' in session.player.exhausted_technologies):
             return ()
@@ -2950,6 +3019,7 @@ class MovementController:
             session.amalgamation_choices[kind] = updated
         else:
             session.amalgamation_choices.pop(kind, None)
+        self._trim_production_reclaims(session, kind)
         return updated
 
     def production_payment(self, session):
@@ -2970,6 +3040,8 @@ class MovementController:
         planet_id = site_planet if site_planet in owned_planets else next(iter(owned_planets), None)
         if planet_id is not None:
             return UnitLocation(Region.PLANET, planet_id=planet_id)
+        if session.ground_forces_in_space:
+            return UnitLocation(Region.SPACE_AREA)
         if session.player.faction == 'saar':
             factory = next((unit for unit in session.target.units
                             if unit.owner == 'saar' and unit.kind == 'spacedock' and
@@ -2979,17 +3051,74 @@ class MovementController:
                 return UnitLocation(Region.TRANSPORT, carrier_id=factory.unit_id)
         return None
 
+    def production_reclaim_candidates(self, session, kind):
+        """Return same-type units that can be recycled into reinforcements.
+
+        The rules allow recycling only when the player is short on that unit
+        type, and only from systems without one of that player's command tokens.
+        Carriers with cargo are omitted so reclaiming one cannot strand units.
+        """
+        if (not session or session.stage != 'production' or
+                unit_supply_remaining(session.player, self.board, kind) is None):
+            return []
+        carrying_ids = {unit.location.carrier_id for tile in self.board.values()
+                        for unit in tile.units if unit.location.region == Region.TRANSPORT}
+        candidates = []
+        for tile in self.board.values():
+            if session.player.faction in tile.command_tokens:
+                continue
+            for unit in tile.units:
+                if unit.owner != session.player.faction or unit.kind != kind:
+                    continue
+                if unit.kind == 'carrier' and unit.unit_id in carrying_ids:
+                    continue
+                candidates.append((tile, unit))
+        return sorted(candidates, key=lambda item: (item[0].name, item[1].unit_id))
+
+    def production_reclaim_required(self, session, kind):
+        remaining = unit_supply_remaining(session.player, self.board, kind)
+        if remaining is None:
+            return 0
+        captured = (min(session.player.captured_units.get(kind, 0),
+                        session.amalgamation_choices.get(kind, 0))
+                    if session.player.faction == 'cabal' else 0)
+        return max(0, session.production_choices.get(kind, 0) - remaining - captured)
+
+    def _trim_production_reclaims(self, session, kind):
+        selected = session.production_reclaims.get(kind, set())
+        required = self.production_reclaim_required(session, kind)
+        for unit_id in sorted(selected, reverse=True)[:max(0, len(selected) - required)]:
+            selected.discard(unit_id)
+        if not selected:
+            session.production_reclaims.pop(kind, None)
+
+    def toggle_production_reclaim(self, kind, unit_id):
+        session = self.session
+        if not session or session.stage != 'production':
+            raise MovementError('Production is not active')
+        candidates = {unit.unit_id for _, unit in self.production_reclaim_candidates(session, kind)}
+        if unit_id not in candidates:
+            raise MovementError('That unit cannot be reclaimed from its system.')
+        selected = session.production_reclaims.setdefault(kind, set())
+        if unit_id in selected:
+            selected.remove(unit_id)
+            if not selected:
+                session.production_reclaims.pop(kind, None)
+            return
+        required = self.production_reclaim_required(session, kind)
+        if len(selected) >= required:
+            raise MovementError(f'Select only {required} {kind} unit(s) to reclaim.')
+        selected.add(unit_id)
+
     def adjust_production(self, kind, delta):
         session = self.session
         if not session or session.stage != 'production':
             raise MovementError('Production is not active')
         if kind not in self.PRODUCIBLE_KINDS:
             raise MovementError('Structures cannot be produced yet')
-        if kind == 'mech' and delta > 0:
-            deployed = sum(unit.owner == session.player.faction and unit.kind == 'mech'
-                           for tile in self.board.values() for unit in tile.units)
-            if deployed + session.production_choices.get('mech', 0) >= 4:
-                raise MovementError('No mechs remain in your reinforcements.')
+        if (delta > 0 and session.production_unit_cost_cap is not None and
+                self.unit_cost(kind, session.player) > session.production_unit_cost_cap):
+            raise MovementError('Umbat can produce only units with a cost of 4 or less.')
         if getattr(session, 'sling_relay', False) and not UNIT_TYPES[kind]['ship']:
             raise MovementError('Sling Relay may produce only a ship.')
         if not production_allowed(session.player, kind):
@@ -2999,12 +3128,25 @@ class MovementController:
             raise MovementError('Cannot produce ships while another player has ships in this system.')
         current = session.production_choices.get(kind, 0)
         if delta > 0:
+            remaining_units = unit_supply_remaining(session.player, self.board, kind)
+            reclaimable_units = len(self.production_reclaim_candidates(session, kind))
+            available_units = remaining_units
+            if session.player.faction == 'cabal' and remaining_units is not None:
+                # Captured pieces on the Cabal sheet are available for
+                # Amalgamation even when its own plastic supply is depleted.
+                available_units += session.player.captured_units.get(kind, 0)
+            if available_units is not None:
+                available_units += reclaimable_units
+                if current >= available_units:
+                    raise MovementError(f'No {kind} units remain in your reinforcements or token-free systems.')
             remaining = session.production_limit - self.production_total(session)
             if (kind in ('infantry', 'fighter') and session.player.faction == 'cabal' and
                     leader_available(session.player, 'cabalcommander')):
                 remaining += max(0, 2 - session.production_choices.get('fighter', 0) -
                                  session.production_choices.get('infantry', 0))
             addition = min(2, remaining) if kind in ('infantry', 'fighter') else 1
+            if available_units is not None:
+                addition = min(addition, max(0, available_units - current))
             if session.player.faction == 'arborec' and kind == 'infantry':
                 letani_capacity = sum(unit.owner == 'arborec' and unit.kind == 'infantry' and
                                       unit.location.region == Region.PLANET and
@@ -3018,7 +3160,11 @@ class MovementController:
                 if (location is None or not can_place_infantry(
                         session.player, self.board, session.target, location)):
                     raise MovementError('No plastic infantry anchor is available for another area.')
+            elif kind == 'fighter' and not can_place_fighter(
+                    session.player, self.board, session.target, UnitLocation(Region.SPACE)):
+                raise MovementError('No plastic fighter anchor is available for another system.')
             session.production_choices[kind] = current + addition
+            self._trim_production_reclaims(session, kind)
         elif current:
             updated = current - 1
             if updated:
@@ -3029,6 +3175,7 @@ class MovementController:
                 session.amalgamation_choices[kind] = updated
             if not session.amalgamation_choices.get(kind, 0):
                 session.amalgamation_choices.pop(kind, None)
+            self._trim_production_reclaims(session, kind)
 
     def change_production_trade_goods(self, delta):
         session = self.session
@@ -3058,11 +3205,42 @@ class MovementController:
             raise MovementError('Production is not active')
         if not session.production_choices:
             raise MovementError('Choose at least one unit or skip production')
+        reclaim_ids = set()
+        for kind, count in session.production_choices.items():
+            if (session.production_unit_cost_cap is not None and
+                    self.unit_cost(kind, session.player) > session.production_unit_cost_cap):
+                raise MovementError('Umbat can produce only units with a cost of 4 or less.')
+            selected = session.production_reclaims.get(kind, set())
+            candidates = {unit.unit_id for _, unit in self.production_reclaim_candidates(session, kind)}
+            if not selected <= candidates:
+                raise MovementError(f'A selected {kind} unit is no longer available to reclaim.')
+            required = self.production_reclaim_required(session, kind)
+            if required > len(candidates):
+                raise MovementError(f'Not enough {kind} units remain in reinforcements or token-free systems.')
+            if len(selected) != required:
+                raise MovementError(f'Reclaim {required} {kind} unit(s) from systems without your command token.')
+            reclaim_ids.update(selected)
+        projected_board = {}
+        for position, tile in self.board.items():
+            projected_tile = copy(tile)
+            projected_tile.units = [unit for unit in tile.units if unit.unit_id not in reclaim_ids]
+            projected_board[position] = projected_tile
+        projected_target = projected_board[session.target.position]
         if session.production_choices.get('infantry', 0):
             location = self._production_infantry_location(session)
             if (location is None or not can_place_infantry(
-                    session.player, self.board, session.target, location)):
+                    session.player, projected_board, projected_target, location)):
                 raise MovementError('No plastic infantry anchor is available for another area.')
+        if session.production_choices.get('fighter', 0) and not can_place_fighter(
+                session.player, projected_board, projected_target, UnitLocation(Region.SPACE)):
+            raise MovementError('No plastic fighter anchor is available for another system.')
+        for kind, count in session.production_choices.items():
+            remaining = unit_supply_remaining(session.player, self.board, kind)
+            captured = (session.amalgamation_choices.get(kind, 0)
+                        if session.player.faction == 'cabal' else 0)
+            reclaimed = len(session.production_reclaims.get(kind, ()))
+            if remaining is not None and count > remaining + captured + reclaimed:
+                raise MovementError(f'Not enough {kind} units remain in reinforcements.')
         if self.production_total(session) > session.production_limit:
             raise MovementError('Production limit exceeded')
         if (self.ships_blocked_by_opponents(session) and
@@ -3086,6 +3264,9 @@ class MovementController:
             if card.planet.planet_id in session.production_planets:
                 card.exhausted = True
         session.player.trade_goods -= session.trade_goods_to_spend
+        if reclaim_ids:
+            for tile in self.board.values():
+                tile.units[:] = [unit for unit in tile.units if unit.unit_id not in reclaim_ids]
         for kind, count in session.amalgamation_choices.items():
             session.player.captured_units[kind] -= count
             if not session.player.captured_units[kind]:
@@ -3113,6 +3294,8 @@ class MovementController:
                     planet_id = site_planet if site_planet in owned_planets else next(iter(owned_planets), None)
                     if planet_id is not None:
                         location = UnitLocation(Region.PLANET, planet_id=planet_id)
+                    elif kind in self.GROUND_FORCES and session.ground_forces_in_space:
+                        location = UnitLocation(Region.SPACE_AREA)
                     elif kind in self.GROUND_FORCES and session.player.faction == 'saar':
                         factory = next((unit for unit in session.target.units
                                         if unit.owner == 'saar' and unit.kind == 'spacedock' and
@@ -3141,6 +3324,7 @@ class MovementController:
                                              UnitLocation(Region.PLANET, session.self_assembly_planet)))
             session.player.exhausted_technologies.add('sar')
         if (session.player.faction == 'titans' and not session.integrated_current and
+                not session.agent_production and
                 not getattr(session, 'sling_relay', False) and
                 leader_available(session.player, 'titanscommander')):
             session.player.trade_goods += 1
@@ -3356,7 +3540,12 @@ class MovementController:
             if unit.owner != player.faction and unit.location.region == Region.PLANET and \
                     unit.location.planet_id == planet_id and unit.kind in ('pds', 'spacedock'):
                 target.units.remove(unit)
-                if player.faction == 'l1z1x':
+                # Assimilate replaces structures with L1Z1X units, but a
+                # replacement still uses one of the faction's physical
+                # structure pieces. If the supply is empty, the rules do not
+                # force the player to reclaim a structure from another system.
+                if (player.faction == 'l1z1x' and
+                        unit_supply_remaining(player, self.board, unit.kind)):
                     target.units.append(Unit(f'l1z1x-assimilated-{uuid4().hex}', unit.kind,
                                              player.faction, player.color_code,
                                              UnitLocation(Region.PLANET, planet_id),
@@ -3565,7 +3754,8 @@ class MovementController:
     def finish(self):
         if self.session and self.session.stage == 'complete':
             session = self.session
-            if (not session.strategic_production and self.exploration is not None and
+            if (not session.strategic_production and not session.component_action and
+                    self.exploration is not None and
                     'det' in session.player.technologies and
                     'frontier' in self.exploration.space_tokens.get(session.target.position, ()) and
                     any(unit.owner == session.player.faction and
@@ -3575,7 +3765,11 @@ class MovementController:
                 self.resolve_exploration_queue()
             from leaders import refresh_leader_unlocks
             for participant in self.players:
-                refresh_leader_unlocks(participant, self.board, self.players)
+                refresh_leader_unlocks(participant, self.board, self.players, self.exploration)
+            if session.component_action:
+                self.history.append(UndoEntry(session.snapshot))
+                self.session = None
+                return True
             if session.strategic_production:
                 self.session = None
                 return True

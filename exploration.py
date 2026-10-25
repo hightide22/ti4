@@ -21,7 +21,9 @@ from relics import RelicController, RelicOutcome
 from secret_objectives import SecretObjectiveController
 from technology import production_allowed, upgrade_profile
 from units import Region, Unit, UnitLocation, UNIT_TYPES, unit_profile
-from unit_supply import can_place_infantry, can_transfer_infantry
+from unit_supply import (can_place_fighter, can_place_infantry,
+                         can_place_structure, can_transfer_infantry,
+                         unit_supply_remaining)
 
 
 TRAITS = ('cultural', 'hazardous', 'industrial', 'frontier')
@@ -372,14 +374,15 @@ class ExplorationController:
             raise ValueError('No mech is available on this planet.')
         if choice and choice.startswith('place_mech_') and 'mech' not in UNIT_TYPES:
             raise ValueError('Mech units are not available in this game setup.')
-        if choice and choice.startswith('place_mech_') and sum(
-            unit.owner == player.faction and unit.kind == 'mech'
-            for source in self.board.values() for unit in source.units
-        ) >= 4:
+        if choice and choice.startswith('place_mech_') and not unit_supply_remaining(
+                player, self.board, 'mech'):
             raise ValueError('All four mechs are already on the board.')
 
     def _place_unit(self, player, tile, planet_id, kind):
         if kind not in UNIT_TYPES:
+            return False
+        remaining = unit_supply_remaining(player, self.board, kind)
+        if remaining is not None and remaining <= 0:
             return False
         if (kind == 'infantry' and not can_place_infantry(
                 player, self.board, tile, UnitLocation(Region.PLANET, planet_id))):
@@ -390,9 +393,11 @@ class ExplorationController:
         while any(unit.unit_id == f'explore-{player.faction}-{self.next_unit_number}'
                   for tile_on_board in self.board.values() for unit in tile_on_board.units):
             self.next_unit_number += 1
-        unit = Unit(f'explore-{player.faction}-{self.next_unit_number}', kind,
-                    player.faction, player.color_code,
+        location = (UnitLocation(Region.SPACE)
+                    if kind == 'spacedock' and player.faction == 'saar' else
                     UnitLocation(Region.PLANET, planet_id))
+        unit = Unit(f'explore-{player.faction}-{self.next_unit_number}', kind,
+                    player.faction, player.color_code, location)
         self.next_unit_number += 1
         tile.units.append(unit)
         return True
@@ -560,11 +565,8 @@ class ExplorationController:
         if kind not in movement.PRODUCIBLE_KINDS or not production_allowed(player, kind):
             raise ValueError('This unit cannot be produced with Freelancers.')
         tile = self.board[offer[1]]
-        occupied = sum(unit.owner == player.faction and unit.kind == kind
-                       for system in self.board.values() for unit in system.units)
-        plastic_limits = {'mech': 4, 'carrier': 4, 'destroyer': 8, 'cruiser': 8,
-                          'dreadnought': 5, 'flagship': 1, 'warsun': 2}
-        if occupied >= plastic_limits.get(kind, float('inf')):
+        remaining = unit_supply_remaining(player, self.board, kind)
+        if remaining is not None and remaining <= 0:
             raise ValueError('No unit of this type remains in reinforcements.')
         if (UNIT_TYPES[kind]['ship'] and any(
                 unit.owner != player.faction and unit.location.region == Region.SPACE and
@@ -588,6 +590,9 @@ class ExplorationController:
                 raise ValueError('Choose a controlled, available planet in this system.')
         if kind == 'infantry' and not can_place_infantry(player, self.board, tile, location):
             raise ValueError('No plastic infantry remains to anchor this planet or system.')
+        if kind == 'fighter' and not can_place_fighter(
+                player, self.board, tile, location):
+            raise ValueError('No plastic fighter anchor is available for another system.')
         resources = tuple(resource_planets)
         influence = tuple(influence_planets)
         chosen = resources + influence
@@ -615,6 +620,9 @@ class ExplorationController:
             cards[planet].exhausted = True
         player.trade_goods -= trade_goods
         tile.units.append(unit)
+        if kind == 'warsun' and player.faction == 'muaat':
+            from leaders import notify_leader_event
+            notify_leader_event(player, 'produced_war_sun')
         self.freelancer_offer = None
         return {'type': 'unit_produced', 'kind': kind, 'unit_id': unit.unit_id,
                 'position': tile.position, 'cost': cost,
@@ -684,13 +692,11 @@ class ExplorationController:
                     if unit.owner == recipient.faction and unit.kind == kind]
         if len(on_board) >= {'pds': 6, 'spacedock': 3}[kind]:
             raise ValueError('No structures of that kind remain in reinforcements.')
-        on_planet = [unit for unit in target[0].units
-                     if unit.location.region == Region.PLANET and
-                     unit.location.planet_id == planet_id and unit.owner == recipient.faction]
-        if kind == 'spacedock' and any(unit.kind == 'spacedock' for unit in on_planet):
-            raise ValueError('This planet already has a space dock.')
-        if kind == 'pds' and sum(unit.kind == 'pds' for unit in on_planet) >= 2:
-            raise ValueError('A planet can have at most two PDS units.')
+        if not (kind == 'spacedock' and recipient.faction == 'saar') and not can_place_structure(
+                target[0], planet_id, recipient.faction, kind):
+            if kind == 'spacedock':
+                raise ValueError('This player already has a space dock on that planet.')
+            raise ValueError('A planet can have at most two PDS units total.')
         if len(set(planet_ids)) != len(planet_ids):
             raise ValueError('Choose each payment planet only once.')
         cards = {card.planet.planet_id: card for card in recipient.planets}

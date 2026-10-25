@@ -51,7 +51,9 @@ def resolve_card_choice(ai):
     session = ai.window.movement.session
     effect = pending['effect']
     player = pending['player']
-    if effect in ('direct_hit', 'courageous'):
+    if effect == 'keleres_unlock':
+        choice = ('spend',) if player.trade_goods > 0 else ('decline',)
+    elif effect in ('direct_hit', 'courageous'):
         units = {unit.unit_id: unit for unit in session.target.units}
         choice = max((key for key, _ in choices), key=lambda key: (
             loss_value(session.target, units[key]), key))

@@ -218,7 +218,8 @@ def build_plan(controller, session, round_number):
     budget = (sum(effective_yields(player, card, exploration)[0]
                   for card in player.planets if not card.exhausted) +
               player.trade_goods)
-    discount = int('st' in player.technologies and not session.integrated_current)
+    discount = int('st' in player.technologies and not session.integrated_current
+                   and not session.agent_production)
     if session.integrated_current:
         planet = next(p for p in tile.planets
                       if p.planet_id == session.integrated_current)
@@ -249,10 +250,13 @@ def build_plan(controller, session, round_number):
                       for u in hostile_ships) * .8 ** (supply_distance - 1)
     owned_planets = [p for p in tile.planets if tile.planet_owners.get(p.planet_id) == player.faction]
     ground_in_space = not owned_planets
-    allow_ground = bool(owned_planets or (player.faction == 'saar' and local['spacedock']))
+    allow_ground = bool(owned_planets or session.ground_forces_in_space or
+                        (player.faction == 'saar' and local['spacedock']))
     ships_blocked = controller.ships_blocked_by_opponents(session)
     profiles = {kind: unit_stats(player, kind) for kind in BUILD_KINDS}
     costs = {kind: controller.unit_cost(kind, player) for kind in BUILD_KINDS}
+    reclaimable = {kind: len(controller.production_reclaim_candidates(session, kind))
+                   for kind in MODEL_LIMITS}
     capital_count = sum(capital_ship(u) for u in local_units if u.location.region == Region.SPACE)
     base_capacity = controller._capacity_value(tile, player.faction)
     cargo = controller._capacity_units(tile, player.faction)
@@ -265,6 +269,8 @@ def build_plan(controller, session, round_number):
     letani = sum(unit.kind == 'infantry' and unit.location.region == Region.PLANET and
                  bool(unit_profile(unit).get('productionValue')) for unit in local_units)
     available = [kind for kind in BUILD_KINDS if production_allowed(player, kind)
+                 and (session.production_unit_cost_cap is None or
+                      costs[kind] <= session.production_unit_cost_cap)
                  and not (ships_blocked and UNIT_TYPES[kind]['ship'])
                  and (kind not in ('infantry', 'mech') or allow_ground)]
     # Enough to cover nearby planets and one defended invasion, with diminishing
@@ -285,7 +291,8 @@ def build_plan(controller, session, round_number):
         raw_cost = ceil(sum(costs[k] * n for k, n in total.items()))
         if max(0, raw_cost - discount) > budget:
             return False
-        if any(total[k] > max(0, limit - empire[k]) for k, limit in MODEL_LIMITS.items()):
+        if any(total[k] > max(0, limit - empire[k]) + reclaimable[k]
+               for k, limit in MODEL_LIMITS.items()):
             return False
         if player.faction == 'arborec' and total['infantry'] > letani:
             return False

@@ -1,6 +1,7 @@
 """Choose strategic-action targets from public logistics and frontier threats."""
 from ai_actions import UNIT_VALUE
 from units import Region, UNIT_TYPES, mobile_ship, unit_profile
+from unit_supply import planet_structure_count
 
 
 def ships(tile, faction, *, enemy=False):
@@ -76,8 +77,7 @@ def construction_choice(ai, controller, session):
                 if player.faction == 'saar':
                     score += 10  # Mobile transport and production, independent of planet resources.
             else:
-                count = sum(unit.owner == player.faction and unit.kind == 'pds' and
-                            unit.location.planet_id == card.planet.planet_id for unit in tile.units)
+                count = planet_structure_count(tile, card.planet.planet_id, 'pds', player.faction)
                 score = (2 + card.planet.resources + min(12, danger) +
                          3 * any(dock is tile for dock in docks) - 4 * count)
                 if 'pds2' in player.technologies:

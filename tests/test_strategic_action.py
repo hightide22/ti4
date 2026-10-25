@@ -122,6 +122,16 @@ class StrategicActionTests(unittest.TestCase):
         self.controller.accept_secondary()
         self.assertEqual(self.hacan.commodities, self.hacan.commodity_limit + 2)
 
+    def test_trade_primary_refreshes_commander_unlocks_before_secondary_phase(self):
+        self.hacan.trade_goods = 7
+        self.start_card(5, owner=1)
+
+        self.controller.confirm_trade()
+
+        self.assertEqual(10, self.hacan.trade_goods)
+        self.assertTrue(self.hacan.leaders['hacancommander'].unlocked)
+        self.assertIs(self.controller.player, self.jolnar)
+
     def test_psychoarchaeology_uses_exhausted_attachment_specialty(self):
         card = self.sol.planets[0]
         card.exhausted = True
@@ -196,6 +206,39 @@ class StrategicActionTests(unittest.TestCase):
         self.assertIn('hacan', tile.command_tokens)
         self.assertTrue(any(u.kind == 'pds' and u.location.planet_id == target for u in tile.units))
         self.assertIs(c.player, self.jolnar)
+
+    def test_construction_respects_player_pds_limit_and_dmz(self):
+        from exploration import ExplorationController
+
+        self.start_card(4)
+        c = self.controller
+        card = self.sol.planets[0]
+        tile = c.planet_system(card.planet.planet_id)
+        tile.units.extend((
+            Unit('sol-first-pds', 'pds', 'sol', self.sol.color_code,
+                 UnitLocation(Region.PLANET, card.planet.planet_id)),
+            Unit('sol-second-pds', 'pds', 'sol', self.sol.color_code,
+                 UnitLocation(Region.PLANET, card.planet.planet_id)),
+            Unit('hacan-pds-on-sol-planet', 'pds', 'hacan', self.hacan.color_code,
+                 UnitLocation(Region.PLANET, card.planet.planet_id)),
+        ))
+        c.session.structure = 'pds'
+        eligible = {candidate.planet.planet_id
+                    for candidate in c.buildable_planets(selected_only=False)}
+        self.assertNotIn(card.planet.planet_id, eligible,
+                         'A player cannot build a third PDS on a planet')
+
+        exploration = ExplorationController(self.board, self.players, relic_deck=[])
+        exploration.attachments[card.planet.planet_id] = ['dmz']
+        c.exploration = exploration
+        tile.units = [unit for unit in tile.units
+                      if unit.unit_id not in {'sol-first-pds', 'sol-second-pds',
+                                              'hacan-pds-on-sol-planet'}]
+        c.session.structure = 'spacedock'
+        eligible = {candidate.planet.planet_id
+                    for candidate in c.buildable_planets(selected_only=False)}
+        self.assertNotIn(card.planet.planet_id, eligible,
+                         'Construction cannot place structures on a DMZ planet')
 
     def test_construction_secondary_places_saar_floating_factory_in_space_and_it_can_move(self):
         config, board = load_board(factions=('sol', 'saar', 'hacan'))

@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from board import load_board
 from movement import MovementController, MovementError, Session, Snapshot
-from player import PlanetCard, create_players
+from player import PlanetCard, PlayerState, create_players
 from technology import research_technology
 from units import Region, Unit, UnitLocation
 
@@ -146,6 +146,33 @@ class MovementTests(unittest.TestCase):
         self.assertNotIn(planet.planet_id, target.planet_owners)
         self.assertNotIn(planet.planet_id,
                          {card.planet.planet_id for card in self.player.planets})
+
+    def test_demilitarized_zone_rejects_sol_orbital_drop_and_arborec_mitosis(self):
+        from exploration import ExplorationController
+
+        planet_id = self.player.planets[0].planet.planet_id
+        exploration = ExplorationController(self.board, self.players, relic_deck=[])
+        exploration.attachments[planet_id] = ['dmz']
+        self.controller.exploration = exploration
+        strategy_tokens = self.player.command_pools['strategic']
+        infantry_before = sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                              unit.location.region == Region.PLANET and
+                              unit.location.planet_id == planet_id
+                              for unit in self.home.units)
+
+        with self.assertRaisesRegex(MovementError, 'blocked or destroyed'):
+            self.controller.orbital_drop(self.player, planet_id)
+        self.assertEqual(strategy_tokens, self.player.command_pools['strategic'])
+        self.assertEqual(infantry_before,
+                         sum(unit.owner == 'sol' and unit.kind == 'infantry' and
+                             unit.location.region == Region.PLANET and
+                             unit.location.planet_id == planet_id for unit in self.home.units))
+
+        arborec = PlayerState('arborec', 'The Arborec', 'grn', 4,
+                              [PlanetCard(self.player.planets[0].planet)])
+        self.home.planet_owners[planet_id] = 'arborec'
+        with self.assertRaisesRegex(MovementError, 'blocked or destroyed'):
+            self.controller.mitosis(arborec, planet_id)
 
     def test_mecatol_custodians_are_paid_before_ground_forces_land(self):
         mecatol = next(tile for tile in self.board.values() if tile.number == 18)
@@ -376,6 +403,69 @@ class MovementTests(unittest.TestCase):
                          initial_infantry)
         self.assertFalse(card.exhausted)
         self.assertEqual(self.player.trade_goods, 0)
+
+    def test_production_cannot_exceed_finite_ship_reinforcements(self):
+        for tile in self.board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == self.player.faction and
+                                     unit.kind == 'dreadnought')]
+        self.home.units.extend(Unit(f'supply-limit-dread-{index}', 'dreadnought',
+                                    self.player.faction, self.player.color_code,
+                                    UnitLocation(Region.SPACE)) for index in range(5))
+        self.home.command_tokens.add(self.player.faction)
+        planet = next(planet for planet in self.home.planets
+                      if self.home.planet_owners.get(planet.planet_id) == self.player.faction)
+        session = Session(self.player, self.home, {}, Snapshot.capture(
+            self.board, self.player, self.players))
+        session.stage = 'production'
+        session.production_limit = 20
+        session.production_sites = [(planet.planet_id, 20)]
+        self.controller.session = session
+
+        with self.assertRaisesRegex(MovementError, 'No dreadnought units remain'):
+            self.controller.adjust_production('dreadnought', 1)
+
+        # Validate again at confirmation in case stale UI or an external effect
+        # changed the board after production choices were made.
+        session.production_choices['dreadnought'] = 1
+        with self.assertRaisesRegex(MovementError, 'Not enough dreadnought units'):
+            self.controller.produce()
+
+    def test_production_can_reclaim_same_unit_from_a_system_without_own_token(self):
+        for tile in self.board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == self.player.faction and
+                                     unit.kind == 'dreadnought')]
+        self.target.command_tokens.discard(self.player.faction)
+        reclaimed = [Unit(f'reclaim-dread-{index}', 'dreadnought', self.player.faction,
+                          self.player.color_code, UnitLocation(Region.SPACE))
+                     for index in range(5)]
+        self.target.units.extend(reclaimed)
+        self.home.command_tokens.add(self.player.faction)
+        self.player.command_pools['fleet'] = 10
+        planet = next(planet for planet in self.home.planets
+                      if self.home.planet_owners.get(planet.planet_id) == self.player.faction)
+        session = Session(self.player, self.home, {}, Snapshot.capture(
+            self.board, self.player, self.players))
+        session.stage = 'production'
+        session.production_limit = 5
+        session.production_sites = [(planet.planet_id, 5)]
+        self.controller.session = session
+        self.player.trade_goods = 4
+        session.trade_goods_to_spend = 4
+
+        self.controller.adjust_production('dreadnought', 1)
+        self.assertEqual(self.controller.production_reclaim_required(session, 'dreadnought'), 1)
+        with self.assertRaisesRegex(MovementError, 'Reclaim 1 dreadnought'):
+            self.controller.produce()
+        self.controller.toggle_production_reclaim('dreadnought', reclaimed[0].unit_id)
+        self.controller.produce()
+
+        self.assertNotIn(reclaimed[0], self.target.units)
+        self.assertEqual(sum(unit.owner == self.player.faction and unit.kind == 'dreadnought'
+                             for tile in self.board.values() for unit in tile.units), 5)
+        self.assertEqual(sum(unit.owner == self.player.faction and unit.kind == 'dreadnought'
+                             for unit in self.home.units), 1)
 
     def test_enemy_ships_block_ship_production_but_allow_ground_forces(self):
         planet = self.home.planets[0]

@@ -501,7 +501,7 @@ class MovementPanel:
                             x, y, 10, INK)
                 meter(x, y - 12, width, paid, selected_cost, GOLD)
                 y -= 27
-                if ('aida' in session.player.technologies and
+                if (not session.agent_production and 'aida' in session.player.technologies and
                         'aida' not in session.player.exhausted_technologies and
                         not session.integrated_current):
                     from technology import is_unit_upgrade, technology_catalog
@@ -538,7 +538,7 @@ class MovementPanel:
                                           y - 29, y - 2))
                         y -= 33
                     y -= 8
-                if session.player.faction == 'cabal':
+                if session.player.faction == 'cabal' and not session.agent_production:
                     available_captives = [kind for kind in PRODUCTION_ORDER
                                           if session.production_choices.get(kind, 0) and
                                           session.player.captured_units.get(kind, 0)]
@@ -578,6 +578,10 @@ class MovementPanel:
                 for kind in PRODUCTION_ORDER:
                     if not production_allowed(session.player, kind):
                         continue
+                    if (session.production_unit_cost_cap is not None and
+                            window.movement.unit_cost(kind, session.player) >
+                            session.production_unit_cost_cap):
+                        continue
                     top = y
                     count = session.production_choices.get(kind, 0)
                     cost = window.movement.unit_cost(kind, session.player)
@@ -603,6 +607,43 @@ class MovementPanel:
                             self.hits.append((('production_unit', kind, delta),
                                               left, left + 32, top - 37, top - 5))
                     y -= ROW_HEIGHT
+                for kind in PRODUCTION_ORDER:
+                    required = window.movement.production_reclaim_required(session, kind)
+                    if not required:
+                        continue
+                    selected = session.production_reclaims.get(kind, set())
+                    window.text(('reclaim_title', kind),
+                                f'RECLAIM {UNIT_TYPES[kind]["name"].upper()} · SELECT '
+                                f'{len(selected)}/{required}', x, y, 9, GOLD, width)
+                    y -= 20
+                    candidates = window.movement.production_reclaim_candidates(session, kind)
+                    seen_in_tile = {}
+                    for tile, unit in candidates:
+                        seen_in_tile[tile.position] = seen_in_tile.get(tile.position, 0) + 1
+                        same_kind = sum(candidate.owner == unit.owner and candidate.kind == kind
+                                        for candidate in tile.units)
+                        index = seen_in_tile[tile.position]
+                        label = f'{tile.name} · {UNIT_TYPES[kind]["name"]} {index}/{same_kind}'
+                        top = y
+                        is_selected = unit.unit_id in selected
+                        surface(x, x + width, top - 31, top,
+                                SELECTED if is_selected else CARD,
+                                GOLD if is_selected else BORDER)
+                        window.text(('reclaim_unit', unit.unit_id), label,
+                                    x + 8, top - 19, 9, INK, max_width=width - 16)
+                        window.text(('reclaim_state', unit.unit_id),
+                                    'SELECTED · rebuild in active system' if is_selected else 'Click to reclaim and rebuild',
+                                    x + 8, top - 28, 7, GOLD if is_selected else MUTED,
+                                    max_width=width - 16)
+                        self.hits.append((('production_reclaim', kind, unit.unit_id),
+                                          x, x + width, top - 31, top))
+                        y -= 35
+                    if not candidates:
+                        window.text(('reclaim_none', kind),
+                                    'No eligible units in systems without your command token.',
+                                    x, y, 8, MUTED, width)
+                        y -= 16
+                    y -= 5
                 y -= 14
                 window.text('production_help', 'Yellow planets pay resources; trade goods cover the rest.',
                             x, y, 9, MUTED, width)
