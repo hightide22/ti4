@@ -150,6 +150,7 @@ class CombatPanel:
                                              bx, bx + bw, by, by + bh))
                 assignments = session.combat_assignments.get(faction, [])
                 available = (not window.ai.is_bot(player) and session.combat_needs_resolution and
+                             not session.thundarian_window_open and
                              window.movement.combat_assignment_target(session, faction, kind) is not None)
                 action = ('assign_hit', faction, kind)
                 if available and len(assignments) < min(session.combat_hits.get(faction, 0),
@@ -517,6 +518,10 @@ class CombatPanel:
             units_label = 'ground forces' if session.combat_type == 'ground' else 'ships'
             label = 'Resolve Hits · Continue' if complete else f'Assign hits to your {units_label}'
             color = SELECTED if complete else DISABLED
+            if session.thundarian_window_open:
+                complete = False
+                label = 'Resolve The Thundarian window first'
+                color = DISABLED
         elif session.stage == 'space_combat_won':
             complete = True
             label = 'Continue to Invasion'
@@ -524,6 +529,7 @@ class CombatPanel:
         else:
             complete = True
             label = ('Finish Combat Round' if session.stage == 'combat_end' else
+                     'Roll Combat Dice Again' if session.repeat_combat_rolls else
                      'Roll Combat Dice' if not session.combat_round else 'Next Combat Round')
             color = SELECTED
         if session.fire_team_pending:
@@ -551,7 +557,8 @@ class CombatPanel:
                         INK if enabled else MUTED, bw - 18)
             if enabled:
                 self.action_hits.append((('fire_team_resolve', faction), bx, bx + bw, by, by + bh))
-        if session.stage == 'space_combat' and not session.retreat_announced:
+        if (session.stage == 'space_combat' and not session.retreat_announced and
+                not session.repeat_combat_rolls):
             retreat_faction = None
             human_defender_decision = False
             if not window.ai.is_bot(session.player):
@@ -598,9 +605,10 @@ class CombatPanel:
             window.text('retreat_declared', 'Retreat declared; choose destination after this round.',
                         left + 22, bottom + 75, 9, ACCENT, col_width)
         letnev = next((player for player in window.player_panel.players if player.faction == 'letnev'), None)
-        if session.stage == 'space_combat' and session.combat_type == 'space' and letnev and \
+        if (session.stage == 'space_combat' and session.combat_type == 'space' and
+                not session.repeat_combat_rolls and letnev and \
                 not window.ai.is_bot(letnev) and \
-                'letnev' in session.combat_factions:
+                'letnev' in session.combat_factions):
             button_x, button_y, button_w, button_h = left + width - 550, bottom + 24, 215, 38
             if not session.combat_needs_resolution:
                 round_number = session.combat_round + 1
@@ -642,6 +650,21 @@ class CombatPanel:
                    primary=True, size=8)
             self.action_hits.append((('cancel_titans_combat_hit', 'titans'),
                                      bx, bx + bw, by, by + bh))
+        nomad = next((player for player in combat_players if player.faction == 'nomad'), None)
+        if (session.thundarian_window_open and nomad and not window.ai.is_bot(nomad) and
+                window.movement.thundarian_window_can_close()):
+            by = bottom + 68
+            use_x, use_w, pass_x, pass_w, bh = left + 24, 205, left + 239, 92, 34
+            usable = window.movement.thundarian_available()
+            button(window, ('use_thundarian', 'nomad'), 'THE THUNDARIAN · REROLL ALL DICE',
+                   use_x, by, use_w, bh, primary=True, enabled=usable, size=8)
+            button(window, ('decline_thundarian', 'nomad'), 'PASS',
+                   pass_x, by, pass_w, bh, primary=False, size=9)
+            if usable:
+                self.action_hits.append((('use_thundarian', 'nomad'), use_x,
+                                         use_x + use_w, by, by + bh))
+            self.action_hits.append((('decline_thundarian', 'nomad'), pass_x,
+                                     pass_x + pass_w, by, by + bh))
         if window.movement_error:
             window.text('combat_error', window.movement_error, left + width / 2, bottom + 76, 10,
                         DANGER, width - 40)
@@ -652,8 +675,9 @@ class CombatPanel:
                                        window.movement.combat_hit_capacity(session, faction)) -
                                 len(session.combat_assignments.get(faction, []))) for faction in factions)
             unit_label = 'ground forces' if session.combat_type == 'ground' else 'ship groups'
+            help_y = bottom + (124 if session.thundarian_window_open else 99)
             window.text('combat_help', f'Click {unit_label} to assign incoming hits · {remaining} left',
-                        left + 24, bottom + 99, 11, MUTED, width - 48)
+                        left + 24, help_y, 11, MUTED, width - 48)
         elif session.stage == 'space_combat_won':
             window.text('combat_help', 'The winner may play Salvage before the action continues.',
                         left + 24, bottom + 99, 11, MUTED, width - 48)

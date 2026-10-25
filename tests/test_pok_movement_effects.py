@@ -23,6 +23,71 @@ def game(faction='sol'):
 
 
 class PokMovementEffectsTests(unittest.TestCase):
+    def test_nomad_thundarian_repeats_same_combat_round_and_keeps_round_effects(self):
+        board, players, movement = game('nomad')
+        nomad, sol = players[:2]
+        tile = next(tile for tile in board.values() if not tile.units)
+        nomad_ship = Unit('nomad-thundarian-carrier', 'carrier', 'nomad', nomad.color_code,
+                          UnitLocation(Region.SPACE))
+        sol_ship = Unit('sol-thundarian-carrier', 'carrier', 'sol', sol.color_code,
+                        UnitLocation(Region.SPACE))
+        tile.units.extend((nomad_ship, sol_ship))
+        session = Session(nomad, tile, {}, Snapshot.capture(board, nomad, players))
+        session.stage = 'space_combat'
+        session.combat_factions = ('nomad', 'sol')
+        session.combat_bonus_dice[nomad_ship.unit_id] = 1
+        session.combat_bonus_sources[nomad_ship.unit_id] = 'solagent'
+        session.combat_modifiers['nomad'] = 1
+        movement.session = session
+
+        with patch('movement.random.randint', return_value=10):
+            movement.advance_combat()
+        self.assertEqual(1, session.combat_round)
+        self.assertTrue(movement.thundarian_available())
+        with self.assertRaises(MovementError):
+            movement.assign_combat_hit('nomad', 'carrier')
+
+        movement.use_thundarian()
+        self.assertTrue(session.repeat_combat_rolls)
+        self.assertFalse(session.combat_needs_resolution)
+        self.assertEqual(1, session.combat_round)
+        self.assertEqual({}, session.combat_rolls)
+        self.assertFalse(leader_available(nomad, 'nomadagentthundarian'))
+
+        with patch('movement.random.randint', return_value=1):
+            movement.advance_combat()
+        self.assertEqual(1, session.combat_round)
+        self.assertFalse(session.repeat_combat_rolls)
+        self.assertFalse(session.thundarian_window_open)
+        self.assertEqual(2, len(session.combat_rolls['nomad']))
+        self.assertEqual('solagent', next(roll['bonus_source'] for roll in
+                                          session.combat_rolls['nomad']
+                                          if roll.get('bonus_source')))
+        self.assertTrue(all(roll['modifier'] == 1 for roll in session.combat_rolls['nomad']))
+
+    def test_nomad_thundarian_must_be_declined_before_hits_are_assigned(self):
+        board, players, movement = game('nomad')
+        nomad, sol = players[:2]
+        tile = next(tile for tile in board.values() if not tile.units)
+        nomad_ship = Unit('nomad-thundarian-target', 'carrier', 'nomad', nomad.color_code,
+                          UnitLocation(Region.SPACE))
+        sol_ship = Unit('sol-thundarian-target', 'carrier', 'sol', sol.color_code,
+                        UnitLocation(Region.SPACE))
+        tile.units.extend((nomad_ship, sol_ship))
+        session = Session(nomad, tile, {}, Snapshot.capture(board, nomad, players))
+        session.stage = 'space_combat'
+        session.combat_factions = ('nomad', 'sol')
+        movement.session = session
+        with patch('movement.random.randint', return_value=10):
+            movement.advance_combat()
+
+        self.assertTrue(movement.thundarian_available())
+        movement.decline_thundarian()
+        self.assertFalse(session.thundarian_window_open)
+        self.assertFalse(movement.thundarian_available())
+        with self.assertRaises(MovementError):
+            movement.use_thundarian()
+
     def test_ghost_slipstream_applies_from_home_and_alpha_beta_but_not_gate(self):
         board, players, movement = game('ghost')
         ghost = players[0]

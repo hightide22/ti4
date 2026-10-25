@@ -3264,6 +3264,14 @@ class BoardWindow(arcade.Window):
                         if action[1] in self.ai.bot_factions:
                             return
                         self.movement.cancel_titans_combat_hit(action[1])
+                    elif action[0] == 'use_thundarian':
+                        if action[1] in self.ai.bot_factions:
+                            return
+                        self.movement.use_thundarian()
+                    elif action[0] == 'decline_thundarian':
+                        if action[1] in self.ai.bot_factions:
+                            return
+                        self.movement.decline_thundarian()
                     elif action[0] == 'cancel_titans_space_cannon_hit':
                         if action[1] in self.ai.bot_factions:
                             return

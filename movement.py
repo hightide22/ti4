@@ -280,6 +280,8 @@ class Session:
     integrated_current: str | None = None
     trade_goods_to_spend: int = 0
     combat_round: int = 0
+    repeat_combat_rolls: bool = False
+    thundarian_window_open: bool = False
     combat_factions: tuple[str, ...] = ()
     combat_rolls: dict[str, list[dict]] = field(default_factory=dict)
     combat_bonus_dice: dict[str, int] = field(default_factory=dict)
@@ -2438,6 +2440,8 @@ class MovementController:
         session.combat_factions = tuple(faction for faction in session.combat_factions
                                         if self.combat_units(session, faction))
         session.combat_round = 0
+        session.repeat_combat_rolls = False
+        session.thundarian_window_open = False
         session.combat_rolls.clear()
         session.combat_hits.clear()
         session.combat_assignments.clear()
@@ -2586,6 +2590,8 @@ class MovementController:
         session = self.session
         if not session or session.stage not in ('space_combat', 'ground_combat') or not session.combat_needs_resolution:
             raise MovementError('Roll combat dice before assigning hits')
+        if session.thundarian_window_open:
+            raise MovementError('Resolve The Thundarian window before assigning hits')
         hits = session.combat_hits.get(faction, 0)
         assignments = session.combat_assignments.setdefault(faction, [])
         required = min(hits, self.combat_hit_capacity(session, faction))
@@ -2656,6 +2662,7 @@ class MovementController:
         player = self.faction_player(faction)
         return bool(session and session.stage in ('space_combat', 'ground_combat') and
                     not session.combat_needs_resolution and faction in session.combat_factions and
+                    not session.repeat_combat_rolls and
                     self.combat_units(session, faction) and player and
                     'sc' in player.technologies and 'sc' not in player.exhausted_technologies)
 
@@ -2664,7 +2671,8 @@ class MovementController:
         session = self.session
         player = self.faction_player(faction)
         if (not session or session.stage not in ('space_combat', 'ground_combat') or
-                session.combat_needs_resolution or faction not in session.combat_factions or
+                session.combat_needs_resolution or session.repeat_combat_rolls or
+                faction not in session.combat_factions or
                 player is None):
             return ()
         if session.combat_type == 'space' and faction == 'letnev' and \
@@ -2702,6 +2710,73 @@ class MovementController:
         session = self.session
         session.combat_modifiers[faction] = session.combat_modifiers.get(faction, 0) + 1
 
+    def thundarian_available(self):
+        session = self.session
+        player = self.faction_player('nomad')
+        return bool(self.thundarian_window_can_close() and player and
+                    leader_available(player, 'nomadagentthundarian'))
+
+    def thundarian_window_can_close(self):
+        session = self.session
+        return bool(session and session.stage in ('space_combat', 'ground_combat') and
+                    session.combat_needs_resolution and session.thundarian_window_open and
+                    'nomad' in session.combat_factions and
+                    not any(session.combat_assignments.values()) and
+                    not session.fire_team_pending and
+                    not (self.action_cards and self.action_cards.pending))
+
+    def use_thundarian(self):
+        session = self.session
+        if not self.thundarian_available():
+            raise MovementError('The Thundarian cannot be used now.')
+        player = self.faction_player('nomad')
+        from leader_effects import use_nomad_thundarian
+        use_nomad_thundarian(player)
+        session.combat_rolls.clear()
+        session.combat_hits = {faction: 0 for faction in session.combat_factions}
+        session.combat_assignments = {faction: [] for faction in session.combat_factions}
+        session.hit_sources.clear()
+        session.combat_needs_resolution = False
+        session.thundarian_window_open = False
+        session.repeat_combat_rolls = True
+        session.assault_log.append('The Nomad used The Thundarian; combat dice will be rerolled.')
+
+    def decline_thundarian(self):
+        session = self.session
+        if not self.thundarian_window_can_close():
+            raise MovementError('The Thundarian timing window is not open.')
+        session.thundarian_window_open = False
+
+    def should_bot_use_thundarian(self):
+        """Use the reroll when the current combat result is materially below expectation."""
+        session = self.session
+        if not self.thundarian_available():
+            return False
+        nomad_rolls = session.combat_rolls.get('nomad', ())
+        opponents = [faction for faction in session.combat_factions if faction != 'nomad']
+        own_hits = sum(bool(roll.get('hit')) for roll in nomad_rolls)
+        if session.combat_type == 'ground' and self.has_tech('nomad', 'x89c4'):
+            own_hits *= 2
+        expected_own = sum(
+            max(0, min(10, 11 - (int(roll['threshold']) - int(roll.get('modifier', 0))))) / 10
+            for roll in nomad_rolls)
+        if session.combat_type == 'ground' and self.has_tech('nomad', 'x89c4'):
+            expected_own *= 2
+        incoming_hits = int(session.combat_hits.get('nomad', 0))
+        expected_incoming = 0.0
+        for faction in opponents:
+            rolls = session.combat_rolls.get(faction, ())
+            expected_incoming += sum(
+                max(0, min(10, 11 - (int(roll['threshold']) - int(roll.get('modifier', 0))))) / 10
+                for roll in rolls)
+            if session.combat_type == 'ground' and self.has_tech(faction, 'x89c4'):
+                expected_incoming += sum(
+                    max(0, min(10, 11 - (int(roll['threshold']) - int(roll.get('modifier', 0))))) / 10
+                    for roll in rolls)
+        current_edge = own_hits - incoming_hits
+        expected_edge = expected_own - expected_incoming
+        return current_edge < expected_edge - 0.5
+
     def advance_combat(self):
         session = self.session
         if not session or session.stage not in ('space_combat', 'ground_combat', 'combat_end',
@@ -2711,6 +2786,8 @@ class MovementController:
             raise MovementError('Finish the action-card choice first.')
         if session.fire_team_pending:
             raise MovementError('Finish Fire Team rerolls first.')
+        if session.thundarian_window_open:
+            raise MovementError('Resolve The Thundarian window before continuing.')
         if session.stage == 'space_combat_won':
             self.continue_after_salvage(session)
             return
@@ -2772,9 +2849,13 @@ class MovementController:
             self._finish_combat_round(session)
             return
 
-        session.combat_round += 1
-        session.combat_sustained_this_round.clear()
-        session.sardakk_retaliation_resolving = False
+        repeating_rolls = session.repeat_combat_rolls
+        if repeating_rolls:
+            session.repeat_combat_rolls = False
+        else:
+            session.combat_round += 1
+            session.combat_sustained_this_round.clear()
+            session.sardakk_retaliation_resolving = False
         session.combat_rolls = {}
         session.combat_hits = {}
         session.combat_assignments = {faction: [] for faction in session.combat_factions}
@@ -2829,8 +2910,9 @@ class MovementController:
             session.combat_rolls[faction] = rolls
             outgoing_hits[faction] = sum(result['hit'] for result in rolls) * (
                 2 if session.combat_type == 'ground' and self.has_tech(faction, 'x89c4') else 1)
-        session.munitions_available = set(session.munitions_ready)
-        session.munitions_ready.clear()
+        if not repeating_rolls:
+            session.munitions_available = set(session.munitions_ready)
+            session.munitions_ready.clear()
         session.combat_hits = {faction: sum(hits for shooter, hits in outgoing_hits.items()
                                              if shooter != faction)
                                for faction in session.combat_factions}
@@ -2838,10 +2920,16 @@ class MovementController:
                                               if shooter != faction and hits)
                                for faction in session.combat_factions}
         session.combat_needs_resolution = True
-        session.combat_bonus_dice.clear()
-        session.combat_bonus_sources.clear()
+        nomad = self.faction_player('nomad')
+        session.thundarian_window_open = bool(
+            'nomad' in session.combat_factions and nomad and
+            leader_available(nomad, 'nomadagentthundarian'))
 
     def _finish_combat_round(self, session):
+        session.combat_bonus_dice.clear()
+        session.combat_bonus_sources.clear()
+        session.thundarian_window_open = False
+        session.repeat_combat_rolls = False
         session.combat_sustained_this_round.clear()
         session.sardakk_retaliation_resolving = False
         session.pending_direct_hits.clear()

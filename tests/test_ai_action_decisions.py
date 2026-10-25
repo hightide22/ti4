@@ -96,6 +96,44 @@ class BotActionDecisions(TestCase):
         self.assertTrue(movement.combat_assignments_complete(session))
         self.assertFalse(leader_available(titans, 'titansagent'))
 
+    def test_bot_nomad_uses_thundarian_only_after_an_unfavorable_combat_roll(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('nomad', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        by_faction = {player.faction: player for player in players}
+        nomad, sol = by_faction['nomad'], by_faction['sol']
+        movement = MovementController(board, players)
+        target = next(iter(board.values()))
+        target.units[:] = [
+            Unit('ai-thundarian-nomad', 'carrier', 'nomad', nomad.color_code,
+                 UnitLocation(Region.SPACE)),
+            Unit('ai-thundarian-sol', 'carrier', 'sol', sol.color_code,
+                 UnitLocation(Region.SPACE)),
+        ]
+        session = Session(nomad, target, {}, Snapshot.capture(board, nomad, players),
+                          stage='space_combat', combat_factions=('nomad', 'sol'),
+                          combat_rolls={
+                              'nomad': [{'unit_id': 'ai-thundarian-nomad', 'kind': 'carrier',
+                                         'threshold': 9, 'modifier': 0, 'hit': False}],
+                              'sol': [{'unit_id': 'ai-thundarian-sol', 'kind': 'carrier',
+                                       'threshold': 9, 'modifier': 0, 'hit': True}],
+                          },
+                          combat_hits={'nomad': 1, 'sol': 0},
+                          combat_assignments={'nomad': [], 'sol': []},
+                          combat_needs_resolution=True, thundarian_window_open=True)
+        movement.session = session
+        turn = TurnOrder(players)
+        cards = ActionCardController(players, movement, turn=turn)
+        window = SimpleNamespace(board=board, movement=movement, turn_order=turn,
+                                 action_cards=cards)
+        ai = GameAI(window, {'nomad', 'sol', 'jolnar', 'hacan'})
+
+        ai.resolve_movement()
+
+        self.assertTrue(session.repeat_combat_rolls)
+        self.assertFalse(session.thundarian_window_open)
+        self.assertFalse(leader_available(nomad, 'nomadagentthundarian'))
+
     def test_fire_team_rerolls_misses_without_touching_successful_dice(self):
         planet = self.target.planets[0].planet_id
         units = [self.unit('infantry', self.sol, f'infantry-{i}',

@@ -1256,6 +1256,7 @@ class GameAI:
         # The human defender gets the first retreat decision before a bot
         # attacker rolls. They can announce a retreat or explicitly stay.
         if (s.stage == 'space_combat' and ai_turn and not s.combat_needs_resolution and
+                not s.repeat_combat_rolls and
                 not s.retreat_announced and s.retreat_declined_round != s.combat_round + 1 and
                 s.retreat_blocked_round != s.combat_round + 1):
             human_defender = next((faction for faction in s.combat_factions
@@ -1265,6 +1266,18 @@ class GameAI:
                 return
         if self.play_combat_card(s):
             return
+        if s.thundarian_window_open:
+            if not ctl.thundarian_window_can_close():
+                return
+            nomad = ctl.faction_player('nomad')
+            if nomad and nomad.faction in self.bot_factions:
+                if ctl.should_bot_use_thundarian():
+                    ctl.use_thundarian()
+                    self.report(nomad, 'The Thundarian reset the combat dice.', .45)
+                    return
+                ctl.decline_thundarian()
+            else:
+                return
         if s.stage in ('space_combat', 'ground_combat') and s.combat_needs_resolution:
             for faction in s.combat_factions:
                 if (faction in self.bot_factions and
@@ -1276,6 +1289,7 @@ class GameAI:
                 if faction in self.bot_factions and self._bot_hit(faction, s):
                     return
         if (s.stage == 'space_combat' and not s.combat_needs_resolution and
+                not s.repeat_combat_rolls and
                 not s.retreat_announced and
                 s.retreat_blocked_round != s.combat_round + 1):
             # A defending bot must make its retreat decision even during a
@@ -1381,6 +1395,7 @@ class GameAI:
             if s.combat_needs_resolution and not ctl.combat_assignments_complete(s):
                 return
             if (s.stage == 'space_combat' and not s.combat_needs_resolution and
+                    not s.repeat_combat_rolls and
                     not s.retreat_announced and
                     s.retreat_blocked_round != s.combat_round + 1 and
                     ctl.retreat_options(s, s.player.faction)):
