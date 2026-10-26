@@ -28,6 +28,33 @@ class Card:
 
 
 class GameAITests(unittest.TestCase):
+    def test_bot_uses_sardakk_agent_to_reinforce_its_tactical_action(self):
+        config, board = load_board(
+            Path(__file__).resolve().parents[1] / 'maps/four_player.json',
+            ('sardakk', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        sardakk = players[0]
+        target = next(tile for tile in board.values()
+                      if any(owner == sardakk.faction for owner in tile.planet_owners.values()))
+        movement = MovementController(board, players)
+        session = movement.activate(sardakk, target.position)
+        session.stage = 'complete'
+        movement.finish()
+        window = SimpleNamespace(
+            turn_order=TurnOrder(players),
+            strategy=SimpleNamespace(pending_cabal_replenishments=[], session=None),
+            movement=movement,
+            leader_panel=SimpleNamespace(open=False, reaction_owner_faction=None),
+            action_cards=SimpleNamespace(pending=[], discard=[]),
+            transaction=SimpleNamespace(session=None),
+            board=board,
+        )
+
+        GameAI(window, {'sardakk'}).step()
+
+        self.assertIsNone(movement.session)
+        self.assertTrue(sardakk.leaders['sardakkagent'].exhausted)
+
     def test_bot_empyrean_declines_acamar_when_it_would_reward_an_opponent(self):
         config, board = load_board(
             Path(__file__).resolve().parents[1] / 'maps/four_player.json',

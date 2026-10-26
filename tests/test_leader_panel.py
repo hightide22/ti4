@@ -215,6 +215,34 @@ class LeaderPanelTests(unittest.TestCase):
         self.assertIn(('use', 'argentagent'),
                       [row[0] for row in self.panel.hits])
 
+    def test_sardakk_agent_reaction_shows_planets_in_the_active_system(self):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('sardakk', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        sardakk, sol = players[:2]
+        target = next(tile for tile in board.values()
+                      if any(owner == sol.faction for owner in tile.planet_owners.values()))
+        planet = next(planet for planet in target.planets
+                      if target.planet_owners.get(planet.planet_id) == sol.faction)
+        session = SimpleNamespace(stage='sardakk_agent', player=sol, target=target,
+                                  sardakk_agent_owner='sardakk')
+        movement = SimpleNamespace(session=session,
+                                   sardakk_agent_planets=lambda _session: [planet])
+        self.movement = movement
+        self.window.player_panel.players = players
+        self.window.turn_order.active_player = sol
+        self.panel.open_for_reaction(sardakk, 'sardakkagent')
+
+        self.draw(player=sardakk, available_actions=('sardakkagent',))
+
+        action, left, right, bottom, top = next(
+            row for row in self.panel.hits
+            if row[0] == ('use', 'sardakkagent', planet.planet_id))
+        self.assertEqual(self.panel.handle_click((left + right) / 2,
+                                                 (bottom + top) / 2,
+                                                 sardakk), action)
+
     def test_header_drag_stays_on_screen(self):
         self.draw()
         left, right, bottom, top = self.panel.bounds

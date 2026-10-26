@@ -29,7 +29,7 @@ MANUAL_ACTION_HEROES = frozenset({
 })
 MANUAL_ACTION_AGENTS = frozenset({'arborecagent', 'cabalagent', 'hacanagent',
                                   'l1z1xagent', 'muaatagent', 'saaragent',
-                                  'xxchaagent'})
+                                  'sardakkagent', 'xxchaagent'})
 
 
 class LeaderPanel:
@@ -71,7 +71,7 @@ class LeaderPanel:
         self.open = True
         self.reaction_owner_faction = player.faction
         self.select(leader_id, player)
-        if leader_id in ('empyreanagent', 'argentagent'):
+        if leader_id in ('empyreanagent', 'argentagent', 'sardakkagent'):
             self.begin_agent_action(leader_id)
 
     def begin_agent_action(self, leader_id: str) -> None:
@@ -345,6 +345,7 @@ class LeaderPanel:
         alias = self.agent_mode
         choice_title = ('CHOOSE A COMMAND POOL' if alias == 'empyreanagent' else
                         'PLACE PRODUCED GROUND FORCES' if alias == 'argentagent' else
+                        'PLACE 2 INFANTRY IN THE ACTIVE SYSTEM' if alias == 'sardakkagent' else
                         'CHOOSE THE EFFECT TARGET')
         window.text(('leader_agent_choice_title', alias), choice_title,
                     x, bottom + 174, 10, ACCENT)
@@ -393,6 +394,20 @@ class LeaderPanel:
                        x, by, width, 27, size=8)
                 self.hits.append((('argent_agent_cycle', unit_id), x,
                                   x + width, by, by + 27))
+        elif alias == 'sardakkagent':
+            session = movement.session
+            planets = movement.sardakk_agent_planets(session) if session else []
+            if not planets:
+                window.text('sardakk_agent_no_planets',
+                            'The active player controls no eligible planet in this system.',
+                            x, bottom + 128, 9, MUTED, width)
+            for index, planet in enumerate(planets[:page_size]):
+                by = bottom + 138 - index * 31
+                button(window, ('sardakk_agent_planet', planet.planet_id),
+                       f'{planet.name.upper()} · PLACE 2 INFANTRY',
+                       x, by, width, 27, size=8)
+                self.hits.append((('use', alias, planet.planet_id),
+                                  x, x + width, by, by + 27))
         elif alias == 'l1z1xagent':
             session = movement.session
             targets = ([unit for unit in session.target.units

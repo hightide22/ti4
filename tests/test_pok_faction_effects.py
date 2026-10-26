@@ -38,6 +38,64 @@ class PokEffectsTests(unittest.TestCase):
         players = create_players(board, config)
         return board, players[0], players[1]
 
+    def test_sardakk_agent_offers_two_infantry_at_tactical_action_end(self):
+        board, sardakk, sol = self.game('sardakk')
+        movement = MovementController(board, (sardakk, sol))
+        target = next(tile for tile in board.values()
+                      if any(owner == sol.faction for owner in tile.planet_owners.values()))
+        planet_id = next(planet_id for planet_id, owner in target.planet_owners.items()
+                         if owner == sol.faction)
+        before = sum(unit.owner == sol.faction and unit.kind == 'infantry' and
+                     unit.location.region == Region.PLANET and
+                     unit.location.planet_id == planet_id for unit in target.units)
+
+        session = movement.activate(sol, target.position)
+        session.stage = 'production'  # all other tactical steps are already resolved
+        movement.skip_production()
+        self.assertEqual(session.stage, 'sardakk_agent')
+        self.assertEqual(session.sardakk_agent_owner, sardakk.faction)
+
+        self.assertTrue(movement.resolve_sardakk_agent(planet_id))
+        after = sum(unit.owner == sol.faction and unit.kind == 'infantry' and
+                    unit.location.region == Region.PLANET and
+                    unit.location.planet_id == planet_id for unit in target.units)
+        self.assertEqual(after, before + 2)
+        self.assertFalse(leader_available(sardakk, 'sardakkagent'))
+        self.assertIsNone(movement.session)
+        self.assertEqual(len(movement.history), 1)
+        self.assertTrue(movement.undo())
+        self.assertTrue(leader_available(sardakk, 'sardakkagent'))
+        self.assertEqual(sum(unit.owner == sol.faction and unit.kind == 'infantry' and
+                             unit.location.region == Region.PLANET and
+                             unit.location.planet_id == planet_id for unit in target.units),
+                         before)
+
+    def test_sardakk_agent_can_be_declined_without_exhausting_it(self):
+        board, sardakk, sol = self.game('sardakk')
+        movement = MovementController(board, (sardakk, sol))
+        target = next(tile for tile in board.values()
+                      if any(owner == sol.faction for owner in tile.planet_owners.values()))
+        session = movement.activate(sol, target.position)
+        session.stage = 'production'
+        movement.skip_production()
+        self.assertEqual(session.stage, 'sardakk_agent')
+
+        self.assertFalse(movement.resolve_sardakk_agent())
+        self.assertTrue(leader_available(sardakk, 'sardakkagent'))
+        self.assertIsNone(movement.session)
+
+    def test_sardakk_agent_is_not_offered_when_active_player_controls_no_planet(self):
+        board, sardakk, sol = self.game('sardakk')
+        movement = MovementController(board, (sardakk, sol))
+        target = next(tile for tile in board.values() if not tile.planets)
+        session = movement.activate(sol, target.position)
+        session.stage = 'production'
+
+        movement.skip_production()
+
+        self.assertIsNone(movement.session)
+        self.assertTrue(leader_available(sardakk, 'sardakkagent'))
+
     def test_cabal_agent_and_devour_capture_without_touching_structures(self):
         board, cabal, sol = self.game('cabal')
         sol.commodities = sol.commodity_limit

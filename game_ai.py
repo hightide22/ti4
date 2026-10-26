@@ -304,6 +304,37 @@ class GameAI:
             if (getattr(w.leader_panel, 'open', False) and
                     getattr(w.leader_panel, 'reaction_owner_faction', None)):
                 return
+            if session.stage == 'sardakk_agent':
+                owner = w.movement.faction_player(session.sardakk_agent_owner)
+                if owner is None:
+                    w.movement.resolve_sardakk_agent()
+                    return
+                if not self.is_bot(owner):
+                    return
+                # T'ro helps the player who just took the tactical action.
+                # Do not spend the Sardakk player's agent to reinforce an
+                # opponent; otherwise invest both infantry on the best
+                # controlled planet available in the active system.
+                planets = (w.movement.sardakk_agent_planets(session)
+                           if session.player is owner else [])
+                if planets:
+                    def reinforcement_value(planet):
+                        local = [unit for unit in session.target.units
+                                 if unit.owner == owner.faction and
+                                 unit.location.region == Region.PLANET and
+                                 unit.location.planet_id == planet.planet_id]
+                        threat = sum(self._tile_threat(neighbor, owner.faction)
+                                     for neighbor in w.movement.neighbors(session.target,
+                                                                         owner.faction))
+                        return (planet.resources + .5 * planet.influence +
+                                (1.25 if not local else 0) - threat * .25,
+                                planet.name.casefold())
+                    planet = max(planets, key=reinforcement_value)
+                    w.movement.resolve_sardakk_agent(planet.planet_id)
+                    self.report(owner, f"Used T'ro to place 2 infantry on {planet.name}.", .3)
+                else:
+                    w.movement.resolve_sardakk_agent()
+                return
             if session.stage == 'argent_agent':
                 owner = w.movement.faction_player(session.argent_agent_owner)
                 if owner is None:

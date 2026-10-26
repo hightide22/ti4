@@ -904,6 +904,9 @@ class BoardWindow(arcade.Window):
             session.activation_agent_alias = None
             self.leader_panel.close()
             self.prompt_activation_agent(session)
+        elif session and session.stage == 'sardakk_agent':
+            self.leader_panel.close()
+            self.movement.resolve_sardakk_agent()
         elif session and session.stage == 'empyrean_agent':
             self.leader_panel.close()
             self.movement.resolve_empyrean_agent()
@@ -949,6 +952,16 @@ class BoardWindow(arcade.Window):
                       if candidate.faction == session.argent_agent_owner), None)
         if owner is not None and not self.ai.is_bot(owner):
             self.leader_panel.open_for_reaction(owner, 'argentagent')
+
+    def sync_sardakk_agent_reaction(self):
+        """Open T'ro's optional reaction after a tactical action completes."""
+        session = self.movement.session
+        if (not session or session.stage != 'sardakk_agent' or
+                self.leader_panel.reaction_owner_faction):
+            return
+        owner = self.movement.faction_player(session.sardakk_agent_owner)
+        if owner is not None and not self.ai.is_bot(owner):
+            self.leader_panel.open_for_reaction(owner, 'sardakkagent')
 
     def finish_activation_agent_reaction(self, session):
         if session.activation_agent_queue:
@@ -1028,6 +1041,20 @@ class BoardWindow(arcade.Window):
             # one snapshot for reversing only this optional placement.
             if session.strategic_production:
                 self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            self.leader_panel.close()
+            self.movement_error = None
+            return
+        if alias == 'sardakkagent':
+            session = self.movement.session
+            if (player is None or player.faction != 'sardakk' or session is None or
+                    session.stage != 'sardakk_agent' or len(command) < 3):
+                self.movement_error = "T'ro is no longer waiting for a planet choice."
+                return
+            try:
+                self.movement.resolve_sardakk_agent(command[2])
+            except (ValueError, KeyError) as error:
+                self.movement_error = str(error)
+                return
             self.leader_panel.close()
             self.movement_error = None
             return
@@ -1725,6 +1752,12 @@ class BoardWindow(arcade.Window):
                     player.faction == session.argent_agent_owner and
                     leader_available(player, 'argentagent')):
                 available.add('argentagent')
+            if (player.faction == 'sardakk' and session is not None and
+                    session.stage == 'sardakk_agent' and
+                    player.faction == session.sardakk_agent_owner and
+                    leader_available(player, 'sardakkagent') and
+                    self.movement.sardakk_agent_planets(session)):
+                available.add('sardakkagent')
             if (session is not None and session.stage == 'movement' and
                     player.faction == session.activation_agent_owner and
                     self.leader_panel.selected_id == session.activation_agent_alias):
@@ -1982,6 +2015,7 @@ class BoardWindow(arcade.Window):
         self.sync_cabal_agent_reaction()
         self.sync_empyrean_agent_reaction()
         self.sync_argent_agent_reaction()
+        self.sync_sardakk_agent_reaction()
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
         for axis in range(2):
             shift = (self.target_map_center[axis] - self.map_center[axis]) * min(1, delta_time * 7)

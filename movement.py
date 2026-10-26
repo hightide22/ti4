@@ -221,6 +221,7 @@ class Session:
     strategic_production: bool = False
     component_action: bool = False
     agent_production: bool = False
+    tactical_activation: bool = False
     production_unit_cost_cap: float | None = None
     ground_forces_in_space: bool = False
     selected: set[str] = field(default_factory=set)
@@ -360,6 +361,8 @@ class Session:
     ai_move_plan: object | None = None
     activation_move_values: dict[str, int] = field(default_factory=dict)
     ghost_wormhole_adjacency: bool = False
+    sardakk_agent_owner: str | None = None
+    sardakk_agent_checked: bool = False
 
     @property
     def choices(self):
@@ -926,6 +929,7 @@ class MovementController:
         player.command_pools['tactical'] -= 1
         target.command_tokens.add(player.faction)
         self.session = Session(player, target, sources, snapshot,
+                               tactical_activation=True,
                                titans_sleepers_at_activation=sleepers_at_activation)
         self._magen_activation(target)
         self.session.gravity_bonus_ids = gravity_bonus_ids
@@ -4257,6 +4261,17 @@ class MovementController:
     def finish(self):
         if self.session and self.session.stage == 'complete':
             session = self.session
+            # T'ro triggers at the end of every tactical action. Keep the
+            # action alive while its optional reaction is being decided so
+            # the agent's placement is part of the same undoable action.
+            if session.tactical_activation and not session.sardakk_agent_checked:
+                session.sardakk_agent_checked = True
+                sardakk = self.faction_player('sardakk')
+                if (sardakk and leader_available(sardakk, 'sardakkagent') and
+                        self.sardakk_agent_planets(session)):
+                    session.sardakk_agent_owner = sardakk.faction
+                    session.stage = 'sardakk_agent'
+                    return False
             if (not session.strategic_production and not session.component_action and
                     self.exploration is not None and
                     'det' in session.player.technologies and
@@ -4287,6 +4302,53 @@ class MovementController:
             self.session = None
             return True
         return False
+
+    def sardakk_agent_planets(self, session=None):
+        """Controlled, legal planets in the active system for T'ro's placement."""
+        session = self.session if session is None else session
+        if (session is None or not session.tactical_activation or
+                session.stage not in ('complete', 'sardakk_agent')):
+            return []
+        beneficiary = session.player
+        return sorted(
+            (planet for planet in session.target.planets
+             if session.target.planet_owners.get(planet.planet_id) == beneficiary.faction and
+             self.planet_allows_landing(planet.planet_id) and
+             can_place_infantry(beneficiary, self.board, session.target,
+                                 UnitLocation(Region.PLANET, planet.planet_id))),
+             key=lambda planet: (planet.name.casefold(), planet.planet_id))
+
+    def resolve_sardakk_agent(self, planet_id=None):
+        """Use or decline T'ro, then resume completion of the tactical action."""
+        session = self.session
+        if (session is None or session.stage != 'sardakk_agent' or
+                not session.sardakk_agent_owner):
+            raise MovementError("T'ro is not awaiting a decision.")
+        owner = self.faction_player(session.sardakk_agent_owner)
+        if owner is None:
+            raise MovementError("The Sardakk player is no longer available.")
+        if planet_id is not None:
+            planet = next((planet for planet in self.sardakk_agent_planets(session)
+                           if planet.planet_id == planet_id), None)
+            if planet is None:
+                raise MovementError("Choose a planet the active player controls in this system.")
+            if not leader_available(owner, 'sardakkagent'):
+                raise MovementError("T'ro is no longer ready.")
+            from leaders import exhaust_leader
+            exhaust_leader(owner, 'sardakkagent')
+            beneficiary = session.player
+            location = UnitLocation(Region.PLANET, planet.planet_id)
+            if not can_place_infantry(beneficiary, self.board, session.target, location):
+                raise MovementError("There is no plastic infantry anchor available on that planet.")
+            for _ in range(2):
+                session.target.units.append(Unit(
+                    f'{beneficiary.faction}-tro-agent-{uuid4().hex}', 'infantry',
+                    beneficiary.faction, beneficiary.color_code, location,
+                    profile_id=(upgrade_profile(beneficiary, 'infantry') or {}).get('id')))
+        session.sardakk_agent_owner = None
+        session.stage = 'complete'
+        self.finish()
+        return planet_id is not None
 
     def legendary_planet_options(self, player):
         """Ready legendary cards and legal end-of-turn destinations for their abilities."""
