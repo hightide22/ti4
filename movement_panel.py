@@ -252,6 +252,8 @@ class MovementPanel:
                 notices.append(('ANTI-FIGHTER BARRAGE', session.afb_log[-1]))
             if session.assault_log:
                 notices.append(('ASSAULT CANNON', session.assault_log[-1]))
+            if session.blockade_log:
+                notices.append(('BLOCKADE', session.blockade_log[-1]))
             if session.titans_awaken_log:
                 notices.append(('TITANS · AWAKEN', session.titans_awaken_log))
             if session.retreat_log:

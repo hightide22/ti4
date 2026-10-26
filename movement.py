@@ -247,6 +247,7 @@ class Session:
     afb_rolls: dict[str, list[dict]] = field(default_factory=dict)
     afb_log: list[str] = field(default_factory=list)
     assault_log: list[str] = field(default_factory=list)
+    blockade_log: list[str] = field(default_factory=list)
     assault_queue: list[str] = field(default_factory=list)
     afb_resolved: bool = False
     retreat_announced: str | None = None
@@ -786,15 +787,20 @@ class MovementController:
         cabal_flagship = any(other is not unit and other.owner == 'cabal' and
                              other.kind == 'flagship' and other.location.region == Region.SPACE
                              for other in tile.units)
-        if (cabal is not None and cabal_flagship and
-                unit.kind not in ('pds', 'spacedock')):
-            from pok_factions import cabal_capture_unit
-            cabal_capture_unit(cabal, unit.kind, unit.owner)
-        elif in_combat and session is not None and 'cabal' in session.combat_factions:
-            if cabal is not None:
-                from pok_factions import cabal_capture_destroyed
-                cabal_capture_destroyed(cabal, unit, during_combat=True)
+        flagship_capture = bool(cabal and cabal_flagship and
+                                unit.kind not in ('pds', 'spacedock'))
+        devour_capture = bool(cabal and in_combat and session is not None and
+                              'cabal' in session.combat_factions)
         tile.units.remove(unit)
+        # Check blockade status after removing the destroyed unit: eliminating
+        # the last blocking ship ends the blockade before capture can resolve.
+        if flagship_capture or devour_capture:
+            from pok_factions import cabal_can_capture_from, cabal_capture_destroyed, cabal_capture_unit
+            if cabal_can_capture_from(cabal, unit.owner, self.board):
+                if flagship_capture:
+                    cabal_capture_unit(cabal, unit.kind, unit.owner)
+                elif devour_capture:
+                    cabal_capture_destroyed(cabal, unit, during_combat=True)
         if mobile_ship(unit):
             for cargo in list(tile.units):
                 if cargo.location.region == Region.TRANSPORT and cargo.location.carrier_id == unit.unit_id:
@@ -1605,6 +1611,7 @@ class MovementController:
             if self._resolve_next_space_cannon_group(session):
                 self.continue_after_space_cannon(session)
         elif next_stage in ('after_combat', 'after_retreat'):
+            self.resolve_cabal_blockade_returns(session)
             self.prepare_invasion(session)
         else:
             session.stage = 'complete'
@@ -1659,7 +1666,26 @@ class MovementController:
         else:
             if next_stage == 'space_combat':
                 session.space_combat_resolved = True
+            self.resolve_cabal_blockade_returns(session)
             self.prepare_invasion(session)
+
+    def resolve_cabal_blockade_returns(self, session=None):
+        # Resolve the Cabal blockade exception after a fleet state changes.
+        from collections import Counter
+        from pok_factions import cabal_release_blockaded_captures
+
+        released = []
+        for player in self.players:
+            if player.faction == 'cabal':
+                released.extend(cabal_release_blockaded_captures(player, self.board))
+        if released and session is not None:
+            by_owner_kind = Counter(released)
+            summary = ', '.join(
+                f'{owner.upper()} {kind} ×{count}'
+                for (owner, kind), count in sorted(by_owner_kind.items()))
+            session.blockade_log.append(
+                f'Blockade returned captured units to reinforcements: {summary}.')
+        return released
 
     def resolve_space_cannon(self, session):
         if session.cannon_checked:
@@ -3181,6 +3207,7 @@ class MovementController:
                     if faction != winner and defeated is not None:
                         mahact_gain_fleet_token(mahact, defeated, self.board)
             session.space_combat_resolved = True
+            self.resolve_cabal_blockade_returns(session)
             if winner and self.action_cards and any(
                     self.action_cards.can_play(winner, alias, session)
                     for player in self.players if player.faction == winner

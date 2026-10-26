@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from leaders import refresh_leader_unlocks
 from player import command_tokens_in_reinforcements
-from units import Region, Unit, UnitLocation, unit_profile
+from units import Region, UNIT_TYPES, Unit, UnitLocation, unit_profile
 from unit_supply import planet_structure_count
 
 
@@ -17,14 +17,53 @@ PDS_SUPPLY = 6
 def cabal_capture_unit(cabal, kind: str, original_owner: str) -> None:
     """Record a captured unit and retain its owner while it is on Cabal's sheet."""
     cabal.captured_units[kind] = cabal.captured_units.get(kind, 0) + 1
-    # Fighter and infantry captures use unlimited supply tokens. Ships and
-    # mechs leave a faction-specific plastic unit out of its owner's reserve.
-    if kind not in ('fighter', 'infantry'):
-        key = (kind, original_owner)
-        sources = getattr(cabal, 'captured_unit_sources', None)
-        if sources is None:
-            cabal.captured_unit_sources = sources = {}
-        sources[key] = sources.get(key, 0) + 1
+    # Keep ownership for all unit types: blockade rules return captured units
+    # belonging to the player who blockades Cabal's space dock.
+    key = (kind, original_owner)
+    sources = getattr(cabal, 'captured_unit_sources', None)
+    if sources is None:
+        cabal.captured_unit_sources = sources = {}
+    sources[key] = sources.get(key, 0) + 1
+
+
+def cabal_blockading_factions(cabal, board):
+    """Return factions whose ships blockade a Cabal space dock."""
+    if cabal.faction != 'cabal':
+        return set()
+    blockers = set()
+    for tile in board.values():
+        if not any(unit.owner == cabal.faction and unit.kind == 'spacedock'
+                   for unit in tile.units):
+            continue
+        has_cabal_ships = any(
+            unit.owner == cabal.faction and unit.location.region == Region.SPACE and
+            UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
+        if has_cabal_ships:
+            continue
+        blockers.update(
+            unit.owner for unit in tile.units
+            if unit.owner != cabal.faction and unit.location.region == Region.SPACE and
+            UNIT_TYPES[unit.kind]['ship'])
+    return blockers
+
+
+def cabal_can_capture_from(cabal, original_owner: str, board) -> bool:
+    """A blockaded Cabal player cannot capture units from their blockader."""
+    return original_owner not in cabal_blockading_factions(cabal, board)
+
+
+def cabal_release_blockaded_captures(cabal, board):
+    """Return captured units belonging to factions blockading a Cabal dock."""
+    blockers = cabal_blockading_factions(cabal, board)
+    released = []
+    sources = getattr(cabal, 'captured_unit_sources', {})
+    for (kind, owner), count in sorted(sources.items()):
+        if owner not in blockers:
+            continue
+        for _ in range(count):
+            if cabal_return_captured(cabal, kind, owner):
+                released.append((owner, kind))
+    return released
 
 
 def cabal_capture_destroyed(cabal, destroyed, *, during_combat: bool) -> bool:

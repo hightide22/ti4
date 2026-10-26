@@ -18,7 +18,8 @@ from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, 
 from leaders import leader_available, ready_leaders, unlock_leader
 from movement import MovementController, Session, Snapshot
 from player import PlanetCard, create_players
-from pok_factions import (cabal_capture_destroyed, cabal_return_captured,
+from pok_factions import (cabal_can_capture_from, cabal_capture_destroyed,
+                          cabal_release_blockaded_captures, cabal_return_captured,
                           cabal_capture_unit,
                           keleres_council_patronage, mahact_gain_fleet_token,
                           mahact_fleet_limit, naaz_explore_planet, titans_awaken,
@@ -116,6 +117,61 @@ class PokEffectsTests(unittest.TestCase):
         self.assertEqual(cabal.captured_units['carrier'], 1)
         self.assertEqual(cabal.captured_unit_sources[('carrier', 'sol')], 1)
 
+    def test_cabal_blockade_returns_only_blockaders_captured_units(self):
+        board, cabal, sol = self.game('cabal')
+        dock_tile = next(tile for tile in board.values()
+                         if any(unit.owner == 'cabal' and unit.kind == 'spacedock'
+                                for unit in tile.units))
+        dock_tile.units[:] = [unit for unit in dock_tile.units
+                              if not (unit.owner == 'cabal' and
+                                      unit.location.region == Region.SPACE and
+                                      unit.kind in ('carrier', 'cruiser', 'destroyer',
+                                                    'dreadnought', 'flagship', 'warsun',
+                                                    'fighter'))]
+        cabal_ship = Unit('cabal-ship-keeps-dock-open', 'carrier', 'cabal',
+                          cabal.color_code, UnitLocation(Region.SPACE))
+        dock_tile.units.append(cabal_ship)
+        dock_tile.units.append(Unit('blockading-sol-fighter', 'fighter', 'sol',
+                                    sol.color_code, UnitLocation(Region.SPACE)))
+        cabal_capture_unit(cabal, 'carrier', 'sol')
+        cabal_capture_unit(cabal, 'infantry', 'sol')
+        cabal_capture_unit(cabal, 'destroyer', 'jolnar')
+
+        self.assertEqual(cabal_release_blockaded_captures(cabal, board), [])
+        dock_tile.units.remove(cabal_ship)
+        self.assertEqual(set(cabal_release_blockaded_captures(cabal, board)),
+                         {('sol', 'carrier'), ('sol', 'infantry')})
+        self.assertEqual(cabal.captured_units, {'destroyer': 1})
+        self.assertEqual(cabal.captured_unit_sources, {('destroyer', 'jolnar'): 1})
+
+    def test_blockaded_cabal_cannot_capture_blockers_units(self):
+        board, cabal, sol = self.game('cabal')
+        dock_tile = next(tile for tile in board.values()
+                         if any(unit.owner == 'cabal' and unit.kind == 'spacedock'
+                                for unit in tile.units))
+        dock_tile.units[:] = [unit for unit in dock_tile.units
+                              if not (unit.owner == 'cabal' and
+                                      unit.location.region == Region.SPACE and
+                                      unit.kind in ('carrier', 'cruiser', 'destroyer',
+                                                    'dreadnought', 'flagship', 'warsun',
+                                                    'fighter'))]
+        dock_tile.units.append(Unit('blocking-sol-fighter', 'fighter', 'sol',
+                                    sol.color_code, UnitLocation(Region.SPACE)))
+        self.assertFalse(cabal_can_capture_from(cabal, 'sol', board))
+        self.assertTrue(cabal_can_capture_from(cabal, 'jolnar', board))
+
+        battle_tile = next(tile for tile in board.values() if tile is not dock_tile)
+        battle_tile.units[:] = [unit for unit in battle_tile.units
+                                if unit.owner not in ('cabal', 'sol')]
+        battle_tile.units.extend((
+            Unit('capture-check-cabal-flagship', 'flagship', 'cabal', cabal.color_code,
+                 UnitLocation(Region.SPACE)),
+            Unit('blocker-unit-that-dies', 'destroyer', 'sol', sol.color_code,
+                 UnitLocation(Region.SPACE))))
+        MovementController(board, (cabal, sol)).destroy_unit(
+            battle_tile, battle_tile.units[-1])
+        self.assertFalse(cabal.captured_units)
+
     def test_cabal_agent_cannot_recapture_a_plastic_unit_already_captured(self):
         board, cabal, sol = self.game('cabal')
         sol_carriers = sum(unit.owner == sol.faction and unit.kind == 'carrier'
@@ -163,6 +219,31 @@ class PokEffectsTests(unittest.TestCase):
             use_cabal_agent(cabal, sol, 'carrier', board)
 
         self.assertTrue(leader_available(cabal, 'cabalagent'))
+
+    def test_cabal_blockade_returns_captures_after_movement_before_invasion(self):
+        board, cabal, sol = self.game('cabal')
+        dock_tile = next(tile for tile in board.values()
+                         if any(unit.owner == 'cabal' and unit.kind == 'spacedock'
+                                for unit in tile.units))
+        dock_tile.units[:] = [unit for unit in dock_tile.units
+                              if not (unit.owner == 'cabal' and
+                                      unit.location.region == Region.SPACE and
+                                      unit.kind in ('carrier', 'cruiser', 'destroyer',
+                                                    'dreadnought', 'flagship', 'warsun',
+                                                    'fighter'))]
+        dock_tile.units.append(Unit('blockading-sol-ship', 'destroyer', 'sol',
+                                    sol.color_code, UnitLocation(Region.SPACE)))
+        cabal_capture_unit(cabal, 'carrier', 'sol')
+        movement = MovementController(board, (cabal, sol))
+        session = Session(sol, dock_tile, {}, Snapshot.capture(board, sol, (cabal, sol)))
+        session.space_cannon_next_stage = 'invasion'
+        movement.session = session
+
+        movement._finish_after_space_cannon(session)
+
+        self.assertNotIn('carrier', cabal.captured_units)
+        self.assertEqual(session.blockade_log, [
+            'Blockade returned captured units to reinforcements: SOL carrier ×1.'])
 
     def test_cabal_hero_rolls_for_enemy_ship_and_captures_its_cargo(self):
         board, cabal, sol = self.game('cabal')
