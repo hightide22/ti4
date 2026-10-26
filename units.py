@@ -100,7 +100,9 @@ STARTING_PLANET_ALIASES = {'at': 'archon tau', 'ar': 'archon ren'}
 @lru_cache(maxsize=1)
 def unit_profiles():
     definitions = {}
-    for filename in ('baseUnits.json', 'pok.json'):
+    # Council Keleres' flagship and mech are distributed in a separate
+    # Codex III unit file instead of the main PoK profile catalog.
+    for filename in ('baseUnits.json', 'pok.json', 'keleres.json'):
         for data in json.loads((RESOURCES / 'data/units' / filename).read_text(encoding='utf-8')):
             if data.get('source') in ('base', 'pok', 'codex3'):
                 definitions[data['id']] = data

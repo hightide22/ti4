@@ -1002,7 +1002,6 @@ class BoardWindow(arcade.Window):
                 snapshot.restore()
                 self.movement_error = str(error)
                 return
-            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
             self.leader_panel.close()
             self.movement_error = None
             return
@@ -1021,7 +1020,13 @@ class BoardWindow(arcade.Window):
                 snapshot.restore()
                 self.movement_error = str(error)
                 return
-            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            # Tactical and component-action production already share the
+            # parent action's undo snapshot. A separate reaction entry would
+            # leave a completed activation on the board after the next undo.
+            # Standalone strategy production has no parent undo entry, so keep
+            # one snapshot for reversing only this optional placement.
+            if session.strategic_production:
+                self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
             self.leader_panel.close()
             self.movement_error = None
             return
@@ -1126,7 +1131,9 @@ class BoardWindow(arcade.Window):
                 self.movement_error = str(error)
                 return
             self.movement.refresh_activation_routes(session)
-            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            # The activation snapshot already includes this reaction and its
+            # exhausted leader. Recording a second entry strands the
+            # activated system when Ctrl+Z subsequently rolls back the action.
             self.finish_activation_agent_reaction(session)
             self.movement_error = None
             return
@@ -1146,7 +1153,6 @@ class BoardWindow(arcade.Window):
                 snapshot.restore()
                 self.movement_error = str(error)
                 return
-            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
             self.finish_activation_agent_reaction(session)
             self.movement_error = None
             return
@@ -1168,7 +1174,6 @@ class BoardWindow(arcade.Window):
                 snapshot.restore()
                 self.movement_error = str(error)
                 return
-            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
             self.finish_activation_agent_reaction(session)
             self.movement_error = None
             return

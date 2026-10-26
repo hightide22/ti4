@@ -55,6 +55,22 @@ class PokFactionSetupTests(unittest.TestCase):
                 self.assertEqual(unit.location.region,
                                  Region.SPACE if kind == 'flagship' else Region.PLANET)
 
+    def test_keleres_codex_units_use_their_unique_profiles(self):
+        flagship = Unit('keleres-flagship-test', 'flagship', 'keleresm', 'blu',
+                        UnitLocation(Region.SPACE))
+        mech = Unit('keleres-mech-test', 'mech', 'keleresm', 'blu',
+                    UnitLocation(Region.PLANET, 'mollprimusk'))
+
+        flagship_profile = unit_profile(flagship)
+        mech_profile = unit_profile(mech)
+        self.assertEqual(flagship_profile['id'], 'keleres_flagship')
+        self.assertEqual((flagship_profile['moveValue'], flagship_profile['capacityValue'],
+                          flagship_profile['combatHitsOn'], flagship_profile['combatDieCount']),
+                         (1, 6, 7, 2))
+        self.assertEqual(mech_profile['id'], 'keleres_mech')
+        self.assertEqual((mech_profile['combatHitsOn'], mech_profile['capacityUsed'],
+                          mech_profile['sustainDamage']), (6, 1, True))
+
     def test_naaz_mech_can_use_its_space_side_only_with_the_space_profile(self):
         from units import Unit, UnitLocation
         valid = Unit('eidolon-space', 'mech', 'naaz', 'grn',
