@@ -172,6 +172,33 @@ class PokEffectsTests(unittest.TestCase):
             battle_tile, battle_tile.units[-1])
         self.assertFalse(cabal.captured_units)
 
+    def test_blockade_prevents_cabal_agent_and_hero_from_capturing_blocker(self):
+        board, cabal, sol = self.game('cabal')
+        dock_tile = next(tile for tile in board.values()
+                         if any(unit.owner == 'cabal' and unit.kind == 'spacedock'
+                                for unit in tile.units))
+        dock_tile.units[:] = [unit for unit in dock_tile.units
+                              if not (unit.owner == 'cabal' and
+                                      unit.location.region == Region.SPACE and
+                                      unit.kind in ('carrier', 'cruiser', 'destroyer',
+                                                    'dreadnought', 'flagship', 'warsun',
+                                                    'fighter'))]
+        dock_tile.units.extend((
+            Unit('blockade-sol-fighter', 'fighter', 'sol', sol.color_code,
+                 UnitLocation(Region.SPACE)),
+            Unit('blockade-sol-cruiser', 'cruiser', 'sol', sol.color_code,
+                 UnitLocation(Region.SPACE))))
+
+        self.assertEqual(cabal_agent_options(
+            sol, board, captured_by=cabal), ())
+        self.assertFalse(any(unit.owner == 'sol' for _, unit in
+                             cabal_hero_targets(board, cabal)))
+        sol.commodities = sol.commodity_limit
+        with self.assertRaises(ValueError):
+            use_cabal_agent(cabal, sol, 'carrier', board)
+        self.assertEqual(sol.commodities, sol.commodity_limit)
+        self.assertTrue(leader_available(cabal, 'cabalagent'))
+
     def test_cabal_agent_cannot_recapture_a_plastic_unit_already_captured(self):
         board, cabal, sol = self.game('cabal')
         sol_carriers = sum(unit.owner == sol.faction and unit.kind == 'carrier'

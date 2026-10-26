@@ -16,7 +16,7 @@ from units import (Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles,
                    unit_profile)
 from technology import upgrade_profile
 from unit_supply import can_transfer_infantry, unit_supply_remaining
-from pok_factions import cabal_capture_unit
+from pok_factions import cabal_can_capture_from, cabal_capture_unit
 
 
 UNIT_SUPPLY_LIMITS = {
@@ -77,6 +77,9 @@ def use_argent_agent(owner, beneficiary, board, source_tile, produced_units,
 def cabal_agent_options(target, board, commodity_value=None, captured_by=None):
     """Unit types still in a player's reinforcements and within commodity value."""
     value = target.commodity_limit if commodity_value is None else commodity_value
+    if captured_by is not None and not cabal_can_capture_from(
+            captured_by, target.faction, board):
+        return ()
     definitions, factions = unit_profiles()
     options = {}
     for alias in factions.get(target.faction, {}).get('units', ()):
@@ -584,7 +587,8 @@ def cabal_hero_targets(board, cabal, *, movement=None, exploration=None):
     return [(tile, unit) for tile in board.values() if tile.position in threatened
             for unit in tile.units if unit.owner != cabal.faction and
             unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship'] and
-            unit.kind != 'fighter']
+            unit.kind != 'fighter' and
+            cabal_can_capture_from(cabal, unit.owner, board)]
 
 
 def use_cabal_hero(owner, board, rng, *, movement=None, exploration=None):
