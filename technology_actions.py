@@ -277,7 +277,6 @@ class TechnologyActions:
             session.production_sites = [(dock.location.planet_id, 1)]
             session.production_limit = 1
             player.exhausted_technologies.add('sr')
-            self.turn.mark_action_completed()
             return
         if alias == 'pm':
             other = next(other for other in self.turn.players

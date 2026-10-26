@@ -1039,11 +1039,8 @@ class BoardWindow(arcade.Window):
                 snapshot.restore()
                 self.movement_error = str(error)
                 return
-            # Tactical and component-action production already share the
-            # parent action's undo snapshot. A separate reaction entry would
-            # leave a completed activation on the board after the next undo.
-            # Standalone strategy production has no parent undo entry, so keep
-            # one snapshot for reversing only this optional placement.
+            # Keep optional Argent placement separate from the completed
+            # Sling Relay production snapshot so undo can reverse it first.
             if session.strategic_production:
                 self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
             self.leader_panel.close()

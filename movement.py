@@ -4336,6 +4336,12 @@ class MovementController:
                 self.session = None
                 return True
             if session.strategic_production:
+                # Strategy-card production is a secondary/bonus window; it
+                # must not become a standalone turn action. Sling Relay is a
+                # component action, so keep its own undo entry after the
+                # production window successfully completes.
+                if getattr(session, 'sling_relay', False):
+                    self.history.append(UndoEntry(session.snapshot))
                 self.session = None
                 return True
             checkpoint = None

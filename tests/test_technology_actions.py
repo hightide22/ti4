@@ -97,6 +97,45 @@ class TechnologyActionTests(unittest.TestCase):
         self.assertNotIn('lgf', winnu.exhausted_technologies)
         self.assertEqual(turn.actions_used, 0)
 
+    def test_sling_relay_cancel_does_not_spend_the_action(self):
+        self.sol.technologies |= {'sr'}
+        dock = next(unit for tile in self.board.values() for unit in tile.units
+                    if unit.owner == 'sol' and unit.kind == 'spacedock')
+        self.actions.use(self.sol, 'sr', dock.unit_id)
+        self.assertIsNotNone(self.movement.session)
+        self.assertTrue(self.movement.cancel())
+        self.assertFalse(self.turn.action_used)
+        self.assertNotIn('sr', self.sol.exhausted_technologies)
+        self.assertEqual(self.movement.history, [])
+
+    def test_sling_relay_production_can_be_undone_as_one_action(self):
+        self.sol.technologies |= {'sr', 'fl'}
+        self.sol.trade_goods = 5
+        self.sol.command_pools['fleet'] += 1
+        dock = next(unit for tile in self.board.values() for unit in tile.units
+                    if unit.owner == 'sol' and unit.kind == 'spacedock')
+        tile = next(tile for tile in self.board.values() if dock in tile.units)
+        before_destroyers = sum(unit.owner == 'sol' and unit.kind == 'destroyer'
+                                for system in self.board.values() for unit in system.units)
+        self.actions.use(self.sol, 'sr', dock.unit_id)
+        self.movement.adjust_production('destroyer', 1)
+        self.movement.toggle_production_planet(dock.location.planet_id)
+        self.movement.produce()
+        self.sync_turn_action(self.turn, self.movement, 0)
+
+        self.assertGreater(sum(unit.owner == 'sol' and unit.kind == 'destroyer'
+                               for system in self.board.values() for unit in system.units),
+                           before_destroyers)
+        self.assertEqual(self.turn.actions_used, 1)
+        self.assertEqual(len(self.movement.history), 1)
+        self.assertTrue(self.movement.undo())
+        self.sync_turn_action(self.turn, self.movement, 1)
+        self.assertEqual(sum(unit.owner == 'sol' and unit.kind == 'destroyer'
+                             for system in self.board.values() for unit in system.units),
+                         before_destroyers)
+        self.assertNotIn('sr', self.sol.exhausted_technologies)
+        self.assertEqual(self.turn.actions_used, 0)
+
     def test_lazax_gate_folding_connects_mecatol_to_alpha_beta_for_movement(self):
         board, players, turn, movement, actions, winnu, mecatol, _planet = self.winnu_game()
         winnu.technologies -= {'lgf'}
