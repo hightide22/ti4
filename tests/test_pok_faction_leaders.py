@@ -1,6 +1,7 @@
 """PoK/Codex III starting setup and leader lifecycle regressions."""
 
 import unittest
+from dataclasses import replace
 
 from board import ROOT, load_board
 from factions import faction_catalog
@@ -163,6 +164,39 @@ class LeaderLifecycleTests(unittest.TestCase):
                                         ghost.color_code, UnitLocation(Region.SPACE)))
         self.assertIn('ghostcommander', refresh_leader_unlocks(ghost, board))
         self.assertTrue(leader_available(ghost, 'ghostcommander'))
+
+    def test_empyrean_commander_counts_players_connected_by_matching_wormholes(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('empyrean', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        empyrean = players[0]
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if unit.owner not in {player.faction for player in players}]
+            tile.planet_owners.clear()
+
+        alpha, matching = next(
+            (left, right)
+            for left in board.values() if left.wormholes
+            for right in board.values()
+            if right is not left and left.wormholes == right.wormholes and
+            not any(neighbor is right for neighbor in board.neighbors(left.position)))
+        alpha.units.append(Unit('empyrean-alpha-presence', 'cruiser', 'empyrean',
+                                empyrean.color_code, UnitLocation(Region.SPACE)))
+        for index, player in enumerate(players[1:]):
+            matching.units.append(Unit(f'{player.faction}-wormhole-presence-{index}',
+                                       'cruiser', player.faction, player.color_code,
+                                       UnitLocation(Region.SPACE)))
+
+        original_definition = matching.definition
+        matching.definition = replace(original_definition, wormholes=('GAMMA',))
+        self.assertEqual([], refresh_leader_unlocks(empyrean, board, players))
+        self.assertFalse(leader_available(empyrean, 'empyreancommander'))
+
+        matching.definition = original_definition
+        self.assertIn('empyreancommander',
+                      refresh_leader_unlocks(empyrean, board, players))
+        self.assertTrue(leader_available(empyrean, 'empyreancommander'))
 
     def test_sol_and_xxcha_commander_unlocks_include_exploration_attachments(self):
         from exploration import ExplorationController

@@ -113,6 +113,29 @@ def refresh_leader_unlocks(player, board, players=(), exploration=None) -> list[
                                      else planet.resources)
     influence_value = lambda planet: (planet_values(planet)[1] if planet_values
                                       else planet.influence)
+
+    def wormholes(tile):
+        types = {str(wormhole).upper() for wormhole in tile.wormholes}
+        if exploration is not None:
+            for token in exploration.space_tokens.get(tile.position, ()):
+                if token == 'gamma':
+                    types.add('GAMMA')
+                elif token.startswith('ion_'):
+                    types.add(token[4:].upper())
+        return types
+
+    def adjacent_for_neighbors(left, right, faction):
+        if right in board.neighbors(left.position):
+            return True
+        left_holes, right_holes = wormholes(left), wormholes(right)
+        if left_holes & right_holes:
+            return True
+        # Quantum Entanglement makes every alpha/beta system adjacent from
+        # the Ghosts' perspective, which also makes those players neighbors.
+        return (faction == 'ghost' and
+                bool(left_holes & {'ALPHA', 'BETA'}) and
+                bool(right_holes & {'ALPHA', 'BETA'}))
+
     checks = {
         'arboreccommander': lambda: sum(unit.kind in ('infantry', 'mech') and
                                       unit.location.region == Region.PLANET and
@@ -127,11 +150,12 @@ def refresh_leader_unlocks(player, board, players=(), exploration=None) -> list[
                                       tile.position in unit_tiles for tile in board.values()) >= 3,
         'empyreancommander': lambda: bool(players) and all(
             other is player or any(
-                neighbor.position in {occupied.position for occupied in board.values()
-                                      if any(unit.owner == other.faction for unit in occupied.units) or
-                                      other.faction in occupied.planet_owners.values()}
-                for own in board.values() if own.position in owned_tiles
-                for neighbor in board.neighbors(own.position))
+                own.position in owned_tiles and
+                adjacent_for_neighbors(own, occupied, other.faction)
+                for own in board.values()
+                for occupied in board.values()
+                if any(unit.owner == other.faction for unit in occupied.units) or
+                other.faction in occupied.planet_owners.values())
             for other in players),
         'hacancommander': lambda: player.trade_goods >= 10,
         'jolnarcommander': lambda: len(player.technologies) >= 8,
