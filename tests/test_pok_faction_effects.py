@@ -9,8 +9,9 @@ from board import ROOT, load_board
 from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, use_empyrean_agent,
                             use_empyrean_hero, use_nomad_artuno, use_nomad_hero,
                             use_ghost_agent, use_l1z1x_agent, use_saar_agent,
-                            cabal_agent_options,
+                            cabal_agent_options, cabal_hero_targets,
                             l1z1x_agent_mech_available,
+                            xxcha_agent_remove_options,
                             use_xxcha_agent,
                             clear_round_hero_effects, use_mahact_hero, use_titans_agent,
                             use_titans_hero)
@@ -178,6 +179,28 @@ class PokEffectsTests(unittest.TestCase):
         self.assertEqual(cabal.captured_units['carrier'], 1)
         self.assertEqual(cabal.captured_units['infantry'], 1)
         self.assertFalse(leader_available(cabal, 'cabalhero'))
+
+    def test_cabal_hero_targets_ships_across_matching_wormholes(self):
+        board, cabal, sol = self.game('cabal')
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units
+                             if not (unit.owner == cabal.faction and
+                                     unit.kind == 'spacedock')]
+        tear = next(tile for tile in board.values()
+                    if tile.wormholes == ('ALPHA',) and tile.planets)
+        remote = next(tile for tile in board.values()
+                      if tile.wormholes == ('ALPHA',) and tile is not tear and
+                      tile.position not in {n.position for n in board.neighbors(tear.position)})
+        planet_id = tear.planets[0].planet_id
+        tear.units.append(Unit('cabal-alpha-dimensional-tear', 'spacedock', cabal.faction,
+                               cabal.color_code, UnitLocation(Region.PLANET, planet_id)))
+        enemy = Unit('enemy-across-alpha-wormhole', 'cruiser', sol.faction,
+                     sol.color_code, UnitLocation(Region.SPACE))
+        remote.units.append(enemy)
+        movement = MovementController(board, [cabal, sol])
+
+        targets = cabal_hero_targets(board, cabal, movement=movement)
+        self.assertIn((remote, enemy), targets)
 
     def test_empyrean_agent_grants_token_only_for_planetless_destination(self):
         board, empyrean, sol = self.game('empyrean')
@@ -488,6 +511,35 @@ class PokEffectsTests(unittest.TestCase):
         self.assertFalse(card.exhausted)
         self.assertNotIn(infantry, home.units)
         self.assertFalse(leader_available(xxcha, 'xxchaagent'))
+
+    def test_xxcha_agent_counts_a_planet_connected_by_matching_wormholes(self):
+        from board import Planet
+
+        board, xxcha, _ = self.game('xxcha')
+        for tile in board.values():
+            tile.planet_owners.clear()
+        controlled = next(tile for tile in board.values()
+                          if tile.wormholes == ('ALPHA',) and tile.planets)
+        target = next(tile for tile in board.values()
+                      if tile.wormholes == ('ALPHA',) and tile is not controlled and
+                      tile.position not in {n.position for n in board.neighbors(controlled.position)})
+        planet = Planet('xxcha-wormhole-agent-target', 'Wormhole Target', 'cultural', 1, 1)
+        target.definition = replace(target.definition,
+                                     planets=(*target.planets, planet))
+        target.planet_owners[planet.planet_id] = xxcha.faction
+        card = PlanetCard(planet, exhausted=True)
+        xxcha.planets.append(card)
+        infantry = Unit('xxcha-wormhole-agent-infantry', 'infantry', xxcha.faction,
+                        xxcha.color_code, UnitLocation(Region.PLANET, planet.planet_id))
+        target.units.append(infantry)
+        controlled.planet_owners[controlled.planets[0].planet_id] = xxcha.faction
+        movement = MovementController(board, [xxcha])
+
+        self.assertEqual((infantry,), xxcha_agent_remove_options(
+            xxcha, board, planet.planet_id, movement=movement))
+        self.assertIs(use_xxcha_agent(xxcha, board, planet.planet_id,
+                                      remove_infantry_id=infantry.unit_id,
+                                      movement=movement), infantry)
 
     def test_empyrean_hero_restores_frontiers_and_returns_systems_to_explore(self):
         from exploration import ExplorationController

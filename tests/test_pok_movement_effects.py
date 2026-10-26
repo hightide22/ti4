@@ -729,6 +729,30 @@ class PokMovementEffectsTests(unittest.TestCase):
         session = Session(xxcha, target, {}, Snapshot.capture(board, xxcha, players))
         self.assertIn(mech, [unit for _, unit, _ in movement._space_cannon_shooters(session)])
 
+    def test_xxcha_flagship_can_fire_space_cannon_into_adjacent_system(self):
+        board, players, movement = game('xxcha')
+        xxcha, sol = players[:2]
+        home = next(tile for tile in board.values()
+                    if xxcha.faction in tile.planet_owners.values())
+        target = next(tile for tile in movement.neighbors(home, xxcha.faction)
+                      if not tile.command_tokens)
+        flagship = Unit('xxcha-deep-space-flagship', 'flagship', 'xxcha', xxcha.color_code,
+                        UnitLocation(Region.SPACE), profile_id='xxcha_flagship')
+        target_ship = Unit('sol-flagship-cannon-target', 'carrier', sol.faction,
+                           sol.color_code, UnitLocation(Region.SPACE))
+        home.units.append(flagship)
+        target.units.append(target_ship)
+        session = Session(sol, target, {}, Snapshot.capture(board, sol, players))
+        movement.session = session
+
+        with patch('movement.random.randint', return_value=10):
+            movement.resolve_space_cannon(session)
+
+        self.assertEqual('space_cannon_assign', session.stage)
+        self.assertEqual('xxcha', session.space_cannon_events[0]['owner'])
+        self.assertEqual([target_ship.unit_id],
+                         session.space_cannon_events[0]['candidates'])
+
     def test_l1z1x_assimilate_does_not_exceed_structure_supply(self):
         for kind, limit in (('pds', 6), ('spacedock', 3)):
             with self.subTest(kind=kind):

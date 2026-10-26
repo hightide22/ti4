@@ -86,7 +86,8 @@ def resolve_card_choice(ai):
                 sum(any(other.owner != player.faction and
                         other.kind in ('infantry', 'mech')
                         for other in neighbor.units)
-                    for neighbor in ai.window.movement.neighbors(unit_tiles[key])),
+                    for neighbor in ai.window.movement.neighbors(unit_tiles[key],
+                                                                  player.faction)),
                 -len(unit_tiles[key].units), key))
         else:
             choice = '__finish_refit__'
@@ -147,7 +148,7 @@ def refit_plan(ai, player):
             continue
         hostile = sum(unit.owner != player.faction and
                       unit.kind in ('infantry', 'mech')
-                      for neighbor in ai.window.movement.neighbors(tile)
+                      for neighbor in ai.window.movement.neighbors(tile, player.faction)
                       for unit in neighbor.units)
         if hostile:
             exposed.append((hostile, infantry))
@@ -238,9 +239,11 @@ def play_useful_card(ai, session):
             elif effect == 'forward_supply_base':
                 score = 70
             elif effect == 'solar_flare':
-                cannons = [unit for tile in (session.target, *ctl.neighbors(session.target))
-                           for unit in tile.units if unit.owner != faction and
-                           unit_profile(unit).get('spaceCannonHitsOn')]
+                cannons = [unit for tile in ctl.board.values() for unit in tile.units
+                           if unit.owner != faction and
+                           unit_profile(unit).get('spaceCannonHitsOn') and
+                           (tile is session.target or tile in ctl.neighbors(
+                               session.target, unit.owner))]
                 score = 15 + 10 * min(3, len(cannons)) if cannons else 0
             elif effect == 'blitz':
                 ground = sum(unit.owner != faction and

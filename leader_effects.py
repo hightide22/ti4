@@ -9,6 +9,7 @@ from __future__ import annotations
 import random
 from uuid import uuid4
 
+from board import adjacent_tiles
 from leaders import exhaust_leader, leader_available, purge_leader
 from player import command_tokens_in_reinforcements
 from units import (Region, Unit, UnitLocation, UNIT_TYPES, unit_profiles,
@@ -48,7 +49,8 @@ def use_argent_agent(owner, beneficiary, board, source_tile, produced_units,
     produced = {unit.unit_id: unit for unit in produced_units}
     nearby = ([source_tile, *movement.neighbors(source_tile, beneficiary.faction)]
               if movement is not None else
-              [source_tile, *board.neighbors(source_tile.position)])
+              [source_tile, *adjacent_tiles(board, source_tile,
+                                             faction=beneficiary.faction)])
     planets = {planet.planet_id: tile for tile in nearby for planet in tile.planets
                if tile.planet_owners.get(planet.planet_id) == beneficiary.faction}
     for unit_id, planet_id in destinations.items():
@@ -339,20 +341,22 @@ def use_arborec_agent(owner, target, board, ship_id, replacement_kind):
     return replacement
 
 
-def xxcha_agent_remove_options(owner, board, planet_id):
+def xxcha_agent_remove_options(owner, board, planet_id, *, movement=None):
     """Infantry that can be removed when readying an adjacent planet."""
     tile = next((tile for tile in board.values()
                  if any(planet.planet_id == planet_id for planet in tile.planets)), None)
+    neighbors = (movement.neighbors(tile) if movement is not None else
+                 adjacent_tiles(board, tile)) if tile is not None else ()
     if tile is None or not any(
             neighbor.planet_owners.get(planet.planet_id) == owner.faction
-            for neighbor in board.neighbors(tile.position) for planet in neighbor.planets):
+            for neighbor in neighbors for planet in neighbor.planets):
         return ()
     return tuple(unit for unit in tile.units if unit.kind == 'infantry' and
                  unit.location.region == Region.PLANET and
                  unit.location.planet_id == planet_id)
 
 
-def use_xxcha_agent(owner, board, planet_id, *, remove_infantry_id=None):
+def use_xxcha_agent(owner, board, planet_id, *, remove_infantry_id=None, movement=None):
     """Ready a controlled planet; optionally return adjacent-system infantry."""
     _require_agent(owner, 'xxchaagent')
     card = next((card for card in owner.planets
@@ -361,7 +365,8 @@ def use_xxcha_agent(owner, board, planet_id, *, remove_infantry_id=None):
         raise ValueError('Choose one of your exhausted planets')
     infantry = None
     if remove_infantry_id is not None:
-        infantry = next((unit for unit in xxcha_agent_remove_options(owner, board, planet_id)
+        infantry = next((unit for unit in xxcha_agent_remove_options(
+                            owner, board, planet_id, movement=movement)
                          if unit.unit_id == remove_infantry_id), None)
         if infantry is None:
             raise ValueError('That infantry cannot be removed by this agent')
@@ -476,7 +481,7 @@ def use_mahact_hero(owner, board, source_tile, destination_tile, *, neighbors=No
     if source_tile.position not in board or destination_tile.position not in board:
         raise ValueError('Choose systems on the game board')
     adjacent = (neighbors(source_tile.position) if neighbors else
-                board.neighbors(source_tile.position))
+                adjacent_tiles(board, source_tile, faction=owner.faction))
     if destination_tile not in adjacent:
         raise ValueError('The destination must be adjacent')
     moving = [unit for unit in source_tile.units if unit.location.region == Region.SPACE]
@@ -568,23 +573,26 @@ def clear_round_hero_effects(player):
     player.hero_round_flags.clear()
 
 
-def cabal_hero_targets(board, cabal):
+def cabal_hero_targets(board, cabal, *, movement=None, exploration=None):
     """List non-fighter ships threatened by a Dimensional Tear."""
     tears = [tile for tile in board.values() if any(
         unit.owner == cabal.faction and unit.kind == 'spacedock' for unit in tile.units)]
     threatened = {tile.position for tear in tears
-                  for tile in (tear, *board.neighbors(tear.position))}
+                  for tile in (tear, *(movement.neighbors(tear) if movement is not None else
+                                       adjacent_tiles(board, tear, exploration,
+                                                      cabal.faction)))}
     return [(tile, unit) for tile in board.values() if tile.position in threatened
             for unit in tile.units if unit.owner != cabal.faction and
             unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship'] and
             unit.kind != 'fighter']
 
 
-def use_cabal_hero(owner, board, rng):
+def use_cabal_hero(owner, board, rng, *, movement=None, exploration=None):
     """Roll for each threatened ship, capturing results of 1–3 and their cargo."""
     _require_hero(owner, 'cabalhero')
     results = []
-    for tile, ship in cabal_hero_targets(board, owner):
+    for tile, ship in cabal_hero_targets(board, owner, movement=movement,
+                                         exploration=exploration):
         roll = rng.randint(1, 10)
         results.append((ship.unit_id, roll))
         if roll > 3:

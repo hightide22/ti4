@@ -10,6 +10,7 @@ from collections import Counter
 
 import arcade
 
+from board import adjacent_tiles
 from ui_theme import ACCENT, BORDER, CARD, GOLD, INK, MUTED, SELECTED, button, modal, surface
 from units import Region, unit_profile
 from unit_supply import can_place_structure
@@ -131,7 +132,8 @@ class RelicActionPanel:
                                any(unit.owner == player.faction and
                                    unit.location.region == Region.SPACE and
                                    unit_profile(unit).get('bombardHitsOn')
-                                   for neighbor in exploration.board.neighbors(tile.position)
+                                   for neighbor in adjacent_tiles(
+                                       exploration.board, tile, exploration, player.faction)
                                    for unit in neighbor.units))
                 else:
                     allowed = (tile.planet_owners.get(planet_id) == player.faction and

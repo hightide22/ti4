@@ -232,6 +232,40 @@ class Board(Mapping[Position, Tile]):
         return [tile for tile in self.values() if tile.player is not None]
 
 
+def adjacent_tiles(board, tile: Tile, exploration=None, faction: str | None = None) -> list[Tile]:
+    """Return systems adjacent by shared edge or matching wormhole."""
+    def wormhole_only(system):
+        return system.number == 51 or system.system_id in ('82a', '82b')
+
+    adjacent = [other for other in board.neighbors(tile.position)
+                if not (wormhole_only(tile) or wormhole_only(other))]
+
+    def wormholes(system):
+        types = {str(kind).upper() for kind in system.wormholes}
+        if exploration is not None:
+            for token in exploration.space_tokens.get(system.position, ()):
+                if token == 'gamma':
+                    types.add('GAMMA')
+                elif token.startswith('ion_'):
+                    types.add(token[4:].upper())
+        return types
+
+    tile_holes = wormholes(tile)
+    if not tile_holes:
+        return adjacent
+    for other in board.values():
+        if other is tile or other in adjacent:
+            continue
+        other_holes = wormholes(other)
+        matching = bool(tile_holes & other_holes)
+        quantum_entanglement = (faction == 'ghost' and
+                                bool(tile_holes & {'ALPHA', 'BETA'}) and
+                                bool(other_holes & {'ALPHA', 'BETA'}))
+        if matching or quantum_entanglement:
+            adjacent.append(other)
+    return adjacent
+
+
 def faction_unit_color(faction: dict) -> str:
     """Pick the first faction-preferred component color that has the core sprites."""
     from units import UNIT_TYPES

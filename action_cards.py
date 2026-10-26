@@ -268,7 +268,7 @@ class ActionCardController:
                 not session.combat_needs_resolution and not session.combat_rolls)
 
     def eligible_docks(self, player, session):
-        systems = (session.target, *self.movement.neighbors(session.target))
+        systems = (session.target, *self.movement.neighbors(session.target, player.faction))
         return [(tile, unit) for tile in systems for unit in tile.units
                 if unit.kind == 'spacedock' and unit.owner == player.faction]
 

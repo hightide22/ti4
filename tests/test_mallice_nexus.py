@@ -28,6 +28,18 @@ class MalliceNexusTests(unittest.TestCase):
         alpha = next(tile for tile in self.board.values() if 'ALPHA' in tile.wormholes)
         self.assertNotIn(alpha, self.movement.neighbors(self.nexus))
 
+        from board import DIRECTIONS
+        q, r = self.nexus.position
+        open_position = next((q + dq, r + dr) for dq, dr in DIRECTIONS
+                             if (q + dq, r + dr) not in self.board)
+        plain_system = next(tile for tile in self.board.values()
+                            if tile.number not in (51, 82) and not tile.wormholes)
+        touching_tile = TILES.create(plain_system.number, open_position)
+        self.board.add(touching_tile)
+        self.assertIn(touching_tile, self.board.neighbors(self.nexus.position))
+        self.assertNotIn(touching_tile, self.movement.neighbors(self.nexus))
+        self.assertNotIn(self.nexus, self.movement.neighbors(touching_tile))
+
     def test_first_ship_enters_through_gamma_then_reveals_other_wormholes(self):
         home = next(tile for tile in self.board.home_tiles
                     if any(planet.faction_homeworld == 'sol' for planet in tile.planets))

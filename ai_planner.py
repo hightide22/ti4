@@ -276,9 +276,12 @@ def _source_exposure(ai, player, source, units, threats):
              if source.planet_owners.get(planet.planet_id) == player.faction]
     docks = [unit for unit in units if unit.owner == player.faction and unit.kind == 'spacedock']
     is_home = any(planet.faction_homeworld == player.faction for planet in owned)
-    cannons = [unit for area in (source, *ai.window.movement.neighbors(source))
-               for unit in area.units if unit.owner == player.faction and unit.kind == 'pds' and
-               (area is source or unit_profile(unit).get('deepSpaceCannon'))]
+    cannons = [unit for area in ai.window.board.values() for unit in area.units
+               if unit.owner == player.faction and
+               unit_profile(unit).get('spaceCannonHitsOn') and
+               (area is source or (unit_profile(unit).get('deepSpaceCannon') and
+                                   area in ai.window.movement.neighbors(
+                                       source, player.faction)))]
     highest = 0.0
     for _, fleet, ground in threats:
         chance = win_probability(fleet, defenders, ai.window.turn_order.players, cannons=cannons)
@@ -421,11 +424,11 @@ def best_activation(ai, player):
                     unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
         enemies = [unit for unit in target.units if unit.owner != player.faction and
                    unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
-        cannons = [unit for area in (target, *movement.neighbors(target))
-                   for unit in area.units if unit.kind == 'pds' and
-                   unit.owner != player.faction and
+        cannons = [unit for area in board.values() for unit in area.units
+                   if unit.owner != player.faction and
                    unit_profile(unit).get('spaceCannonHitsOn') and
-                   (area is target or unit_profile(unit).get('deepSpaceCannon'))]
+                   (area is target or (unit_profile(unit).get('deepSpaceCannon') and
+                                       area in movement.neighbors(target, unit.owner)))]
         uncaptured = [planet for planet in target.planets
                       if target.planet_owners.get(planet.planet_id) != player.faction]
         uncaptured_ids = {planet.planet_id for planet in uncaptured}
@@ -657,10 +660,12 @@ def _best_staging(ai, player, threat_cache):
                             continue
                         factories = {unit.unit_id for _, unit, _ in chosen if unit.kind == 'spacedock'}
                         require_transport = not bool(carriers & factories)
-                        local_cannons = [unit for area in (waypoint, *movement.neighbors(waypoint))
-                                         for unit in area.units if unit.owner != player.faction and
-                                         unit.kind == 'pds' and (area is waypoint or
-                                                                  unit_profile(unit).get('deepSpaceCannon'))]
+                        local_cannons = [unit for area in board.values() for unit in area.units
+                                         if unit.owner != player.faction and
+                                         unit_profile(unit).get('spaceCannonHitsOn') and
+                                         (area is waypoint or
+                                          (unit_profile(unit).get('deepSpaceCannon') and
+                                           area in movement.neighbors(waypoint, unit.owner)))]
                         local_fleet = fleet + [unit for unit in waypoint.units
                                                if unit.owner == player.faction and
                                                unit.location.region == Region.SPACE and
@@ -671,9 +676,12 @@ def _best_staging(ai, player, threat_cache):
                             continue
                         enemies = [unit for unit in goal.units if unit.owner != player.faction and
                                    unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
-                        cannons = [unit for area in (goal, *movement.neighbors(goal)) for unit in area.units
-                                   if unit.owner != player.faction and unit.kind == 'pds' and
-                                   (area is goal or unit_profile(unit).get('deepSpaceCannon'))]
+                        cannons = [unit for area in board.values() for unit in area.units
+                                   if unit.owner != player.faction and
+                                   unit_profile(unit).get('spaceCannonHitsOn') and
+                                   (area is goal or
+                                    (unit_profile(unit).get('deepSpaceCannon') and
+                                     area in movement.neighbors(goal, unit.owner)))]
                         odds = win_probability(fleet, enemies, ai.window.turn_order.players,
                                                cannons=cannons, require_transport=require_transport,
                                                cargo_carriers=carriers)

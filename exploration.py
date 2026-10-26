@@ -14,7 +14,7 @@ import json
 from math import ceil
 import random
 
-from board import Planet, RESOURCES
+from board import Planet, RESOURCES, adjacent_tiles
 from leaders import leader_available
 from player import PlanetCard, command_tokens_in_reinforcements
 from relics import RelicController, RelicOutcome
@@ -732,7 +732,8 @@ class ExplorationController:
         bombarding = any(
             unit.owner == player.faction and unit.location.region == Region.SPACE and
             unit_profile(unit).get('bombardHitsOn')
-            for adjacent in self.board.neighbors(tile.position) for unit in adjacent.units
+            for adjacent in adjacent_tiles(self.board, tile, self, player.faction)
+            for unit in adjacent.units
         )
         if not bombarding:
             raise ValueError('No adjacent friendly unit has Bombardment.')

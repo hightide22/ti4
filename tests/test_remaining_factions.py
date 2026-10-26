@@ -1,5 +1,6 @@
 import random
 import unittest
+from dataclasses import replace
 from itertools import combinations
 from unittest.mock import patch
 
@@ -224,6 +225,34 @@ class RemainingFactionTests(unittest.TestCase):
                     if card.planet.planet_id == target_planet.planet_id)
         self.assertTrue(card.exhausted)
         self.assertIn('crf1', movement.exploration.fragments['xxcha'])
+
+    def test_xxcha_peace_accords_reaches_matching_wormhole_system(self):
+        board, players, by_faction = self.game(('xxcha', 'sol', 'jolnar', 'hacan'))
+        xxcha = by_faction['xxcha']
+        for tile in board.values():
+            tile.planet_owners.clear()
+            tile.units[:] = [unit for unit in tile.units if unit.owner != 'xxcha']
+
+        pairs = [(left, right) for left in board.values() if left.planets and left.wormholes
+                 for right in board.values() if right is not left and
+                 set(left.wormholes) & set(right.wormholes) and
+                 right not in board.neighbors(left.position)]
+        self.assertTrue(pairs, 'map must have matching non-adjacent wormhole systems')
+        source, target = pairs[0]
+        source_planet = source.planets[0]
+        target_planet = replace(source_planet,
+                                planet_id='peace-accords-wormhole-target',
+                                name='Peace Accords Test World',
+                                resources=99, influence=99)
+        target.definition = replace(target.definition,
+                                    planets=(target_planet, *target.planets))
+        source.planet_owners[source_planet.planet_id] = 'xxcha'
+
+        movement = MovementController(board, players)
+        claimed = movement.peace_accords(xxcha)
+
+        self.assertEqual(target_planet.planet_id, claimed.planet_id)
+        self.assertEqual('xxcha', target.planet_owners[target_planet.planet_id])
 
     def test_xxcha_peace_accords_cannot_claim_destroyed_planet(self):
         board, players, by_faction = self.game(('xxcha', 'sol', 'jolnar', 'hacan'))

@@ -749,8 +749,11 @@ class GameAI:
                 self.report(player, 'Explored frontier systems with hero.', .8)
                 return True
         if player.faction == 'cabal' and leader_available(player, 'cabalhero'):
-            if len(cabal_hero_targets(w.board, player)) >= 2:
-                results = use_cabal_hero(player, w.board, exploration.rng)
+            if len(cabal_hero_targets(w.board, player, movement=w.movement,
+                                      exploration=exploration)) >= 2:
+                results = use_cabal_hero(player, w.board, exploration.rng,
+                                         movement=w.movement,
+                                         exploration=exploration)
                 w.turn_order.mark_action_completed()
                 self.report(player, f'Hero threatened {len(results)} enemy ships.', 1.0)
                 return True
@@ -1290,7 +1293,7 @@ class GameAI:
             friendly = [unit for unit in tile.units if unit.owner == faction and
                         unit.location.region == Region.SPACE]
             hostile_neighbors = sum(self._tile_threat(other, faction)
-                                    for other in ctl.neighbors(tile))
+                                    for other in ctl.neighbors(tile, faction))
             overflow = max(0, fleeing + sum(capital_ship(unit) for unit in friendly) -
                            ctl.fleet_supply(player))
             owned = sum(tile.planet_owners.get(planet.planet_id) == faction

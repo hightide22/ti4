@@ -1,7 +1,8 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
-from board import load_board
+from board import ROOT, load_board
 from movement import MovementController, MovementError, Session, Snapshot
 from player import (PlanetCard, PlayerState, command_tokens_in_play,
                     create_players)
@@ -1078,6 +1079,32 @@ class MovementTests(unittest.TestCase):
         self.assertIn('sol', self.home.command_tokens)
         self.assertEqual(self.player.command_pools['tactical'], tactical - 1)
         self.assertTrue(session.space_combat_resolved)
+
+    def test_ghost_can_retreat_through_quantum_entanglement(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('ghost', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        ghost = next(player for player in players if player.faction == 'ghost')
+        sol = next(player for player in players if player.faction == 'sol')
+        movement = MovementController(board, players)
+        target = next(tile for tile in board.values() if tile.number == 26)
+        destination = next(tile for tile in board.values() if tile.number == 39)
+        destination.definition = replace(destination.definition, wormholes=('BETA',))
+        ghost_ship = Unit('ghost-retreat-wormhole-cruiser', 'cruiser', ghost.faction,
+                          ghost.color_code, UnitLocation(Region.SPACE))
+        sol_ship = Unit('sol-retreat-wormhole-cruiser', 'cruiser', sol.faction,
+                        sol.color_code, UnitLocation(Region.SPACE))
+        destination_anchor = Unit('ghost-retreat-destination-anchor', 'cruiser', ghost.faction,
+                                  ghost.color_code, UnitLocation(Region.SPACE))
+        target.units.extend((ghost_ship, sol_ship))
+        destination.units.append(destination_anchor)
+        session = Session(sol, target, {}, Snapshot.capture(board, sol, players),
+                          stage='retreat_selection', combat_factions=('sol', 'ghost'),
+                          retreat_announced='ghost')
+        movement.session = session
+
+        self.assertNotIn(destination, movement.neighbors(target))
+        self.assertIn(destination, movement.retreat_options(session, ghost.faction))
 
     def test_fighter_i_only_is_removed_on_retreat_without_placing_a_token(self):
         fighter = Unit('sol-retreat-fighter-i', 'fighter', 'sol', self.player.color_code,

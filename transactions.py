@@ -44,7 +44,15 @@ class TransactionController:
         for tile in first_systems:
             if tile.position in second_positions:
                 return True
-            if any(neighbor.position in second_positions for neighbor in self.movement.neighbors(tile)):
+            perspective = 'ghost' if first == 'ghost' else None
+            if any(neighbor.position in second_positions
+                   for neighbor in self.movement.neighbors(tile, perspective)):
+                return True
+        if second == 'ghost':
+            first_positions = {tile.position for tile in first_systems}
+            if any(neighbor.position in first_positions
+                   for tile in second_systems
+                   for neighbor in self.movement.neighbors(tile, 'ghost')):
                 return True
         return False
 

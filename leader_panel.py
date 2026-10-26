@@ -607,7 +607,8 @@ class LeaderPanel:
                        bottom + 132, width, 27, size=8)
                 self.hits.append((('use', alias, ('xxcha', planet_id, None)),
                                   x, x + width, bottom + 132, bottom + 159))
-                options = xxcha_agent_remove_options(player, board, planet_id)
+                options = xxcha_agent_remove_options(player, board, planet_id,
+                                                      movement=movement)
                 for index, unit in enumerate(options[:3]):
                     by = bottom + 98 - index * 30
                     label = f'READY + REMOVE {unit.owner.upper()} INFANTRY'

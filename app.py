@@ -1218,7 +1218,8 @@ class BoardWindow(arcade.Window):
                 else:
                     _effect, planet_id, infantry_id = command[2]
                     use_xxcha_agent(player, self.board, planet_id,
-                                    remove_infantry_id=infantry_id)
+                                    remove_infantry_id=infantry_id,
+                                    movement=self.movement)
             except (ValueError, KeyError, StopIteration) as error:
                 if snapshot is not None:
                     snapshot.restore()
@@ -1256,7 +1257,9 @@ class BoardWindow(arcade.Window):
         try:
             snapshot = self._component_action_snapshot()
             if alias == 'cabalhero':
-                results = use_cabal_hero(player, self.board, self.exploration.rng)
+                results = use_cabal_hero(player, self.board, self.exploration.rng,
+                                         movement=self.movement,
+                                         exploration=self.exploration)
                 self.movement_error = f'Cabal hero rolled for {len(results)} ships.'
             elif alias == 'empyreanhero':
                 tiles = use_empyrean_hero(player, self.exploration, self.board)

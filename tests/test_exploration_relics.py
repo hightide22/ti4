@@ -547,6 +547,26 @@ class ExplorationDeckTests(unittest.TestCase):
         self.assertIn(planet.planet_id, engine.destroyed_planets)
         self.assertIn('stellarconverter', engine.relics.purged)
 
+    def test_stellar_converter_accepts_bombardment_across_matching_wormholes(self):
+        board, target, player = make_game(26)  # Lodor has an alpha wormhole.
+        target.position = (0, 0)
+        target.planet_owners.clear()
+        player.planets.clear()
+        remote = TILES.create(39, (4, 0))  # Remote alpha system, not edge-adjacent.
+        board.add(remote)
+        planet = target.planets[0]
+        target.units.append(Unit('wormhole-target-infantry', 'infantry', 'hacan', 'ylw',
+                                 UnitLocation(Region.PLANET, planet.planet_id)))
+        remote.units.append(Unit('wormhole-bombardment-warsun', 'warsun', player.faction,
+                                 player.color_code, UnitLocation(Region.SPACE)))
+        engine = ExplorationController(board, [player], relic_deck=['stellarconverter'])
+        engine.relics.draw(player.faction)
+
+        engine.use_stellar_converter(player, planet.planet_id)
+
+        self.assertIn(planet.planet_id, engine.destroyed_planets)
+        self.assertIn('stellarconverter', engine.relics.purged)
+
     def test_three_matching_fragments_gain_relic_and_are_purged(self):
         board, tile, player = make_game()
         engine = ExplorationController(board, [player], decks={

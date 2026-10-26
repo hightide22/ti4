@@ -198,6 +198,28 @@ class LeaderLifecycleTests(unittest.TestCase):
                       refresh_leader_unlocks(empyrean, board, players))
         self.assertTrue(leader_available(empyrean, 'empyreancommander'))
 
+    def test_naalu_commander_uses_wormhole_adjacency_to_mecatol(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('naalu', 'sol', 'jolnar', 'hacan'))
+        naalu = create_players(board, config)[0]
+        for tile in board.values():
+            tile.units[:] = [unit for unit in tile.units if unit.owner != 'naalu']
+            tile.planet_owners = {planet_id: owner for planet_id, owner in
+                                  tile.planet_owners.items() if owner != 'naalu'}
+        mecatol = next(tile for tile in board.values() if tile.number == 18)
+        lodor = next(tile for tile in board.values() if tile.number == 26)
+        planet = lodor.planets[0]
+        lodor.units.append(Unit('naalu-commander-ground-force', 'infantry', 'naalu',
+                                naalu.color_code, UnitLocation(Region.PLANET,
+                                                              planet.planet_id)))
+
+        self.assertEqual([], refresh_leader_unlocks(naalu, board))
+        self.assertFalse(leader_available(naalu, 'naalucommander'))
+
+        mecatol.definition = replace(mecatol.definition, wormholes=('ALPHA',))
+        self.assertIn('naalucommander', refresh_leader_unlocks(naalu, board))
+        self.assertTrue(leader_available(naalu, 'naalucommander'))
+
     def test_sol_and_xxcha_commander_unlocks_include_exploration_attachments(self):
         from exploration import ExplorationController
 

@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 
-from board import RESOURCES
+from board import RESOURCES, adjacent_tiles
 from units import Region, unit_profile
 
 
@@ -114,27 +114,13 @@ def refresh_leader_unlocks(player, board, players=(), exploration=None) -> list[
     influence_value = lambda planet: (planet_values(planet)[1] if planet_values
                                       else planet.influence)
 
-    def wormholes(tile):
-        types = {str(wormhole).upper() for wormhole in tile.wormholes}
-        if exploration is not None:
-            for token in exploration.space_tokens.get(tile.position, ()):
-                if token == 'gamma':
-                    types.add('GAMMA')
-                elif token.startswith('ion_'):
-                    types.add(token[4:].upper())
-        return types
-
-    def adjacent_for_neighbors(left, right, faction):
-        if right in board.neighbors(left.position):
-            return True
-        left_holes, right_holes = wormholes(left), wormholes(right)
-        if left_holes & right_holes:
-            return True
-        # Quantum Entanglement makes every alpha/beta system adjacent from
-        # the Ghosts' perspective, which also makes those players neighbors.
-        return (faction == 'ghost' and
-                bool(left_holes & {'ALPHA', 'BETA'}) and
-                bool(right_holes & {'ALPHA', 'BETA'}))
+    def empyrean_neighbors_with(faction):
+        presence = {tile.position for tile in board.values()
+                    if any(unit.owner == faction for unit in tile.units) or
+                    faction in tile.planet_owners.values()}
+        return any(neighbor.position in presence
+                   for own in board.values() if own.position in owned_tiles
+                   for neighbor in adjacent_tiles(board, own, exploration, faction))
 
     checks = {
         'arboreccommander': lambda: sum(unit.kind in ('infantry', 'mech') and
@@ -149,13 +135,7 @@ def refresh_leader_unlocks(player, board, players=(), exploration=None) -> list[
         'ghostcommander': lambda: sum(bool({'ALPHA', 'BETA'} & set(tile.wormholes)) and
                                       tile.position in unit_tiles for tile in board.values()) >= 3,
         'empyreancommander': lambda: bool(players) and all(
-            other is player or any(
-                own.position in owned_tiles and
-                adjacent_for_neighbors(own, occupied, other.faction)
-                for own in board.values()
-                for occupied in board.values()
-                if any(unit.owner == other.faction for unit in occupied.units) or
-                other.faction in occupied.planet_owners.values())
+            other is player or empyrean_neighbors_with(other.faction)
             for other in players),
         'hacancommander': lambda: player.trade_goods >= 10,
         'jolnarcommander': lambda: len(player.technologies) >= 8,
@@ -165,9 +145,10 @@ def refresh_leader_unlocks(player, board, players=(), exploration=None) -> list[
                                          if unit.owner == faction) >= 5 for tile in board.values()),
         'mahactcommander': lambda: len(player.foreign_fleet_tokens) >= 2,
         'mentakcommander': lambda: unit_count('cruiser') >= 4,
-        'naalucommander': lambda: any(tile.number == 18 or
-                                    any(neighbor.number == 18 for neighbor in board.neighbors(tile.position))
-                                    for tile, unit in units if unit.kind in ('infantry', 'mech')),
+        'naalucommander': lambda: any(
+            tile.number == 18 or any(neighbor.number == 18 for neighbor in
+                                     adjacent_tiles(board, tile, exploration, faction))
+            for tile, unit in units if unit.kind in ('infantry', 'mech')),
         'naazcommander': lambda: len({tile.position for tile, unit in units
                                      if unit.kind == 'mech'}) >= 3,
         'nekrocommander': lambda: len(player.technologies) >= 3,

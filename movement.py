@@ -8,6 +8,7 @@ from math import ceil
 import random
 from uuid import uuid4
 
+from board import adjacent_tiles
 from player import PlanetCard, command_tokens_in_reinforcements
 from leaders import leader_available
 from units import Region, Unit, UnitLocation, UNIT_TYPES, mobile_ship, unit_profile, unit_profiles
@@ -667,7 +668,8 @@ class MovementController:
                                 if player.faction in tile.planet_owners.values()}
         adjacent_positions = {neighbor.position for tile in self.board.values()
                               if tile.position in controlled_positions
-                              for neighbor in self.board.neighbors(tile.position)}
+                              for neighbor in adjacent_tiles(
+                                  self.board, tile, self.exploration, player.faction)}
         candidates = []
         for tile in self.board.values():
             if tile.number == 18 or tile.position not in adjacent_positions:
@@ -799,26 +801,7 @@ class MovementController:
                     self.destroy_unit(tile, cargo, session, source_factions)
 
     def neighbors(self, tile, faction=None):
-        neighbors = list(self.board.neighbors(tile.position))
-        def wormholes(system):
-            types = set(system.wormholes)
-            if self.exploration is not None:
-                for token in self.exploration.space_tokens.get(system.position, ()):
-                    if token == 'gamma':
-                        types.add('GAMMA')
-                    elif token.startswith('ion_'):
-                        types.add(token[4:].upper())
-            return types
-        tile_holes = wormholes(tile)
-        if tile_holes:
-            neighbors.extend(other for other in self.board.values()
-                             if other is not tile and tile_holes & wormholes(other)
-                             and other not in neighbors)
-        if faction == 'ghost' and tile_holes & {'ALPHA', 'BETA'}:
-            neighbors.extend(other for other in self.board.values()
-                             if other is not tile and wormholes(other) & {'ALPHA', 'BETA'}
-                             and other not in neighbors)
-        return neighbors
+        return adjacent_tiles(self.board, tile, self.exploration, faction)
 
     @staticmethod
     def is_gravity_rift(tile):
@@ -1873,14 +1856,11 @@ class MovementController:
         for source in self.board.values():
             for unit in source.units:
                 profile = unit_profile(unit)
-                if ((unit.kind != 'pds' and not (unit.owner == 'xxcha' and
-                                                unit.kind == 'mech')) or
-                        unit.unit_id in session.disabled_pds or
+                if (unit.unit_id in session.disabled_pds or
                         not profile.get('spaceCannonHitsOn')):
                     continue
                 if source is not session.target:
-                    if not profile.get('deepSpaceCannon') and not (
-                            unit.owner == 'xxcha' and unit.kind == 'mech'):
+                    if not profile.get('deepSpaceCannon'):
                         continue
                     adjacent = neighbor_cache.setdefault(
                         unit.owner, {tile.position for tile in self.neighbors(session.target, unit.owner)})
@@ -2245,7 +2225,7 @@ class MovementController:
             moves_units = False
         player = self.faction_player(faction) or session.player
         options = []
-        for tile in self.neighbors(session.target):
+        for tile in self.neighbors(session.target, faction):
             if not self._retreat_destination_legal(session, faction, tile, skilled):
                 continue
             needs_token = moves_units and faction not in tile.command_tokens

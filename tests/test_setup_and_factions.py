@@ -1,6 +1,7 @@
 import unittest
 import random
 import json
+from dataclasses import replace
 from unittest.mock import patch
 
 from board import ROOT, load_board
@@ -145,6 +146,10 @@ class SetupTests(unittest.TestCase):
         self.assertIn(gate, neighbors)
         self.assertEqual({tile.number for tile in neighbors if 'supernova' not in tile.anomalies},
                          {17})
+        non_gate_neighbors = [tile for tile in neighbors if tile is not gate]
+        self.assertTrue(non_gate_neighbors)
+        self.assertNotIn(non_gate_neighbors[0], movement.neighbors(home, 'ghost'))
+        self.assertNotIn(home, movement.neighbors(non_gate_neighbors[0], 'ghost'))
         self.assertEqual(movement.route(home, empty_system, carrier, ghost),
                          (home.position, gate.position, empty_system.position))
 
@@ -412,6 +417,31 @@ class HacanAbilityTests(unittest.TestCase):
         self.controller.open()
         self.assertIn(self.by_faction['sol'], self.controller.eligible_partners(self.by_faction['hacan']))
         self.controller.cancel()
+
+    def test_ghost_quantum_entanglement_makes_players_neighbors_for_transactions(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('ghost', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        ghost = next(player for player in players if player.faction == 'ghost')
+        sol = next(player for player in players if player.faction == 'sol')
+        for tile in board.values():
+            tile.units.clear()
+            tile.planet_owners.clear()
+        ghost_home = next(tile for tile in board.values() if tile.number == 51)
+        remote = next(tile for tile in board.values() if tile.number == 39)
+        ghost_home.definition = replace(ghost_home.definition, wormholes=('ALPHA',))
+        remote.definition = replace(remote.definition, wormholes=('GAMMA',))
+        ghost_home.units.append(Unit('ghost-neighbor-anchor', 'cruiser', ghost.faction,
+                                     ghost.color_code, UnitLocation(Region.SPACE)))
+        remote.units.append(Unit('sol-neighbor-anchor', 'cruiser', sol.faction,
+                                 sol.color_code, UnitLocation(Region.SPACE)))
+        movement = MovementController(board, players)
+        controller = TransactionController(board, players, TurnOrder(players), movement)
+
+        self.assertFalse(controller.are_neighbors(ghost.faction, sol.faction))
+        remote.definition = replace(remote.definition, wormholes=('BETA',))
+        self.assertTrue(controller.are_neighbors(sol.faction, ghost.faction))
+        self.assertTrue(controller.are_neighbors(ghost.faction, sol.faction))
 
     def test_arbiters_and_trade_goods_are_exchanged_in_one_transaction(self):
         hacan, sol = self.by_faction['hacan'], self.by_faction['sol']
