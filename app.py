@@ -678,6 +678,7 @@ class BoardWindow(arcade.Window):
         try:
             if kind == 'close' and not research:
                 self.technology_actions.cancel_transit()
+                self.technology_actions.mageon_owner = None
                 self.technology_view = False
             elif kind == 'tab':
                 if self.technology_actions.transit:
@@ -736,9 +737,13 @@ class BoardWindow(arcade.Window):
                 self.technology_view = False
                 self.sync_turn_action()
             elif kind == 'use' and not research:
-                self.technology_actions.use(self.player_panel.player, args[0], args[1])
-                self.technology_view = False
-                self.sync_turn_action()
+                completed = self.technology_actions.use(
+                    self.player_panel.player, args[0], args[1])
+                if completed is False:
+                    panel.action_page = 0
+                else:
+                    self.technology_view = False
+                    self.sync_turn_action()
             self.movement_error = None
         except (ValueError, StopIteration) as error:
             self.movement_error = str(error) or 'This choice is no longer available.'
@@ -4048,6 +4053,7 @@ class BoardWindow(arcade.Window):
             if symbol == arcade.key.ESCAPE and not (self.strategy.session and
                                                     self.strategy.session.stage == 'technology'):
                 self.technology_actions.cancel_transit()
+                self.technology_actions.mageon_owner = None
                 self.technology_view = False
             return
         if symbol == arcade.key.ESCAPE and self.orbital_drop_mode:

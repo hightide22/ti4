@@ -315,7 +315,8 @@ class TechnologyPanel:
             elif state and state.moved_ids:
                 self._button(w, ('transit_finish',), 'FINISH TRANSIT', right,
                              bottom + 10, right_width, 30)
-        elif selected_tech and selected_tech['alias'] in ('pa', 'bs', 'pi', 'sr', 'pm', 'vtx'):
+        elif selected_tech and selected_tech['alias'] in (
+                'pa', 'bs', 'pi', 'sr', 'pm', 'vtx', 'lgf', 'mi'):
             alias = selected_tech['alias']
             targets = w.technology_actions.targets(player, alias)
             w.text('tech_action_heading', 'AVAILABLE USES', right, bottom + 232, 10, ACCENT)

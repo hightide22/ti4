@@ -807,7 +807,44 @@ class MovementController:
                     self.destroy_unit(tile, cargo, session, source_factions)
 
     def neighbors(self, tile, faction=None):
-        return adjacent_tiles(self.board, tile, self.exploration, faction)
+        neighbors = adjacent_tiles(self.board, tile, self.exploration, faction)
+        for candidate in self._winnu_gate_neighbors(tile):
+            if candidate not in neighbors:
+                neighbors.append(candidate)
+        return neighbors
+
+    def _winnu_gate_neighbors(self, tile, tactical_player=None):
+        winnu = self.faction_player('winnu')
+        if (winnu is None or 'lgf' not in winnu.technologies or
+                any(candidate.planet_owners.get('mr') == 'winnu'
+                    for candidate in self.board.values())):
+            return []
+        if tactical_player is not None:
+            if tactical_player is not winnu:
+                return []
+            if self.session and (not self.session.tactical_activation or
+                                 self.session.player is not winnu):
+                return []
+        elif (not self.session or not self.session.tactical_activation or
+              self.session.player is not winnu):
+            return []
+        mecatol = next((candidate for candidate in self.board.values()
+                        if candidate.number == 18), None)
+        if mecatol is None:
+            return []
+
+        def has_alpha_or_beta(candidate):
+            holes = {str(kind).upper() for kind in candidate.wormholes}
+            if self.exploration is not None:
+                holes.update(str(token[4:]).upper()
+                             for token in self.exploration.space_tokens.get(
+                                 candidate.position, ()) if token.startswith('ion_'))
+            return bool(holes & {'ALPHA', 'BETA'})
+
+        if tile is mecatol:
+            return [candidate for candidate in self.board.values()
+                    if candidate is not mecatol and has_alpha_or_beta(candidate)]
+        return [mecatol] if has_alpha_or_beta(tile) else []
 
     @staticmethod
     def is_gravity_rift(tile):
@@ -848,6 +885,9 @@ class MovementController:
             if len(path) - 1 >= budget + rift_bonus:
                 continue
             adjacent = self.neighbors(tile, player.faction)
+            for candidate in self._winnu_gate_neighbors(tile, player):
+                if candidate not in adjacent:
+                    adjacent.append(candidate)
             if session and session.ghost_wormhole_adjacency:
                 active = session.target
                 if tile is active:

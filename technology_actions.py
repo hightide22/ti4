@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from movement import Snapshot, UndoEntry
-from units import Region, UNIT_TYPES, UnitLocation, unit_profile
-from unit_supply import can_transfer_infantry, unit_supply_remaining
+from units import Region, UNIT_TYPES, Unit, UnitLocation, unit_profile
+from unit_supply import can_place_infantry, can_transfer_infantry, unit_supply_remaining
+from technology import upgrade_profile
 
 
 @dataclass
@@ -21,6 +22,7 @@ class TechnologyActions:
         self.movement = movement
         self.turn = turn
         self.transit: TransitResolution | None = None
+        self.mageon_owner: str | None = None
 
     def transit_units(self, player):
         if self.transit and self.transit.player is not player:
@@ -161,6 +163,32 @@ class TechnologyActions:
                                     f'{owner.faction.upper()} · Tile {tile.system_id} · '
                                     f'{unit.kind.title()}'))
             return sorted(options, key=lambda value: (value[1], value[0]))
+        if alias == 'lgf':
+            if player.faction != 'winnu':
+                return []
+            mecatol = next((tile for tile in self.board.values()
+                            if any(planet.planet_id == 'mr' for planet in tile.planets)), None)
+            if mecatol and mecatol.planet_owners.get('mr') != player.faction:
+                return [('no-effect', 'Exhaust · no effect')]
+            if (mecatol and mecatol.planet_owners.get('mr') == player.faction and
+                    can_place_infantry(player, self.board, mecatol,
+                                       UnitLocation(Region.PLANET, planet_id='mr'))):
+                return [('mr', 'Mecatol Rex · place 1 infantry')]
+            return []
+        if alias == 'mi':
+            from action_cards import ActionCardController
+            if self.mageon_owner is None:
+                return [(f'owner:{other.faction}', f'{other.name} · view action cards')
+                        for other in self.turn.players
+                        if other is not player and other.action_cards]
+            owner = next((other for other in self.turn.players
+                          if other.faction == self.mageon_owner and other is not player), None)
+            if owner is None or not owner.action_cards:
+                self.mageon_owner = None
+                return []
+            return [('back', 'Choose another player')] + [
+                (f'card:{index}', ActionCardController.name_for(card))
+                for index, card in enumerate(owner.action_cards)]
         if alias == 'sr':
             return [(unit.unit_id, f'Tile {tile.system_id} · Space Dock')
                     for tile in self.board.values() for unit in tile.units
@@ -176,6 +204,12 @@ class TechnologyActions:
     def use(self, player, alias, target_id):
         if target_id not in {key for key, _ in self.targets(player, alias)}:
             raise ValueError('This technology or target is unavailable.')
+        if alias == 'mi' and target_id.startswith('owner:'):
+            self.mageon_owner = target_id.partition(':')[2]
+            return False
+        if alias == 'mi' and target_id == 'back':
+            self.mageon_owner = None
+            return False
         snapshot = Snapshot.capture(self.board, player, self.turn.players,
                                     exploration=self.movement.exploration)
         if alias == 'vtx':
@@ -184,9 +218,34 @@ class TechnologyActions:
                           if unit.unit_id == target_id)
             cabal_capture_unit(player, target.kind, target.owner)
             player.exhausted_technologies.add('vtx')
-            self.turn.mark_action_completed()
+            # The app records undoable actions from their history entry. Marking
+            # here too would spend both Fleet Logistics actions for one use.
             self.movement.history.append(UndoEntry(snapshot))
             return
+        if alias == 'lgf':
+            if target_id == 'no-effect':
+                player.exhausted_technologies.add('lgf')
+                self.movement.history.append(UndoEntry(snapshot))
+                return
+            from uuid import uuid4
+            tile = next(tile for tile in self.board.values()
+                        if any(planet.planet_id == 'mr' for planet in tile.planets))
+            tile.units.append(Unit(f'winnu-lazax-gate-{uuid4().hex}', 'infantry',
+                                   player.faction, player.color_code,
+                                   UnitLocation(Region.PLANET, planet_id='mr'),
+                                   profile_id=(upgrade_profile(player, 'infantry') or {}).get('id')))
+            player.exhausted_technologies.add('lgf')
+            self.movement.history.append(UndoEntry(snapshot))
+            return
+        if alias == 'mi':
+            owner = next(other for other in self.turn.players
+                         if other.faction == self.mageon_owner)
+            index = int(target_id.partition(':')[2])
+            player.action_cards.append(owner.action_cards.pop(int(index)))
+            player.exhausted_technologies.add('mi')
+            self.mageon_owner = None
+            self.movement.history.append(UndoEntry(snapshot))
+            return True
         if alias == 'pa':
             card = next(card for card in player.planets if card.planet.planet_id == target_id)
             card.exhausted = True
