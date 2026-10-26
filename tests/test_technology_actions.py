@@ -1,6 +1,6 @@
 import unittest
 
-from board import load_board
+from board import ROOT, load_board
 from movement import MovementController, Session, Snapshot
 from player import PlanetCard, create_players
 from technology_actions import TechnologyActions
@@ -19,6 +19,62 @@ class TechnologyActionTests(unittest.TestCase):
         self.home = next(tile for tile in self.board.values()
                          if any(unit.owner == 'sol' and unit.kind == 'spacedock'
                                 for unit in tile.units))
+
+    def cabal_game(self):
+        config, board = load_board(ROOT / 'maps/four_player.json',
+                                   ('cabal', 'sol', 'hacan', 'letnev'))
+        players = create_players(board, config)
+        turn = TurnOrder(players)
+        movement = MovementController(board, players)
+        actions = TechnologyActions(board, movement, turn)
+        cabal = next(player for player in players if player.faction == 'cabal')
+        sol = next(player for player in players if player.faction == 'sol')
+        turn.active_index = players.index(cabal)
+        cabal.technologies |= {'vtx'}
+        cabal.command_pools['strategic'] = 0
+        dock_tile = next(tile for tile in board.values()
+                         if any(unit.owner == 'cabal' and unit.kind == 'spacedock'
+                                for unit in tile.units))
+        target_tile = movement.neighbors(dock_tile, 'cabal')[0]
+        target = Unit('vortex-target-cruiser', 'cruiser', sol.faction,
+                      sol.color_code, UnitLocation(Region.SPACE))
+        target_tile.units.append(target)
+        return board, players, turn, movement, actions, cabal, sol, dock_tile, target_tile, target
+
+    def test_cabal_vortex_captures_reinforcement_unit_without_spending_a_token(self):
+        board, players, turn, movement, actions, cabal, sol, _dock, target_tile, target = self.cabal_game()
+
+        self.assertIn((target.unit_id, f'SOL · Tile {target_tile.system_id} · Cruiser'),
+                      actions.targets(cabal, 'vtx'))
+        actions.use(cabal, 'vtx', target.unit_id)
+
+        self.assertIn(target, target_tile.units)
+        self.assertEqual(cabal.captured_units, {'cruiser': 1})
+        self.assertEqual(cabal.captured_unit_sources[('cruiser', 'sol')], 1)
+        self.assertEqual(cabal.command_pools['strategic'], 0)
+        self.assertIn('vtx', cabal.exhausted_technologies)
+        self.assertTrue(turn.action_used)
+
+    def test_cabal_vortex_cannot_target_a_blockading_player_or_empty_reinforcements(self):
+        board, players, turn, movement, actions, cabal, sol, dock_tile, target_tile, target = self.cabal_game()
+        # A Sol ship blockades the Tear. It prevents Vortex from targeting Sol units.
+        dock_tile.units[:] = [unit for unit in dock_tile.units
+                              if not (unit.owner == 'cabal' and
+                                      unit.location.region == Region.SPACE and
+                                      unit.kind in ('carrier', 'cruiser', 'destroyer',
+                                                    'dreadnought', 'flagship', 'warsun',
+                                                    'fighter'))]
+        dock_tile.units.append(Unit('vortex-blockader', 'fighter', 'sol',
+                                    sol.color_code, UnitLocation(Region.SPACE)))
+        self.assertNotIn(target.unit_id, {key for key, _ in actions.targets(cabal, 'vtx')})
+
+        dock_tile.units.remove(next(unit for unit in dock_tile.units
+                                    if unit.unit_id == 'vortex-blockader'))
+        for index in range(8):
+            board[next(iter(board))].units.append(
+                Unit(f'vortex-sol-cruiser-{index}', 'cruiser', 'sol', sol.color_code,
+                     UnitLocation(Region.SPACE)))
+        self.assertNotIn(target.unit_id, {key for key, _ in actions.targets(cabal, 'vtx')})
 
     def test_codex_x89_is_not_a_separate_action(self):
         self.sol.technologies |= {'x89c4'}

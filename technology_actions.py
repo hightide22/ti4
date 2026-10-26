@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from movement import Snapshot, UndoEntry
-from units import Region, UNIT_TYPES, UnitLocation
-from unit_supply import can_transfer_infantry
+from units import Region, UNIT_TYPES, UnitLocation, unit_profile
+from unit_supply import can_transfer_infantry, unit_supply_remaining
 
 
 @dataclass
@@ -129,6 +129,38 @@ class TechnologyActions:
                     for tactical, fleet, strategic in alternatives]
         if not self.turn.can_take_action:
             return []
+        if alias == 'vtx':
+            if player.faction != 'cabal':
+                return []
+            from pok_factions import cabal_can_capture_from
+            dock_systems = {neighbor.position
+                            for dock_tile in self.board.values()
+                            if any(unit.owner == player.faction and unit.kind == 'spacedock'
+                                   for unit in dock_tile.units)
+                            for neighbor in self.movement.neighbors(dock_tile, player.faction)}
+            options = []
+            for tile in self.board.values():
+                if tile.position not in dock_systems:
+                    continue
+                for unit in tile.units:
+                    if unit.owner == player.faction or unit.kind in ('pds', 'spacedock'):
+                        continue
+                    profile = unit_profile(unit)
+                    if profile.get('cost') is None or not cabal_can_capture_from(
+                            player, unit.owner, self.board):
+                        continue
+                    owner = next((candidate for candidate in self.turn.players
+                                  if candidate.faction == unit.owner), None)
+                    if owner is None:
+                        continue
+                    remaining = unit_supply_remaining(owner, self.board, unit.kind)
+                    captured = player.captured_unit_sources.get((unit.kind, owner.faction), 0)
+                    if remaining is not None and remaining - captured <= 0:
+                        continue
+                    options.append((unit.unit_id,
+                                    f'{owner.faction.upper()} · Tile {tile.system_id} · '
+                                    f'{unit.kind.title()}'))
+            return sorted(options, key=lambda value: (value[1], value[0]))
         if alias == 'sr':
             return [(unit.unit_id, f'Tile {tile.system_id} · Space Dock')
                     for tile in self.board.values() for unit in tile.units
@@ -146,6 +178,15 @@ class TechnologyActions:
             raise ValueError('This technology or target is unavailable.')
         snapshot = Snapshot.capture(self.board, player, self.turn.players,
                                     exploration=self.movement.exploration)
+        if alias == 'vtx':
+            from pok_factions import cabal_capture_unit
+            target = next(unit for tile in self.board.values() for unit in tile.units
+                          if unit.unit_id == target_id)
+            cabal_capture_unit(player, target.kind, target.owner)
+            player.exhausted_technologies.add('vtx')
+            self.turn.mark_action_completed()
+            self.movement.history.append(UndoEntry(snapshot))
+            return
         if alias == 'pa':
             card = next(card for card in player.planets if card.planet.planet_id == target_id)
             card.exhausted = True
