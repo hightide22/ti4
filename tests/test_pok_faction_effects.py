@@ -3,6 +3,7 @@
 import random
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
 
 from board import ROOT, load_board
 from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, use_empyrean_agent,
@@ -15,13 +16,14 @@ from leader_effects import (use_arborec_agent, use_cabal_agent, use_cabal_hero, 
                             use_titans_hero)
 from leaders import leader_available, ready_leaders, unlock_leader
 from movement import MovementController, Session, Snapshot
-from player import create_players
+from player import PlanetCard, create_players
 from pok_factions import (cabal_capture_destroyed, cabal_return_captured,
                           cabal_capture_unit,
                           keleres_council_patronage, mahact_gain_fleet_token,
                           mahact_fleet_limit, naaz_explore_planet, titans_awaken,
                           titans_hero_space_cannon, titans_place_sleeper)
 from units import Region, Unit, UnitLocation
+from unit_supply import infantry_area_counts
 
 
 class FixedDie:
@@ -129,6 +131,185 @@ class PokEffectsTests(unittest.TestCase):
         use_empyrean_agent(empyrean, sol, board, empty, 'tactical')
         self.assertEqual(sol.command_pools['tactical'], before + 1)
         self.assertFalse(leader_available(empyrean, 'empyreanagent'))
+
+    def test_empyrean_agent_treats_a_stellar_converter_wreck_as_planetless(self):
+        board, empyrean, sol = self.game('empyrean')
+        tile = next(tile for tile in board.values() if len(tile.planets) == 1)
+        destroyed_planet = tile.planets[0]
+        tile.units.append(Unit('sol-in-wreck-system', 'carrier', 'sol', sol.color_code,
+                               UnitLocation(Region.SPACE)))
+        before = sol.command_pools['fleet']
+
+        use_empyrean_agent(
+            empyrean, sol, board, tile, 'fleet',
+            exploration=SimpleNamespace(
+                destroyed_planets={destroyed_planet.planet_id}))
+
+        self.assertEqual(sol.command_pools['fleet'], before + 1)
+        self.assertFalse(leader_available(empyrean, 'empyreanagent'))
+
+    def test_empyrean_agent_opens_after_a_ship_reaches_a_planetless_system(self):
+        board, empyrean, sol = self.game('empyrean')
+        movement = MovementController(board, (empyrean, sol))
+        target = next(tile for tile in board.values() if tile.number == 77)
+        session = movement.activate(sol, target.position)
+        ship = next(ship for source in session.sources.values()
+                    for ship in source.ships if ship.kind == 'carrier')
+        session.toggle(ship.unit_id)
+
+        movement.confirm()
+
+        self.assertEqual(session.stage, 'empyrean_agent')
+        self.assertEqual(session.empyrean_agent_owner, empyrean.faction)
+        before = dict(sol.command_pools)
+        movement.resolve_empyrean_agent('fleet')
+        self.assertEqual(sol.command_pools['fleet'], before['fleet'] + 1)
+        self.assertFalse(leader_available(empyrean, 'empyreanagent'))
+        self.assertNotEqual(session.stage, 'empyrean_agent')
+
+    def test_empyrean_agent_can_be_declined_and_is_not_offered_without_supply(self):
+        board, empyrean, sol = self.game('empyrean')
+        movement = MovementController(board, (empyrean, sol))
+        target = next(tile for tile in board.values() if tile.number == 77)
+        session = movement.activate(sol, target.position)
+        ship = next(ship for source in session.sources.values()
+                    for ship in source.ships if ship.kind == 'carrier')
+        session.toggle(ship.unit_id)
+        movement.confirm()
+        movement.resolve_empyrean_agent()
+        self.assertTrue(leader_available(empyrean, 'empyreanagent'))
+
+        board, empyrean, sol = self.game('empyrean')
+        sol.command_pools.update(tactical=11, fleet=3, strategic=2)
+        movement = MovementController(board, (empyrean, sol))
+        target = next(tile for tile in board.values() if tile.number == 77)
+        session = movement.activate(sol, target.position)
+        ship = next(ship for source in session.sources.values()
+                    for ship in source.ships if ship.kind == 'carrier')
+        session.toggle(ship.unit_id)
+        movement.confirm()
+        self.assertNotEqual(session.stage, 'empyrean_agent')
+        self.assertTrue(leader_available(empyrean, 'empyreanagent'))
+
+    def _produce_sol_infantry_with_argent_in_game(self, *, count=1,
+                                                 fill_infantry_areas=False):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('argent', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        argent, sol = players[:2]
+        controller = MovementController(board, players)
+        home = next(tile for tile in board.values()
+                    if any(unit.owner == 'sol' and unit.kind == 'spacedock'
+                           for unit in tile.units))
+        dock = next(unit for unit in home.units
+                    if unit.owner == 'sol' and unit.kind == 'spacedock')
+        adjacent = next(tile for tile in controller.neighbors(home)
+                        if tile.planets and not any(p.faction_homeworld for p in tile.planets))
+        destination = adjacent.planets[0]
+        adjacent.planet_owners[destination.planet_id] = sol.faction
+        sol.planets.append(PlanetCard(destination))
+        if fill_infantry_areas:
+            source_planet = dock.location.planet_id
+            for tile in board.values():
+                tile.units[:] = [unit for unit in tile.units
+                                 if not (unit.owner == sol.faction and
+                                         unit.kind == 'infantry')]
+            home.units.append(Unit('sol-home-infantry-anchor', 'infantry', sol.faction,
+                                   sol.color_code,
+                                   UnitLocation(Region.PLANET, source_planet)))
+            anchor_index = 0
+            for tile in board.values():
+                if tile.position in (home.position, adjacent.position):
+                    continue
+                planet = next((planet for planet in tile.planets
+                               if planet.planet_id != destination.planet_id), None)
+                if planet is None:
+                    continue
+                tile.units.append(Unit(f'sol-area-anchor-{anchor_index}', 'infantry',
+                                       sol.faction, sol.color_code,
+                                       UnitLocation(Region.PLANET, planet.planet_id)))
+                anchor_index += 1
+                if anchor_index == 11:
+                    break
+            if anchor_index != 11:
+                raise AssertionError('Four-player map has too few distinct planet areas')
+        sol.trade_goods = 3
+        session = controller.start_strategy_production(sol, home, dock)
+        session.production_choices = {'infantry': count}
+        session.trade_goods_to_spend = 1
+        controller.produce()
+        return controller, argent, sol, home, adjacent, destination, session
+
+    def test_argent_agent_relocates_new_ground_force_to_adjacent_controlled_planet(self):
+        controller, argent, sol, home, adjacent, destination, session = \
+            self._produce_sol_infantry_with_argent_in_game()
+
+        self.assertEqual(session.stage, 'argent_agent')
+        unit_id = session.argent_agent_produced_ids[0]
+        options = controller.argent_agent_destination_options(session, unit_id)
+        self.assertIn(destination.planet_id, [option[0] for option in options])
+
+        controller.resolve_argent_agent({unit_id: destination.planet_id})
+
+        relocated = next(unit for unit in adjacent.units if unit.unit_id == unit_id)
+        self.assertEqual(relocated.location, UnitLocation(Region.PLANET, destination.planet_id))
+        self.assertFalse(any(unit.unit_id == unit_id for unit in home.units))
+        self.assertFalse(leader_available(argent, 'argentagent'))
+        self.assertIsNone(controller.session)
+
+    def test_argent_agent_decline_ignores_staged_destinations(self):
+        controller, argent, _sol, home, _adjacent, destination, session = \
+            self._produce_sol_infantry_with_argent_in_game()
+        unit_id = session.argent_agent_produced_ids[0]
+        session.argent_agent_destinations[unit_id] = destination.planet_id
+
+        controller.resolve_argent_agent({})
+
+        self.assertTrue(leader_available(argent, 'argentagent'))
+        self.assertTrue(any(unit.unit_id == unit_id and
+                            unit.location.planet_id == home.planets[0].planet_id
+                            for unit in home.units))
+        self.assertIsNone(controller.session)
+
+    def test_argent_agent_reaction_also_follows_umbat_agent_production(self):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('argent', 'muaat', 'sol', 'hacan'))
+        players = create_players(board, config)
+        argent, muaat = players[:2]
+        controller = MovementController(board, players)
+        home = next(tile for tile in board.values()
+                    if any(unit.owner == muaat.faction for unit in tile.units) and
+                    any(planet.faction_homeworld == muaat.faction for planet in tile.planets))
+        home.units.append(Unit('muaat-agent-production-war-sun', 'warsun', muaat.faction,
+                               muaat.color_code, UnitLocation(Region.SPACE)))
+        adjacent = next(tile for tile in controller.neighbors(home)
+                        if tile.planets and not any(p.faction_homeworld for p in tile.planets))
+        destination = adjacent.planets[0]
+        adjacent.planet_owners[destination.planet_id] = muaat.faction
+        muaat.planets.append(PlanetCard(destination))
+        muaat.trade_goods = 1
+        snapshot = Snapshot.capture(board, muaat, players)
+        session = controller.start_agent_production(muaat, home, snapshot)
+        session.production_choices = {'infantry': 1}
+        session.trade_goods_to_spend = 1
+
+        controller.produce()
+
+        self.assertEqual(session.stage, 'argent_agent')
+        self.assertTrue(session.argent_agent_produced_ids)
+        self.assertEqual(session.argent_agent_owner, argent.faction)
+        self.assertTrue(leader_available(argent, 'argentagent'))
+
+    def test_argent_agent_cannot_exceed_the_infantry_area_anchor_supply(self):
+        controller, argent, sol, home, adjacent, destination, session = \
+            self._produce_sol_infantry_with_argent_in_game(
+                count=2, fill_infantry_areas=True)
+
+        self.assertEqual(12, len(infantry_area_counts(sol, controller.board)))
+        self.assertNotEqual(session.stage, 'argent_agent')
+        self.assertTrue(leader_available(argent, 'argentagent'))
 
     def test_l1z1x_agent_replaces_active_system_infantry_with_mech(self):
         board, l1z1x, sol = self.game('l1z1x')

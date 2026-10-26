@@ -324,6 +324,12 @@ class Session:
     fire_team_pending: str | None = None
     fire_team_selected: set[int] = field(default_factory=set)
     moved_ship_ids: set[str] = field(default_factory=set)
+    empyrean_agent_owner: str | None = None
+    empyrean_agent_next_stage: str | None = None
+    argent_agent_owner: str | None = None
+    argent_agent_next_stage: str | None = None
+    argent_agent_produced_ids: list[str] = field(default_factory=list)
+    argent_agent_destinations: dict[str, str] = field(default_factory=dict)
     mentak_ambush_resolved: bool = False
     mentak_ambush_rolls: list[dict] = field(default_factory=list)
     nekro_tech_gained: set[str] = field(default_factory=set)
@@ -1330,6 +1336,15 @@ class MovementController:
                             if session.target.planets else {})
         next_stage = ('space_combat' if self.hostile_space_factions(session.target, session.player.faction)
                       else 'invasion')
+        empyrean = self.faction_player('empyrean')
+        destroyed_planets = (self.exploration.destroyed_planets
+                             if self.exploration is not None else ())
+        if (session.moved_ship_ids and empyrean and
+                not any(planet.planet_id not in destroyed_planets
+                        for planet in session.target.planets) and
+                leader_available(empyrean, 'empyreanagent') and
+                command_tokens_in_reinforcements(session.player, self.board) > 0):
+            session.empyrean_agent_owner = empyrean.faction
         affected = [(origin.position, session.player.faction) for origin, _, _ in transfers]
         affected.append((session.target.position, session.player.faction))
         foresight_destinations = self.foresight_options(session)
@@ -1592,6 +1607,10 @@ class MovementController:
             self.finish()
 
     def continue_after_movement(self, session, next_stage):
+        if session.empyrean_agent_owner:
+            session.empyrean_agent_next_stage = next_stage
+            session.stage = 'empyrean_agent'
+            return
         session.space_cannon_next_stage = next_stage
         if not session.cannon_checked:
             experimental_available = bool(session.moved_ship_ids and self.action_cards and any(
@@ -1667,6 +1686,111 @@ class MovementController:
         if resolved:
             self.continue_after_space_cannon(session)
         return resolved
+
+    def resolve_empyrean_agent(self, pool=None):
+        """Resolve or decline Acamar's reaction, then resume the tactical action."""
+        session = self.session
+        if (not session or session.stage != 'empyrean_agent' or
+                not session.empyrean_agent_owner):
+            raise MovementError('Acamar is not awaiting a decision.')
+        next_stage = session.empyrean_agent_next_stage or 'invasion'
+        if pool is not None:
+            owner = self.faction_player(session.empyrean_agent_owner)
+            if owner is None:
+                raise MovementError('The Empyrean player is no longer available.')
+            from leader_effects import use_empyrean_agent
+            use_empyrean_agent(owner, session.player, self.board, session.target,
+                               pool, moved_ship_ids=session.moved_ship_ids,
+                               exploration=self.exploration)
+        session.empyrean_agent_owner = None
+        session.empyrean_agent_next_stage = None
+        self.continue_after_movement(session, next_stage)
+        return pool is not None
+
+    def argent_agent_destination_options(self, session, unit_id):
+        """Controlled adjacent planets that can receive this newly produced unit."""
+        unit = next((candidate for candidate in session.target.units
+                     if candidate.unit_id == unit_id and
+                     candidate.owner == session.player.faction and
+                     candidate.kind in self.GROUND_FORCES), None)
+        if unit is None:
+            return []
+        planned_transfers = []
+        for planned_unit_id, planet_id in session.argent_agent_destinations.items():
+            if planned_unit_id == unit_id:
+                continue
+            planned_unit = next((candidate for candidate in session.target.units
+                                 if candidate.unit_id == planned_unit_id), None)
+            destination_tile = next((tile for tile in self.board.values()
+                                     if any(planet.planet_id == planet_id
+                                            for planet in tile.planets)), None)
+            if planned_unit is None or destination_tile is None:
+                continue
+            planned_transfers.append((session.target, planned_unit, destination_tile,
+                                      UnitLocation(Region.PLANET, planet_id)))
+        nearby = [session.target, *self.neighbors(session.target,
+                                                  session.player.faction)]
+        options = []
+        for tile in nearby:
+            for planet in tile.planets:
+                if (tile.planet_owners.get(planet.planet_id) != session.player.faction or
+                        (unit.location.region == Region.PLANET and
+                         unit.location.planet_id == planet.planet_id) or
+                        (self.exploration and (self.exploration.planet_is_blocked(planet.planet_id) or
+                                               planet.planet_id in self.exploration.destroyed_planets))):
+                    continue
+                if not can_transfer_infantry(
+                        session.player, self.board,
+                        [*planned_transfers,
+                         (session.target, unit, tile,
+                          UnitLocation(Region.PLANET, planet.planet_id))]):
+                    continue
+                options.append((planet.planet_id, planet.name, tile.number,
+                                tile.position))
+        return sorted(options, key=lambda option: (option[2], option[1], option[0]))
+
+    def cycle_argent_agent_destination(self, unit_id):
+        session = self.session
+        if not session or session.stage != 'argent_agent' or \
+                unit_id not in session.argent_agent_produced_ids:
+            raise MovementError('Argent agent placement is not awaiting this unit.')
+        options = [None, *(option[0] for option in
+                           self.argent_agent_destination_options(session, unit_id))]
+        current = session.argent_agent_destinations.get(unit_id)
+        next_index = (options.index(current) + 1) % len(options) if current in options else 0
+        destination = options[next_index]
+        if destination is None:
+            session.argent_agent_destinations.pop(unit_id, None)
+        else:
+            session.argent_agent_destinations[unit_id] = destination
+        return destination
+
+    def resolve_argent_agent(self, destinations=None):
+        """Resolve Argent's placement reaction, then finish production checks."""
+        session = self.session
+        if (not session or session.stage != 'argent_agent' or
+                not session.argent_agent_owner):
+            raise MovementError('The Argent agent is not awaiting a decision.')
+        next_stage = session.argent_agent_next_stage or 'complete'
+        destinations = dict(session.argent_agent_destinations
+                            if destinations is None else destinations)
+        if destinations:
+            owner = self.faction_player(session.argent_agent_owner)
+            if owner is None:
+                raise MovementError('The Argent player is no longer available.')
+            from leader_effects import use_argent_agent
+            produced = [unit for unit in session.target.units
+                        if unit.unit_id in session.argent_agent_produced_ids]
+            use_argent_agent(owner, session.player, self.board, session.target,
+                             produced, destinations, movement=self)
+        session.argent_agent_owner = None
+        session.argent_agent_next_stage = None
+        session.argent_agent_produced_ids.clear()
+        session.argent_agent_destinations.clear()
+        session.stage = 'complete'
+        self._check_capacity_and_fleet(
+            session, [(session.target.position, session.player.faction)], next_stage)
+        return bool(destinations)
 
     def _space_cannon_shooters(self, session):
         shooters = []
@@ -3520,6 +3644,7 @@ class MovementController:
             session.player.exhausted_technologies.add('aida')
         used_ids = {unit.unit_id for tile in self.board.values() for unit in tile.units}
         next_id = 1
+        produced_ground_force_ids = []
         for kind, count in session.production_choices.items():
             for _ in range(count):
                 while f'{session.player.faction}-built-{next_id}' in used_ids:
@@ -3556,9 +3681,12 @@ class MovementController:
                         raise MovementError('Ground units and structures need a controlled planet in this system.')
                 else:
                     location = UnitLocation(Region.SPACE)
-                session.target.units.append(Unit(unit_id, kind, session.player.faction,
-                                                 session.player.color_code, location,
-                                                 profile_id=(upgrade_profile(session.player, kind) or {}).get('id')))
+                produced_unit = Unit(unit_id, kind, session.player.faction,
+                                     session.player.color_code, location,
+                                     profile_id=(upgrade_profile(session.player, kind) or {}).get('id'))
+                session.target.units.append(produced_unit)
+                if kind in self.GROUND_FORCES:
+                    produced_ground_force_ids.append(unit_id)
                 if kind == 'warsun' and session.player.faction == 'muaat':
                     from leaders import notify_leader_event
                     notify_leader_event(session.player, 'produced_war_sun')
@@ -3573,8 +3701,19 @@ class MovementController:
                 not getattr(session, 'sling_relay', False) and
                 leader_available(session.player, 'titanscommander')):
             session.player.trade_goods += 1
-        session.stage = 'complete'
         next_stage = 'integrated_continue' if session.integrated_current else 'complete'
+        argent = self.faction_player('argent')
+        if (produced_ground_force_ids and argent and
+                leader_available(argent, 'argentagent') and
+                any(self.argent_agent_destination_options(session, unit_id)
+                    for unit_id in produced_ground_force_ids)):
+            session.argent_agent_owner = argent.faction
+            session.argent_agent_next_stage = next_stage
+            session.argent_agent_produced_ids = produced_ground_force_ids
+            session.argent_agent_destinations.clear()
+            session.stage = 'argent_agent'
+            return
+        session.stage = 'complete'
         self._check_capacity_and_fleet(
             session, [(session.target.position, session.player.faction)], next_stage)
 

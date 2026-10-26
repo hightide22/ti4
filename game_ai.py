@@ -23,7 +23,8 @@ from player import command_tokens_in_reinforcements
 from technology import (available_technologies, can_use_specialty_planet,
                         missing_prerequisites, production_allowed,
                         unit_upgrade_kind)
-from units import Region, UNIT_TYPES, unit_profile
+from units import Region, UNIT_TYPES, UnitLocation, unit_profile
+from unit_supply import can_transfer_infantry
 
 
 TECH_PRIORITY = {
@@ -302,6 +303,72 @@ class GameAI:
             session = w.movement.session
             if (getattr(w.leader_panel, 'open', False) and
                     getattr(w.leader_panel, 'reaction_owner_faction', None)):
+                return
+            if session.stage == 'argent_agent':
+                owner = w.movement.faction_player(session.argent_agent_owner)
+                if owner is None:
+                    w.movement.resolve_argent_agent()
+                    return
+                if not self.is_bot(owner):
+                    return
+                destinations, planned = {}, []
+                if owner is session.player:
+                    for unit_id in session.argent_agent_produced_ids:
+                        unit = next((candidate for candidate in session.target.units
+                                     if candidate.unit_id == unit_id), None)
+                        if unit is None:
+                            continue
+                        options = w.movement.argent_agent_destination_options(session, unit_id)
+
+                        def placement_value(option):
+                            planet_id, _, _, position = option
+                            tile = w.board[position]
+                            planet = next(planet for planet in tile.planets
+                                          if planet.planet_id == planet_id)
+                            threat = sum(self._tile_threat(neighbor, owner.faction)
+                                         for neighbor in w.movement.neighbors(tile, owner.faction))
+                            return (planet.resources + .5 * planet.influence - threat,
+                                    -tile.number, planet_id)
+
+                        for option in sorted(options, key=placement_value, reverse=True):
+                            planet_id, _, _, position = option
+                            tile = w.board[position]
+                            transfer = (session.target, unit, tile,
+                                        UnitLocation(Region.PLANET, planet_id))
+                            if can_transfer_infantry(owner, w.board,
+                                                     [*planned, transfer]):
+                                destinations[unit_id] = planet_id
+                                planned.append(transfer)
+                                break
+                if destinations:
+                    try:
+                        w.movement.resolve_argent_agent(destinations)
+                    except ValueError:
+                        w.movement.resolve_argent_agent()
+                    else:
+                        self.report(owner, 'Argent relocated newly produced ground forces.', .35)
+                else:
+                    w.movement.resolve_argent_agent()
+                return
+            if session.stage == 'empyrean_agent':
+                owner = w.movement.faction_player(session.empyrean_agent_owner)
+                if owner is None:
+                    w.movement.resolve_empyrean_agent()
+                    return
+                if not self.is_bot(owner):
+                    return
+                # Acamar grants a token to the player who just moved. Bots use
+                # it when it benefits their own faction and leave opponents'
+                # command-pool decisions alone.
+                if session.player is owner:
+                    try:
+                        w.movement.resolve_empyrean_agent(self.command_pool(owner))
+                    except ValueError:
+                        w.movement.resolve_empyrean_agent()
+                    else:
+                        self.report(owner, 'Acamar added a command token after the move.', .3)
+                else:
+                    w.movement.resolve_empyrean_agent()
                 return
             if not session.activation_agent_resolved:
                 if self.resolve_activation_agent_window(session):

@@ -36,7 +36,7 @@ def _require_hero(owner, leader_id):
 
 
 def use_argent_agent(owner, beneficiary, board, source_tile, produced_units,
-                     destinations: dict[str, str]):
+                     destinations: dict[str, str], *, movement=None):
     """Move just-produced ground forces to controlled planets nearby.
 
     ``destinations`` maps produced unit IDs to controlled planet IDs. Units
@@ -46,7 +46,9 @@ def use_argent_agent(owner, beneficiary, board, source_tile, produced_units,
     if not destinations:
         raise ValueError('Select a ground force to relocate')
     produced = {unit.unit_id: unit for unit in produced_units}
-    nearby = [source_tile, *board.neighbors(source_tile.position)]
+    nearby = ([source_tile, *movement.neighbors(source_tile, beneficiary.faction)]
+              if movement is not None else
+              [source_tile, *board.neighbors(source_tile.position)])
     planets = {planet.planet_id: tile for tile in nearby for planet in tile.planets
                if tile.planet_owners.get(planet.planet_id) == beneficiary.faction}
     for unit_id, planet_id in destinations.items():
@@ -112,14 +114,23 @@ def use_cabal_agent(owner, target, kind: str, board=None, *, commodity_value=Non
     cabal_capture_unit(owner, kind, target.faction)
 
 
-def use_empyrean_agent(owner, beneficiary, board, tile, pool: str):
+def use_empyrean_agent(owner, beneficiary, board, tile, pool: str, *,
+                       moved_ship_ids=None, exploration=None):
     """Grant a command token after ships enter a planetless system."""
     _require_agent(owner, 'empyreanagent')
-    if tile.planets or pool not in beneficiary.command_pools:
+    destroyed_planets = (exploration.destroyed_planets
+                         if exploration is not None else ())
+    if (any(planet.planet_id not in destroyed_planets for planet in tile.planets) or
+            pool not in beneficiary.command_pools):
         raise ValueError('The destination must be planetless and the pool valid')
-    if not any(unit.owner == beneficiary.faction and unit.location.region == Region.SPACE
-               and UNIT_TYPES[unit.kind]['ship'] for unit in tile.units):
-        raise ValueError('The beneficiary has no ship in that system')
+    if moved_ship_ids is None:
+        moved = any(unit.owner == beneficiary.faction and
+                    unit.location.region == Region.SPACE and
+                    UNIT_TYPES[unit.kind]['ship'] for unit in tile.units)
+    else:
+        moved = bool(moved_ship_ids)
+    if not moved:
+        raise ValueError('The beneficiary did not move a ship into that system')
     if command_tokens_in_reinforcements(beneficiary, board) < 1:
         raise ValueError('No command token remains in reinforcements')
     exhaust_leader(owner, 'empyreanagent')

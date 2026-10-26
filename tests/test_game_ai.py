@@ -28,6 +28,36 @@ class Card:
 
 
 class GameAITests(unittest.TestCase):
+    def test_bot_empyrean_declines_acamar_when_it_would_reward_an_opponent(self):
+        config, board = load_board(
+            Path(__file__).resolve().parents[1] / 'maps/four_player.json',
+            ('empyrean', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        empyrean, sol = players[:2]
+        movement = MovementController(board, players)
+        target = next(tile for tile in board.values() if tile.number == 77)
+        session = movement.activate(sol, target.position)
+        ship = next(ship for source in session.sources.values()
+                    for ship in source.ships if ship.kind == 'carrier')
+        session.toggle(ship.unit_id)
+        movement.confirm()
+        self.assertEqual(session.stage, 'empyrean_agent')
+        turn = TurnOrder(players)
+        window = SimpleNamespace(
+            turn_order=turn,
+            strategy=SimpleNamespace(pending_cabal_replenishments=[], session=None),
+            movement=movement,
+            leader_panel=SimpleNamespace(open=False, reaction_owner_faction=None),
+            action_cards=SimpleNamespace(pending=[], discard=[]),
+            transaction=SimpleNamespace(session=None),
+            board=board,
+        )
+
+        GameAI(window, {'empyrean'}).step()
+
+        self.assertNotEqual(session.stage, 'empyrean_agent')
+        self.assertFalse(empyrean.leaders['empyreanagent'].exhausted)
+
     def test_bot_cabal_resolves_queued_trade_agent_before_next_strategy_step(self):
         config, board = load_board(
             Path(__file__).resolve().parents[1] / 'maps/four_player.json',

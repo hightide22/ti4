@@ -903,6 +903,14 @@ class BoardWindow(arcade.Window):
             session.activation_agent_alias = None
             self.leader_panel.close()
             self.prompt_activation_agent(session)
+        elif session and session.stage == 'empyrean_agent':
+            self.leader_panel.close()
+            self.movement.resolve_empyrean_agent()
+        elif session and session.stage == 'argent_agent':
+            self.leader_panel.close()
+            # A decline must ignore any destinations the player cycled through
+            # while considering the reaction.
+            self.movement.resolve_argent_agent({})
         elif (self.strategy.pending_cabal_replenishments and
               self.strategy.pending_cabal_replenishments[0][0] == 'cabal'):
             self.strategy.pending_cabal_replenishments.pop(0)
@@ -919,6 +927,28 @@ class BoardWindow(arcade.Window):
             return
         self.leader_panel.open_for_reaction(owner, 'cabalagent')
 
+    def sync_empyrean_agent_reaction(self):
+        """Pause after movement for a human Acamar reaction."""
+        session = self.movement.session
+        if (not session or session.stage != 'empyrean_agent' or
+                self.leader_panel.reaction_owner_faction):
+            return
+        owner = next((candidate for candidate in self.player_panel.players
+                      if candidate.faction == session.empyrean_agent_owner), None)
+        if owner is not None and not self.ai.is_bot(owner):
+            self.leader_panel.open_for_reaction(owner, 'empyreanagent')
+
+    def sync_argent_agent_reaction(self):
+        """Pause after production for a human Argent placement reaction."""
+        session = self.movement.session
+        if (not session or session.stage != 'argent_agent' or
+                self.leader_panel.reaction_owner_faction):
+            return
+        owner = next((candidate for candidate in self.player_panel.players
+                      if candidate.faction == session.argent_agent_owner), None)
+        if owner is not None and not self.ai.is_bot(owner):
+            self.leader_panel.open_for_reaction(owner, 'argentagent')
+
     def finish_activation_agent_reaction(self, session):
         if session.activation_agent_queue:
             session.activation_agent_queue.pop(0)
@@ -932,6 +962,13 @@ class BoardWindow(arcade.Window):
 
     def resolve_leader_action(self, command):
         if not command:
+            return
+        if command[0] == 'argent_agent_cycle':
+            try:
+                self.movement.cycle_argent_agent_destination(command[1])
+                self.movement_error = None
+            except (ValueError, KeyError) as error:
+                self.movement_error = str(error)
             return
         if command[0] == 'record_objective':
             player = self.turn_order.active_player
@@ -950,6 +987,44 @@ class BoardWindow(arcade.Window):
         player = next((candidate for candidate in self.player_panel.players
                        if candidate.faction == self.leader_panel.reaction_owner_faction),
                       self.turn_order.active_player)
+        if alias == 'empyreanagent':
+            session = self.movement.session
+            if (player is None or player.faction != 'empyrean' or session is None or
+                    session.stage != 'empyrean_agent' or len(command) < 3):
+                self.movement_error = 'Acamar is no longer waiting for this choice.'
+                return
+            snapshot = Snapshot.capture(self.board, session.player,
+                                        self.player_panel.players, self.action_cards,
+                                        self.exploration)
+            try:
+                self.movement.resolve_empyrean_agent(command[2])
+            except (ValueError, KeyError) as error:
+                snapshot.restore()
+                self.movement_error = str(error)
+                return
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            self.leader_panel.close()
+            self.movement_error = None
+            return
+        if alias == 'argentagent':
+            session = self.movement.session
+            if (player is None or player.faction != 'argent' or session is None or
+                    session.stage != 'argent_agent'):
+                self.movement_error = "The Argent agent's production window is no longer open."
+                return
+            snapshot = Snapshot.capture(self.board, session.player,
+                                        self.player_panel.players, self.action_cards,
+                                        self.exploration)
+            try:
+                self.movement.resolve_argent_agent()
+            except (ValueError, KeyError) as error:
+                snapshot.restore()
+                self.movement_error = str(error)
+                return
+            self.movement.history.append(UndoEntry(snapshot, counts_as_action=False))
+            self.leader_panel.close()
+            self.movement_error = None
+            return
         if alias == 'cabalagent':
             pending = self.strategy.pending_cabal_replenishments
             if (player is None or player.faction != 'cabal' or not pending or
@@ -1634,6 +1709,16 @@ class BoardWindow(arcade.Window):
                     self.movement.session is None and not self.strategy.session):
                 available.add('naazagent')
             session = self.movement.session
+            if (player.faction == 'empyrean' and session is not None and
+                    session.stage == 'empyrean_agent' and
+                    player.faction == session.empyrean_agent_owner and
+                    leader_available(player, 'empyreanagent')):
+                available.add('empyreanagent')
+            if (player.faction == 'argent' and session is not None and
+                    session.stage == 'argent_agent' and
+                    player.faction == session.argent_agent_owner and
+                    leader_available(player, 'argentagent')):
+                available.add('argentagent')
             if (session is not None and session.stage == 'movement' and
                     player.faction == session.activation_agent_owner and
                     self.leader_panel.selected_id == session.activation_agent_alias):
@@ -1889,6 +1974,8 @@ class BoardWindow(arcade.Window):
         self.unit_renderer.update(delta_time)
         self.sync_turn_action()
         self.sync_cabal_agent_reaction()
+        self.sync_empyrean_agent_reaction()
+        self.sync_argent_agent_reaction()
         self.zoom += (self.target_zoom - self.zoom) * min(1, delta_time * 14)
         for axis in range(2):
             shift = (self.target_map_center[axis] - self.map_center[axis]) * min(1, delta_time * 7)
@@ -2998,7 +3085,7 @@ class BoardWindow(arcade.Window):
                         x, y, next((candidate for candidate in self.player_panel.players
                                     if candidate.faction == reaction),
                                    self.turn_order.active_player)))
-                    if action == ('close',) and reaction:
+                    if action in (('close',), ('agent_cancel',)) and reaction:
                         self.skip_activation_agent_window()
             return
         if self.legendary_modal:

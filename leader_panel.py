@@ -71,6 +71,8 @@ class LeaderPanel:
         self.open = True
         self.reaction_owner_faction = player.faction
         self.select(leader_id, player)
+        if leader_id in ('empyreanagent', 'argentagent'):
+            self.begin_agent_action(leader_id)
 
     def begin_agent_action(self, leader_id: str) -> None:
         self.agent_mode = leader_id
@@ -341,11 +343,57 @@ class LeaderPanel:
 
     def _draw_agent_choices(self, window, player, board, movement, x, bottom, width):
         alias = self.agent_mode
-        window.text(('leader_agent_choice_title', alias), 'CHOOSE THE EFFECT TARGET',
+        choice_title = ('CHOOSE A COMMAND POOL' if alias == 'empyreanagent' else
+                        'PLACE PRODUCED GROUND FORCES' if alias == 'argentagent' else
+                        'CHOOSE THE EFFECT TARGET')
+        window.text(('leader_agent_choice_title', alias), choice_title,
                     x, bottom + 174, 10, ACCENT)
         page_size = 4
         pages = 1
-        if alias == 'l1z1xagent':
+        if alias == 'empyreanagent':
+            session = movement.session
+            beneficiary = session.player if session and session.stage == 'empyrean_agent' else None
+            if beneficiary is None:
+                window.text('empyrean_agent_no_beneficiary',
+                            'The command-token reaction is no longer available.',
+                            x, bottom + 128, 9, MUTED, width)
+            else:
+                window.text('empyrean_agent_beneficiary',
+                            f'{beneficiary.faction.upper()} GAINS 1 COMMAND TOKEN · CHOOSE A POOL',
+                            x, bottom + 166, 9, GOLD, max_width=width)
+                for index, pool in enumerate(('tactical', 'fleet', 'strategic')):
+                    by = bottom + 128 - index * 34
+                    button(window, ('empyrean_agent_pool', pool),
+                           f'ADD TO {pool.upper()} POOL', x, by, width, 29,
+                           size=9)
+                    self.hits.append((('use', alias, pool), x, x + width,
+                                      by, by + 29))
+        elif alias == 'argentagent':
+            session = movement.session
+            unit_ids = (session.argent_agent_produced_ids
+                        if session and session.stage == 'argent_agent' else [])
+            pages = max(1, (len(unit_ids) + page_size - 1) // page_size)
+            self.target_page = min(self.target_page, pages - 1)
+            visible = unit_ids[self.target_page * page_size:
+                               (self.target_page + 1) * page_size]
+            for index, unit_id in enumerate(visible):
+                unit = next((candidate for candidate in session.target.units
+                             if candidate.unit_id == unit_id), None)
+                if unit is None:
+                    continue
+                options = movement.argent_agent_destination_options(session, unit_id)
+                destination_id = session.argent_agent_destinations.get(unit_id)
+                destination = next((option for option in options
+                                    if option[0] == destination_id), None)
+                kind = UNIT_TYPES[unit.kind]['name'].upper()
+                label = (f'{kind} · MOVE TO {destination[1]} · TILE {destination[2]}'
+                         if destination else f'{kind} · STAY IN TILE {session.target.number}')
+                by = bottom + 138 - index * 31
+                button(window, ('argent_agent_cycle', unit_id), label,
+                       x, by, width, 27, size=8)
+                self.hits.append((('argent_agent_cycle', unit_id), x,
+                                  x + width, by, by + 27))
+        elif alias == 'l1z1xagent':
             session = movement.session
             targets = ([unit for unit in session.target.units
                         if unit.owner == session.player.faction and
@@ -579,6 +627,31 @@ class LeaderPanel:
                    bottom + 20, 96, 25, size=8)
             self.hits.append((('agent_cancel',), x + width - 96,
                               x + width, bottom + 20, bottom + 45))
+        elif alias == 'argentagent':
+            if pages > 1:
+                for direction, label, bx in ((-1, '‹', x),
+                                              (1, '›', x + width - 34)):
+                    if 0 <= self.target_page + direction < pages:
+                        button(window, ('leader_agent_page', direction), label,
+                               bx, bottom + 20, 30, 25, size=11)
+                        self.hits.append((('target_page', direction), bx,
+                                          bx + 30, bottom + 20, bottom + 45))
+                window.text('leader_agent_target_page',
+                            f'{self.target_page + 1}/{pages}',
+                            x + width / 2 - 12, bottom + 27, 8, MUTED)
+            session = movement.session
+            can_apply = bool(session and session.argent_agent_destinations)
+            button(window, 'leader_argent_apply', 'USE AGENT',
+                   x + width - 204, bottom + 20, 100, 25,
+                   enabled=can_apply,
+                   primary=True, size=8)
+            if can_apply:
+                self.hits.append((('use', alias), x + width - 204,
+                                  x + width - 104, bottom + 20, bottom + 45))
+            button(window, 'leader_argent_decline', 'DECLINE',
+                   x + width - 96, bottom + 20, 96, 25, size=8)
+            self.hits.append((('agent_cancel',), x + width - 96,
+                              x + width, bottom + 20, bottom + 45))
         elif alias == 'arborecagent' and self.agent_ship_id is not None or \
                 alias == 'xxchaagent' and self.agent_planet_id is not None:
             button(window, 'leader_agent_cancel', 'CANCEL', x + width - 96,
@@ -601,7 +674,8 @@ class LeaderPanel:
             self.hits.append((('agent_cancel',), x + width - 96,
                               x + width, bottom + 20, bottom + 45))
         else:
-            button(window, 'leader_agent_cancel', 'CANCEL', x + width - 96,
+            cancel_label = 'DECLINE' if alias == 'empyreanagent' else 'CANCEL'
+            button(window, 'leader_agent_cancel', cancel_label, x + width - 96,
                    bottom + 20, 96, 25, size=8)
             self.hits.append((('agent_cancel',), x + width - 96,
                               x + width, bottom + 20, bottom + 45))

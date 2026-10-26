@@ -155,6 +155,66 @@ class LeaderPanelTests(unittest.TestCase):
         self.assertNotIn(('use', 'cabalagent', 'pds'), actions)
         self.assertNotIn(('use', 'cabalagent', 'spacedock'), actions)
 
+    def test_empyrean_reaction_lets_recipient_choose_token_pool(self):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('empyrean', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        empyrean, sol = players[:2]
+        self.window.player_panel.players = players
+        self.window.turn_order.active_player = sol
+        self.movement.session = SimpleNamespace(
+            player=sol, target=next(tile for tile in board.values()
+                                    if not tile.planets),
+            stage='empyrean_agent', empyrean_agent_owner='empyrean')
+        self.panel.open_for_reaction(empyrean, 'empyreanagent')
+
+        self.draw(player=empyrean, available_actions=('empyreanagent',))
+
+        actions = [row[0] for row in self.panel.hits]
+        self.assertIn(('use', 'empyreanagent', 'tactical'), actions)
+        self.assertIn(('use', 'empyreanagent', 'fleet'), actions)
+        self.assertIn(('use', 'empyreanagent', 'strategic'), actions)
+        decline = next(row for row in self.panel.hits
+                       if row[0] == ('agent_cancel',))
+        self.assertIsNotNone(self.panel.handle_click(
+            (decline[1] + decline[2]) / 2,
+            (decline[3] + decline[4]) / 2, empyrean))
+
+    def test_argent_agent_apply_button_is_not_clickable_until_a_unit_is_placed(self):
+        config, board = load_board(
+            ROOT / 'maps/four_player.json',
+            ('argent', 'sol', 'jolnar', 'hacan'))
+        players = create_players(board, config)
+        argent, sol = players[:2]
+        self.window.player_panel.players = players
+        self.window.turn_order.active_player = sol
+        target = next(tile for tile in board.values()
+                      if any(unit.owner == 'sol' for unit in tile.units))
+        unit = next(unit for unit in target.units
+                    if unit.owner == 'sol' and unit.kind == 'infantry')
+        session = SimpleNamespace(
+            player=sol, target=target, stage='argent_agent',
+            argent_agent_produced_ids=[unit.unit_id],
+            argent_agent_destinations={})
+        self.movement.session = session
+        self.movement.argent_agent_destination_options = lambda _session, _unit_id: [
+            ('neighbor-planet', 'NEIGHBOR', 22, (0, 0))]
+        self.panel.open_for_reaction(argent, 'argentagent')
+
+        self.draw(player=argent, available_actions=('argentagent',))
+        self.assertNotIn(('use', 'argentagent'),
+                         [row[0] for row in self.panel.hits])
+        cycle = next(row for row in self.panel.hits
+                     if row[0] == ('argent_agent_cycle', unit.unit_id))
+        self.panel.handle_click((cycle[1] + cycle[2]) / 2,
+                                (cycle[3] + cycle[4]) / 2, argent)
+        session.argent_agent_destinations[unit.unit_id] = 'neighbor-planet'
+
+        self.draw(player=argent, available_actions=('argentagent',))
+        self.assertIn(('use', 'argentagent'),
+                      [row[0] for row in self.panel.hits])
+
     def test_header_drag_stays_on_screen(self):
         self.draw()
         left, right, bottom, top = self.panel.bounds
