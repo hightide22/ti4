@@ -109,6 +109,7 @@ class TechnologyActionTests(unittest.TestCase):
 
         self.assertIsNone(movement.route(origin, mecatol, ship, winnu))
         winnu.technologies |= {'lgf'}
+        winnu.exhausted_technologies.add('lgf')
         self.assertEqual(movement.route(origin, mecatol, ship, winnu),
                          (origin.position, mecatol.position))
 
@@ -181,6 +182,13 @@ class TechnologyActionTests(unittest.TestCase):
             board[next(iter(board))].units.append(
                 Unit(f'vortex-sol-cruiser-{index}', 'cruiser', 'sol', sol.color_code,
                      UnitLocation(Region.SPACE)))
+        self.assertNotIn(target.unit_id, {key for key, _ in actions.targets(cabal, 'vtx')})
+
+    def test_cabal_vortex_cannot_target_a_unit_in_the_dock_system_itself(self):
+        board, players, turn, movement, actions, cabal, sol, dock_tile, target_tile, target = self.cabal_game()
+        target_tile.units.remove(target)
+        dock_tile.units.append(target)
+
         self.assertNotIn(target.unit_id, {key for key, _ in actions.targets(cabal, 'vtx')})
 
     def test_codex_x89_is_not_a_separate_action(self):
