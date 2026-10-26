@@ -254,7 +254,7 @@ class CommanderEffectTests(unittest.TestCase):
         self.assertEqual(1, len(heroic))
         self.assertEqual((5, 3), (heroic[0][2]['spaceCannonHitsOn'],
                                   heroic[0][2]['spaceCannonDieCount']))
-        with patch('movement.random.randint', return_value=5):
+        with patch('movement.random.randint', return_value=6):
             movement._roll_space_cannon(session, heroic, None)
         self.assertEqual(3, len(session.space_cannon_events))
 

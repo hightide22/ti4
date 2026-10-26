@@ -831,8 +831,121 @@ class MovementTests(unittest.TestCase):
             self.controller.confirm()
         roll.assert_called_once_with(1, 10)
         self.assertIn(carrier, target.units)
-        self.assertTrue(any('1 miss' in entry and '0 hit(s)' in entry
+        self.assertTrue(any('1-1=0 miss' in entry and '0 hit(s)' in entry
                             for entry in session.cannon_log), session.cannon_log)
+
+    def test_antimass_deflectors_reduce_incoming_space_cannon_offense(self):
+        self.target = next(tile for tile in self.controller.neighbors(self.home)
+                           if tile.planets and not tile.command_tokens)
+        pds = Unit('antimass-offense-pds', 'pds', 'hacan', 'ylw',
+                   UnitLocation(Region.PLANET, planet_id=self.target.planets[0].planet_id))
+        ship = Unit('antimass-offense-carrier', 'carrier', 'sol', 'blu',
+                    UnitLocation(Region.SPACE))
+        self.target.units.extend((pds, ship))
+        self.player.technologies = self.player.technologies | {'amd'}
+        session = Session(self.player, self.target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='space_cannon')
+        self.controller.session = session
+
+        with patch('movement.random.randint', return_value=6) as roll:
+            self.controller.resolve_space_cannon(session)
+
+        roll.assert_called_once_with(1, 10)
+        self.assertFalse(session.space_cannon_events)
+        self.assertIn('6-1=5 miss', session.cannon_log[0])
+        self.assertIn('Antimass Deflectors', session.cannon_log[0])
+
+    def test_antimass_deflectors_reduce_outgoing_space_cannon_offense_targeting_them(self):
+        self.target = next(tile for tile in self.controller.neighbors(self.home)
+                           if tile.planets and not tile.command_tokens)
+        enemy = next(player for player in self.players if player.faction != 'sol')
+        enemy.technologies = enemy.technologies | {'amd'}
+        pds = Unit('antimass-target-pds', 'pds', 'sol', 'blu',
+                   UnitLocation(Region.PLANET, planet_id=self.target.planets[0].planet_id))
+        ship = Unit('antimass-target-cruiser', 'cruiser', enemy.faction,
+                    enemy.color_code, UnitLocation(Region.SPACE))
+        self.target.units.extend((pds, ship))
+        session = Session(self.player, self.target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='space_cannon')
+        self.controller.session = session
+
+        with patch('movement.random.randint', return_value=6) as roll:
+            self.controller.resolve_space_cannon(session)
+
+        roll.assert_called_once_with(1, 10)
+        self.assertFalse(session.space_cannon_events)
+        self.assertIn('6-1=5 miss', session.cannon_log[0])
+        self.assertIn('Antimass Deflectors', session.cannon_log[0])
+
+    def test_graviton_laser_system_applies_to_all_of_the_players_cannon_units(self):
+        self.target = next(tile for tile in self.controller.neighbors(self.home)
+                           if tile.planets and not tile.command_tokens)
+        enemy = next(player for player in self.players if player.faction != 'sol')
+        self.player.technologies = self.player.technologies | {'gls'}
+        self.target.units.extend((
+            Unit('graviton-pds-one', 'pds', 'sol', 'blu',
+                 UnitLocation(Region.PLANET, self.target.planets[0].planet_id)),
+            Unit('graviton-pds-two', 'pds', 'sol', 'blu',
+                 UnitLocation(Region.PLANET, self.target.planets[0].planet_id)),
+            Unit('graviton-enemy-fighter', 'fighter', enemy.faction,
+                 enemy.color_code, UnitLocation(Region.SPACE)),
+            Unit('graviton-enemy-cruiser', 'cruiser', enemy.faction,
+                 enemy.color_code, UnitLocation(Region.SPACE)),
+        ))
+        session = Session(self.player, self.target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='space_cannon')
+        self.controller.session = session
+
+        with patch('movement.random.randint', return_value=10):
+            self.controller.resolve_space_cannon(session)
+
+        self.assertEqual(len(session.space_cannon_events), 2)
+        self.assertTrue(all(event['graviton'] for event in session.space_cannon_events))
+        self.assertIn('gls', self.player.exhausted_technologies)
+        self.assertEqual([unit.kind for unit in self.controller.space_cannon_assignment_candidates(session)],
+                         ['cruiser'])
+
+    def test_capacity_is_resolved_between_different_players_space_cannon_rolls(self):
+        self.target = next(tile for tile in self.controller.neighbors(self.home)
+                           if tile.planets and not tile.command_tokens)
+        hacan = next(player for player in self.players if player.faction == 'hacan')
+        jolnar = next(player for player in self.players if player.faction == 'jolnar')
+        carrier = Unit('cannon-capacity-carrier', 'carrier', 'sol', 'blu',
+                       UnitLocation(Region.SPACE))
+        cruiser = Unit('cannon-capacity-cruiser', 'cruiser', 'sol', 'blu',
+                       UnitLocation(Region.SPACE))
+        fighters = [Unit(f'cannon-capacity-fighter-{index}', 'fighter', 'sol', 'blu',
+                         UnitLocation(Region.SPACE)) for index in range(2)]
+        cannons = [
+            Unit('hacan-capacity-pds', 'pds', 'hacan', hacan.color_code,
+                 UnitLocation(Region.PLANET, self.target.planets[0].planet_id)),
+            Unit('jolnar-capacity-pds', 'pds', 'jolnar', jolnar.color_code,
+                 UnitLocation(Region.PLANET, self.target.planets[0].planet_id)),
+        ]
+        self.target.units.extend((carrier, cruiser, *fighters, *cannons))
+        session = Session(self.player, self.target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='space_cannon', space_cannon_next_stage='invasion')
+        self.controller.session = session
+
+        with patch('movement.random.randint', side_effect=(10, 1, 10)) as roll:
+            self.controller.resolve_space_cannon(session)
+            self.controller.assign_space_cannon_hit(carrier.unit_id)
+            ordered_owners = [player for player in self.controller._space_cannon_player_order(session)
+                              if player.faction in ('hacan', 'jolnar')]
+            first_owner = ordered_owners[0]
+            self.assertEqual(roll.call_count, 1 + int('ps' in first_owner.technologies))
+            self.assertEqual(session.stage, 'capacity_overflow')
+            self.assertEqual(session.capacity_required, 2)
+            for fighter in fighters:
+                self.controller.toggle_capacity_overflow_unit(fighter.unit_id)
+            self.controller.resolve_capacity_overflow()
+            expected_total = sum(1 + int('ps' in player.technologies)
+                                 for player in ordered_owners)
+            self.assertEqual(roll.call_count, expected_total)
 
     def test_researched_pds_ii_fires_into_adjacent_active_system_at_enemy_ships(self):
         pds_planet = self.home.planets[0]
@@ -1126,6 +1239,31 @@ class MovementTests(unittest.TestCase):
         self.assertIn(infantry, target.units)
         self.assertTrue(any('1-1=0 miss' in entry and '0 hit(s)' in entry
                             for entry in session.defense_log), session.defense_log)
+
+    def test_plasma_scoring_adds_one_space_cannon_die_on_each_invaded_planet(self):
+        target = next(tile for tile in self.board.values() if len(tile.planets) >= 2)
+        enemy = next(player for player in self.players if player.faction != 'sol')
+        enemy.technologies = enemy.technologies | {'ps'}
+        planets = target.planets[:2]
+        for index, planet in enumerate(planets):
+            target.units.extend((
+                Unit(f'plasma-defense-pds-{index}', 'pds', enemy.faction,
+                     enemy.color_code, UnitLocation(Region.PLANET, planet.planet_id)),
+                Unit(f'plasma-defense-infantry-{index}', 'infantry', 'sol', 'blu',
+                     UnitLocation(Region.PLANET, planet.planet_id)),
+            ))
+        session = Session(self.player, target, {},
+                          Snapshot.capture(self.board, self.player, self.players),
+                          stage='space_cannon_defense',
+                          landed_planets=[planet.planet_id for planet in planets])
+        self.controller.session = session
+
+        with patch('movement.random.randint', return_value=1) as roll:
+            self.controller.resolve_planetary_cannon_defense(session)
+
+        self.assertEqual(roll.call_count, 4)
+        self.assertEqual(sum('Plasma Scoring +1 die' in line
+                             for line in session.defense_log), 2)
 
     def test_ground_battles_resolve_landed_planets_in_order_then_capture_them(self):
         target = next(tile for tile in self.board.neighbors(self.home.position)

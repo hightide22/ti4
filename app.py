@@ -135,6 +135,7 @@ class BoardWindow(arcade.Window):
         self.ai_speed_hit = None
         self.action_card_button_hit = None
         self.movement = MovementController(self.board, self.player_panel.players)
+        self.movement.turn_order = self.turn_order
         self.technology_actions = TechnologyActions(self.board, self.movement, self.turn_order)
         self.action_cards = ActionCardController(self.player_panel.players, self.movement,
                                                  deck=self.action_card_deck.cards,

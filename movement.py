@@ -189,6 +189,12 @@ class SessionCheckpoint:
             session.combat_rolls.clear()
             session.combat_hits.clear()
             session.combat_assignments.clear()
+            session.space_cannon_queue.clear()
+            session.space_cannon_roll_owner = None
+            session.space_cannon_group_target = None
+            session.space_cannon_events.clear()
+            session.cannon_checked = False
+            session.space_cannon_target_faction = None
             session.combat_needs_resolution = False
             session.overflow_required = 0
             session.overflow_selected.clear()
@@ -222,6 +228,9 @@ class Session:
     cannon_log: list[str] = field(default_factory=list)
     cannon_checked: bool = False
     space_cannon_events: list[dict] = field(default_factory=list)
+    space_cannon_queue: list[str] = field(default_factory=list)
+    space_cannon_roll_owner: str | None = None
+    space_cannon_group_target: str | None = None
     space_cannon_target_faction: str | None = None
     space_cannon_next_stage: str | None = None
     space_cannon_nes_cancel: int = 0
@@ -482,6 +491,7 @@ class MovementController:
         self.exploration_is_bot = lambda _player: False
         self.exploration_queue = []
         self.exploration_outcomes = []
+        self.turn_order = None
 
     @staticmethod
     def _independent_fighter(unit, player):
@@ -1600,6 +1610,9 @@ class MovementController:
             self.advance_integrated_production(session)
         elif next_stage == 'after_cannon':
             self._finish_after_space_cannon(session)
+        elif next_stage == 'after_cannon_group':
+            if self._resolve_next_space_cannon_group(session):
+                self.continue_after_space_cannon(session)
         elif next_stage in ('after_combat', 'after_retreat'):
             self.prepare_invasion(session)
         else:
@@ -1632,12 +1645,17 @@ class MovementController:
             session.space_cannon_direct_hit = None
         if session.space_cannon_events and not self.resolve_space_cannon_hits(session):
             return
-        factions = {unit.owner for unit in session.target.units
-                    if unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']}
-        factions.add(session.player.faction)
+        target_faction = session.space_cannon_group_target
+        session.space_cannon_roll_owner = None
+        if target_faction is None:
+            self._finish_after_space_cannon(session)
+            return
+        session.space_cannon_group_target = None
+        if session.space_cannon_queue:
+            session.space_cannon_target_faction = None
+        next_stage = ('after_cannon_group' if session.space_cannon_queue else 'after_cannon')
         self._check_capacity_and_fleet(
-            session, [(session.target.position, faction) for faction in sorted(factions)],
-            'after_cannon')
+            session, [(session.target.position, target_faction)], next_stage)
 
     def _finish_after_space_cannon(self, session):
         next_stage = session.space_cannon_next_stage or 'invasion'
@@ -1653,18 +1671,62 @@ class MovementController:
         if session.cannon_checked:
             return True
         session.cannon_checked = True
-        active_faction = session.player.faction
         shooters = self._space_cannon_shooters(session)
-        if not shooters:
-            return self._finish_space_cannon_rolls(session)
+        owners = {cannon.owner for _, cannon, _ in shooters}
+        session.space_cannon_queue = [player.faction for player in
+                                      self._space_cannon_player_order(session)
+                                      if player.faction in owners]
+        # Defensive fallback for generated effects whose owner is not a normal
+        # player entry (for example a temporary unit created by a relic).
+        for owner in sorted(owners - set(session.space_cannon_queue)):
+            session.space_cannon_queue.append(owner)
+        return self._resolve_next_space_cannon_group(session, shooters)
 
-        active_shooters = [shooter for shooter in shooters if shooter[1].owner == active_faction]
-        targets = self.space_cannon_target_options(session)
-        if active_shooters and len(targets) > 1 and session.space_cannon_target_faction is None:
-            session.stage = 'space_cannon_choose_target'
-            return False
-        target_faction = session.space_cannon_target_faction or (targets[0] if targets else None)
-        return self._roll_space_cannon(session, shooters, target_faction)
+    def _space_cannon_player_order(self, session):
+        """Return current action initiative, rotated to start with the active player."""
+        players = self.players
+        turn_order = getattr(self, 'turn_order', None)
+        if turn_order is not None:
+            indices = getattr(turn_order, 'strategy_initiative', ())
+            if indices and len(indices) == len(turn_order.players):
+                players = [turn_order.players[index] for index in indices]
+            else:
+                players = list(turn_order.players)
+        else:
+            players = list(players)
+        if session.player in players:
+            start = players.index(session.player)
+            players = players[start:] + players[:start]
+        return players
+
+    def _resolve_next_space_cannon_group(self, session, shooters=None):
+        """Roll one player's eligible cannons, then pause for their hit assignments."""
+        all_shooters = self._space_cannon_shooters(session) if shooters is None else shooters
+        active_faction = session.player.faction
+        while session.space_cannon_queue:
+            owner = session.space_cannon_queue.pop(0)
+            group = [shooter for shooter in all_shooters if shooter[1].owner == owner]
+            if not group:
+                continue
+            targets = self.space_cannon_target_options(session)
+            if owner == active_faction:
+                if len(targets) > 1 and session.space_cannon_target_faction is None:
+                    session.space_cannon_roll_owner = owner
+                    session.stage = 'space_cannon_choose_target'
+                    return False
+                target_faction = session.space_cannon_target_faction or (targets[0] if targets else None)
+            else:
+                target_faction = active_faction
+            session.space_cannon_roll_owner = owner
+            session.space_cannon_group_target = target_faction
+            session.space_cannon_target_faction = None
+            if target_faction is None:
+                session.space_cannon_group_target = None
+                continue
+            return self._roll_space_cannon(session, group, target_faction)
+        session.space_cannon_roll_owner = None
+        session.space_cannon_group_target = None
+        return self._finish_space_cannon_rolls(session)
 
     def space_cannon_target_options(self, session):
         """Players whose ships the active player's Space Cannon may target."""
@@ -1680,8 +1742,10 @@ class MovementController:
         if faction not in self.space_cannon_target_options(session):
             raise MovementError('Choose a player with ships in the active system')
         session.space_cannon_target_faction = faction
-        shooters = self._space_cannon_shooters(session)
-
+        owner = session.space_cannon_roll_owner or session.player.faction
+        shooters = [shooter for shooter in self._space_cannon_shooters(session)
+                    if shooter[1].owner == owner]
+        session.space_cannon_group_target = faction
         resolved = self._roll_space_cannon(session, shooters, faction)
         if resolved:
             self.continue_after_space_cannon(session)
@@ -1826,6 +1890,7 @@ class MovementController:
     def _roll_space_cannon(self, session, shooters, active_target):
         active_faction = session.player.faction
         plasma_used = set()
+        graviton_active = set()
         argent = self.faction_player('argent')
         argent_cannon = None
         if argent and leader_available(argent, 'argentcommander'):
@@ -1843,6 +1908,10 @@ class MovementController:
                             unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
             if not target_ships:
                 continue
+            # Antimass Deflectors protect the targeted player's units from
+            # Space Cannon rolls in both offense and defense. Defense applies
+            # the same modifier in resolve_planetary_cannon_defense().
+            antimass_penalty = -1 if self.has_tech(target_faction, 'amd') else 0
             if (target_faction == 'argent' and cannon.owner != 'argent' and
                     any(unit.owner == 'argent' and unit.kind == 'flagship' and
                         unit.location.region == Region.SPACE for unit in session.target.units)):
@@ -1856,20 +1925,26 @@ class MovementController:
             argent_bonus = cannon.unit_id == argent_cannon
             extra += int(argent_bonus)
             dice = [self.roll_d10(session) for _ in range(int(profile.get('spaceCannonDieCount') or 1) + extra)]
-            hits = sum(value >= int(profile['spaceCannonHitsOn']) for value in dice)
+            hits = sum(value + antimass_penalty >= int(profile['spaceCannonHitsOn'])
+                        for value in dice)
+            mixed_ship_group = (any(unit.kind == 'fighter' for unit in target_ships) and
+                                any(unit.kind != 'fighter' for unit in target_ships))
             graviton = bool(shooter and 'gls' in shooter.technologies and
-                            'gls' not in shooter.exhausted_technologies and
-                            any(unit.kind == 'fighter' for unit in target_ships) and
-                            any(unit.kind != 'fighter' for unit in target_ships))
-            if graviton:
+                            mixed_ship_group and
+                            (cannon.owner in graviton_active or
+                             'gls' not in shooter.exhausted_technologies))
+            if graviton and cannon.owner not in graviton_active:
                 shooter.exhausted_technologies.add('gls')
+                graviton_active.add(cannon.owner)
             results = ', '.join(format_die_result(
-                value, 0, value >= int(profile['spaceCannonHitsOn']))
+                value, antimass_penalty,
+                value + antimass_penalty >= int(profile['spaceCannonHitsOn']))
                 for value in dice)
             session.cannon_log.append(
                 f'{cannon.owner.upper()} {cannon.kind.title()} in tile {source.system_id} '
                 f'targeting {target_faction.upper()} '
                 f'({profile["spaceCannonHitsOn"]}+): {results} → {hits} hit(s)' +
+                (' · Antimass Deflectors −1' if antimass_penalty else '') +
                 (' · Plasma Scoring +1 die' if plasma_bonus else '') +
                 (' · Argent commander +1 die' if argent_bonus else ''))
             for _ in range(hits):
@@ -3848,7 +3923,6 @@ class MovementController:
         if 'l4' in session.player.technologies:
             session.defense_log.append('L4 Disruptors prevent space cannon defense during this invasion.')
             return
-        plasma_used = set()
         nes_cancel = {}
         argent = self.faction_player('argent')
         argent_pds = [(int(unit_profile(unit)['spaceCannonHitsOn']), unit.unit_id)
@@ -3862,6 +3936,9 @@ class MovementController:
         argent_cannon = (min(argent_pds)[1] if argent_pds and argent and
                          leader_available(argent, 'argentcommander') else None)
         for planet_id in session.landed_planets:
+            # Space Cannon Defense is resolved independently on each invaded
+            # planet; Plasma Scoring can add one die to a unit on every planet.
+            plasma_used = set()
             cannons = [unit for unit in session.target.units if unit.owner != faction and unit.kind == 'pds' and
                        unit.unit_id not in session.disabled_pds and
                        unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
