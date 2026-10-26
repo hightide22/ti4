@@ -2978,7 +2978,40 @@ class BoardWindow(arcade.Window):
             assert not self.strategy.pending_cabal_replenishments
             assert cabal.captured_units.get('dreadnought') == 1
             assert sol.commodities == 0 and sol.trade_goods == 3 + sol.commodity_limit
-            print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, command allocation, faction abilities, Hacan agent, and Cabal trade reaction checked')
+            self.configure_game(ROOT / 'maps/four_player.json',
+                                ('sardakk', 'sol', 'jolnar', 'hacan'))
+            sardakk = next(player for player in self.turn_order.players
+                           if player.faction == 'sardakk')
+            sol = next(player for player in self.turn_order.players
+                       if player.faction == 'sol')
+            self.turn_order.active_index = self.turn_order.players.index(sol)
+            self.player_panel.active = self.player_panel.players.index(sol)
+            target = next(tile for tile in self.board.values()
+                          if any(owner == sol.faction
+                                 for owner in tile.planet_owners.values()))
+            planet_id = next(planet_id for planet_id, owner in target.planet_owners.items()
+                             if owner == sol.faction)
+            before = sum(unit.owner == sol.faction and unit.kind == 'infantry' and
+                         unit.location.region == Region.PLANET and
+                         unit.location.planet_id == planet_id for unit in target.units)
+            tactical = self.movement.activate(sol, target.position)
+            tactical.stage = 'production'
+            self.movement.skip_production()
+            assert tactical.stage == 'sardakk_agent'
+            self.on_update(0)
+            assert self.leader_panel.reaction_owner_faction == 'sardakk'
+            self.on_draw()
+            tro_hit = next(hit for hit in self.leader_panel.hits
+                           if hit[0] == ('use', 'sardakkagent', planet_id))
+            self.on_mouse_press((tro_hit[1] + tro_hit[2]) / 2,
+                                (tro_hit[3] + tro_hit[4]) / 2,
+                                arcade.MOUSE_BUTTON_LEFT, 0)
+            assert self.movement.session is None
+            assert not leader_available(sardakk, 'sardakkagent')
+            assert sum(unit.owner == sol.faction and unit.kind == 'infantry' and
+                       unit.location.region == Region.PLANET and
+                       unit.location.planet_id == planet_id for unit in target.units) == before + 2
+            print(f'PASS: {len(self.board)} tile objects; movement, combat, round passing, command allocation, faction abilities, Hacan and Cabal agents, and Sardakk tactical reaction checked')
             self.close()
 
     def on_mouse_motion(self, x, y, dx, dy):
