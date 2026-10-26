@@ -216,7 +216,10 @@ class CombatPanel:
         elif session.stage == 'space_cannon_assign':
             target_faction = (session.space_cannon_events[0].get('target', session.player.faction)
                               if session.space_cannon_events else session.player.faction)
-            subtitle = f'{target_faction.upper()} · choose a ship to take the hit'
+            event = session.space_cannon_events[0] if session.space_cannon_events else {}
+            assignment_target = ('ground force' if event.get('source') == 'planetary_defense'
+                                 else 'ship')
+            subtitle = f'{target_faction.upper()} · choose a {assignment_target} to take the hit'
             if session.space_cannon_events[0].get('source') == 'mentak_ambush':
                 subtitle = f'{target_faction.upper()} · assign the Mentak Ambush hit'
         elif session.stage == 'space_combat_won':
@@ -288,8 +291,10 @@ class CombatPanel:
             heading = 'MENTAK AMBUSH · ASSIGN HIT' if ability else 'SPACE CANNON · ASSIGN HIT'
             window.text('space_cannon_assign_title', heading,
                         left + 24, bottom + height - 96, 11, ACCENT)
+            assignment_target = ('ground force' if event.get('source') == 'planetary_defense'
+                                 else 'ship')
             window.text('space_cannon_assign_help',
-                        f'{target_faction.upper()} · {len(session.space_cannon_events)} hit(s) remain. Choose which ship takes the next hit.',
+                        f'{target_faction.upper()} · {len(session.space_cannon_events)} hit(s) remain. Choose which {assignment_target} takes the next hit.',
                         left + 24, bottom + height - 119, 10, INK)
             page_candidates = candidates[self.space_cannon_page * 8:self.space_cannon_page * 8 + 8]
             cell_gap = 12
@@ -308,14 +313,17 @@ class CombatPanel:
                     card_left + 22, card_top - 31, 29)
                 label = UNIT_TYPES[unit.kind]['name']
                 if unit.damaged:
-                    detail = 'Damaged · another hit destroys this ship'
+                    detail = 'Damaged · another hit destroys this unit'
                 elif unit_profile(unit).get('sustainDamage'):
                     detail = 'Can sustain one hit'
                 else:
-                    detail = 'Assign hit to this ship'
-                cargo = [item for item in session.target.units
-                         if item.location.region == Region.TRANSPORT and
-                         item.location.carrier_id == unit.unit_id]
+                    detail = 'Assign hit to this unit'
+                if event.get('source') == 'planetary_defense' and not unit.damaged and not unit_profile(unit).get('sustainDamage'):
+                    detail = 'Ground force · assign hit here'
+                cargo = ([item for item in session.target.units
+                          if item.location.region == Region.TRANSPORT and
+                          item.location.carrier_id == unit.unit_id]
+                         if event.get('source') != 'planetary_defense' else [])
                 if cargo:
                     cargo_counts = {}
                     for item in cargo:

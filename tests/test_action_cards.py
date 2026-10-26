@@ -202,6 +202,33 @@ class ActionCardTests(unittest.TestCase):
         self.assertNotIn(dreadnought, system.units)
         self.assertEqual(session.stage, 'invasion')
 
+    def test_maneuvering_jets_is_available_once_per_invaded_planet(self):
+        system = next(tile for tile in self.board.values() if len(tile.planets) >= 2)
+        first, second = system.planets[:2]
+        hacan = next(player for player in self.players if player.faction == 'hacan')
+        infantry = Unit('action-sol-defense-infantry', 'infantry', self.sol.faction,
+                        self.sol.color_code, UnitLocation(Region.PLANET, first.planet_id))
+        system.units.append(infantry)
+        self.sol.action_cards[:] = ['mjets1', 'mjets2']
+        session = Session(self.sol, system, {}, Snapshot.capture(self.board, self.sol, self.players),
+                          stage='space_cannon_response', space_cannon_next_stage='planetary_defense',
+                          space_cannon_events=[{'owner': hacan.faction,
+                                                'target': self.sol.faction,
+                                                'source': 'planetary_defense',
+                                                'planet_id': first.planet_id,
+                                                'candidates': [infantry.unit_id]}])
+        self.movement.session = session
+
+        self.assertTrue(self.cards.can_play(self.sol.faction, 'mjets1', session))
+        self.cards.play(self.sol, 0)
+        self.assertFalse(self.cards.can_play(self.sol.faction, 'mjets2', session))
+        session.space_cannon_events.append({'owner': hacan.faction,
+                                            'target': self.sol.faction,
+                                            'source': 'planetary_defense',
+                                            'planet_id': second.planet_id,
+                                            'candidates': [infantry.unit_id]})
+        self.assertTrue(self.cards.can_play(self.sol.faction, 'mjets2', session))
+
     def test_bunker_reduces_bombardment_against_the_card_owners_planet(self):
         system = next(tile for tile in self.board.values() if tile.planets)
         planet_id = system.planets[0].planet_id

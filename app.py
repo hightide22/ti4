@@ -2606,6 +2606,43 @@ class BoardWindow(arcade.Window):
                     cannon_target.units.remove(cannon_infantry)
                     self.player_panel.active = self.player_panel.players.index(sol_player)
 
+                    # Planetary Space Cannon hits must pause for the attacker
+                    # to choose which ground force is destroyed or damaged.
+                    defense_planet = cannon_target.planets[0]
+                    defense_pds = Unit('smoke-defense-pds', 'pds', 'hacan',
+                                       hacan_player.color_code,
+                                       UnitLocation(Region.PLANET,
+                                                    planet_id=defense_planet.planet_id))
+                    defense_infantry = Unit('smoke-defense-infantry', 'infantry', 'sol',
+                                            sol_player.color_code,
+                                            UnitLocation(Region.PLANET,
+                                                         planet_id=defense_planet.planet_id))
+                    cannon_target.units.extend((defense_pds, defense_infantry))
+                    defense_session = Session(
+                        sol_player, cannon_target, {},
+                        Snapshot.capture(self.board, sol_player, self.player_panel.players),
+                        stage='space_cannon_assign',
+                        landed_planets=[defense_planet.planet_id])
+                    defense_session.space_cannon_next_stage = 'planetary_defense'
+                    defense_session.space_cannon_events.append({
+                        'owner': 'hacan', 'target': 'sol', 'source': 'planetary_defense',
+                        'planet_id': defense_planet.planet_id,
+                        'candidates': [defense_infantry.unit_id],
+                    })
+                    self.movement.session = defense_session
+                    self.on_draw()
+                    assert self.labels['combat_modal_title'].text == 'SPACE CANNON DEFENSE'
+                    assert 'ground force' in self.labels['space_cannon_assign_help'].text
+                    arcade.get_image().save(preview_dir / 'planetary-cannon-assignment-preview.png')
+                    ground_hit = next(hit for hit in self.combat_panel.action_hits
+                                      if hit[0] == ('space_cannon_target', defense_infantry.unit_id))
+                    self.on_mouse_press((ground_hit[1] + ground_hit[2]) / 2,
+                                        (ground_hit[3] + ground_hit[4]) / 2,
+                                        arcade.MOUSE_BUTTON_LEFT, 0)
+                    assert defense_infantry not in cannon_target.units
+                    self.movement.session = None
+                    cannon_target.units.remove(defense_pds)
+
                     # Draw the ground-combat modal after assigning a landed force.
                     sol_home = next(tile for tile in self.board.values()
                                     if any(unit.owner == 'sol' and unit.kind == 'carrier' for unit in tile.units))

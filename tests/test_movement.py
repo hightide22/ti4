@@ -1211,6 +1211,9 @@ class MovementTests(unittest.TestCase):
             self.controller.cycle_landing(unit.unit_id)
         with patch('movement.random.randint', return_value=10):
             self.controller.establish_control()
+        if session.stage == 'space_cannon_assign':
+            candidates = self.controller.space_cannon_assignment_candidates(session)
+            self.controller.assign_space_cannon_hit(candidates[0].unit_id)
 
         self.assertTrue(session.defense_log)
         self.assertEqual(sum(unit.owner == 'sol' and unit.kind == 'infantry' and
@@ -1239,6 +1242,68 @@ class MovementTests(unittest.TestCase):
         self.assertIn(infantry, target.units)
         self.assertTrue(any('1-1=0 miss' in entry and '0 hit(s)' in entry
                             for entry in session.defense_log), session.defense_log)
+
+    def test_planetary_space_cannon_hit_waits_for_active_player_to_choose_ground_casualty(self):
+        target = next(tile for tile in self.controller.neighbors(self.home)
+                      if tile.planets and any(self.controller.route(self.home, tile, unit, self.player)
+                                             for unit in self.home.units if unit.kind == 'carrier'))
+        planet = target.planets[0]
+        hacan = next(player for player in self.players if player.faction == 'hacan')
+        pds = Unit('defense-hit-pds', 'pds', 'hacan', hacan.color_code,
+                   UnitLocation(Region.PLANET, planet.planet_id))
+        sol_mech = Unit('defense-choice-mech', 'mech', 'sol', self.player.color_code,
+                        UnitLocation(Region.PLANET, planet.planet_id))
+        sol_infantry = Unit('defense-choice-infantry', 'infantry', 'sol', self.player.color_code,
+                            UnitLocation(Region.PLANET, planet.planet_id))
+        hacan_infantry = Unit('defense-choice-defender', 'infantry', 'hacan', hacan.color_code,
+                              UnitLocation(Region.PLANET, planet.planet_id))
+        target.units.extend((pds, sol_mech, sol_infantry, hacan_infantry))
+        session = Session(self.player, target, {}, Snapshot.capture(self.board, self.player, self.players),
+                          stage='invasion', landed_planets=[planet.planet_id])
+        self.controller.session = session
+
+        with patch('movement.random.randint', return_value=10):
+            resolved = self.controller.resolve_planetary_cannon_defense(session)
+
+        self.assertFalse(resolved)
+        self.assertEqual('space_cannon_assign', session.stage)
+        self.assertEqual({sol_mech.unit_id, sol_infantry.unit_id},
+                         {unit.unit_id for unit in self.controller.space_cannon_assignment_candidates(session)})
+        self.controller.assign_space_cannon_hit(sol_infantry.unit_id)
+
+        self.assertNotIn(sol_infantry, target.units)
+        self.assertIn(sol_mech, target.units)
+        self.assertFalse(sol_mech.damaged)
+        self.assertTrue(any('Infantry on' in line and 'destroyed' in line
+                            for line in session.defense_log), session.defense_log)
+
+    def test_planetary_space_cannon_resolves_each_planet_after_its_hits_are_assigned(self):
+        target = next(tile for tile in self.board.values() if len(tile.planets) >= 2)
+        hacan = next(player for player in self.players if player.faction == 'hacan')
+        first, second = target.planets[:2]
+        first_pds = Unit('defense-queue-pds-1', 'pds', 'hacan', hacan.color_code,
+                         UnitLocation(Region.PLANET, first.planet_id))
+        second_pds = Unit('defense-queue-pds-2', 'pds', 'hacan', hacan.color_code,
+                          UnitLocation(Region.PLANET, second.planet_id))
+        first_infantry = Unit('defense-queue-infantry-1', 'infantry', 'sol', self.player.color_code,
+                              UnitLocation(Region.PLANET, first.planet_id))
+        second_infantry = Unit('defense-queue-infantry-2', 'infantry', 'sol', self.player.color_code,
+                               UnitLocation(Region.PLANET, second.planet_id))
+        target.units.extend((first_pds, second_pds, first_infantry, second_infantry))
+        session = Session(self.player, target, {}, Snapshot.capture(self.board, self.player, self.players),
+                          stage='invasion', landed_planets=[first.planet_id, second.planet_id])
+        self.controller.session = session
+
+        with patch('movement.random.randint', side_effect=[10, 1]) as roll:
+            self.assertFalse(self.controller.resolve_planetary_cannon_defense(session))
+            self.assertEqual(1, roll.call_count)
+            self.controller.assign_space_cannon_hit(first_infantry.unit_id)
+
+        self.assertEqual(2, roll.call_count)
+        self.assertNotIn(first_infantry, target.units)
+        self.assertIn(second_infantry, target.units)
+        self.assertTrue(any(f'PDS on {second.planet_id}' in line and '0 hit(s)' in line
+                            for line in session.defense_log), session.defense_log)
 
     def test_plasma_scoring_adds_one_space_cannon_die_on_each_invaded_planet(self):
         target = next(tile for tile in self.board.values() if len(tile.planets) >= 2)

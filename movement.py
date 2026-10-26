@@ -171,6 +171,9 @@ class SessionCheckpoint:
             session.ground_planet_index = 0
             session.defense_checked = False
             session.defense_log.clear()
+            session.defense_planet_queue.clear()
+            session.space_cannon_events.clear()
+            session.space_cannon_nes_cancel = 0
         elif self.stage == 'bombardment':
             session.bombard_targets = dict(self.bombard_targets)
             session.bombard_rolls.clear()
@@ -260,6 +263,7 @@ class Session:
     bombardment_cancelled: bool = False
     defense_checked: bool = False
     defense_log: list[str] = field(default_factory=list)
+    defense_planet_queue: list[str] = field(default_factory=list)
     outcome: str = ''
     overflow_required: int = 0
     overflow_selected: set[str] = field(default_factory=set)
@@ -1659,7 +1663,10 @@ class MovementController:
 
     def _finish_after_space_cannon(self, session):
         next_stage = session.space_cannon_next_stage or 'invasion'
-        if next_stage == 'space_combat' and self.hostile_space_factions(
+        if next_stage == 'planetary_defense':
+            if self._resolve_next_planetary_cannon_defense(session):
+                self.continue_invasion_after_planetary_cannon(session)
+        elif next_stage == 'space_combat' and self.hostile_space_factions(
                 session.target, session.player.faction) and self.combat_units(session, session.player.faction):
             self.start_combat(session)
         else:
@@ -1989,10 +1996,18 @@ class MovementController:
         if not session or not session.space_cannon_events:
             return []
         event = session.space_cannon_events[0]
-        candidates = [unit for unit in session.target.units
-                      if unit.unit_id in event['candidates'] and
-                      unit.owner == event.get('target', session.player.faction) and
-                      unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
+        if event.get('source') == 'planetary_defense':
+            candidates = [unit for unit in session.target.units
+                          if unit.unit_id in event['candidates'] and
+                          unit.owner == event.get('target', session.player.faction) and
+                          unit.location.region == Region.PLANET and
+                          unit.location.planet_id == event.get('planet_id') and
+                          unit.kind in self.GROUND_FORCES]
+        else:
+            candidates = [unit for unit in session.target.units
+                          if unit.unit_id in event['candidates'] and
+                          unit.owner == event.get('target', session.player.faction) and
+                          unit.location.region == Region.SPACE and UNIT_TYPES[unit.kind]['ship']]
         if event.get('graviton'):
             nonfighters = [unit for unit in candidates if unit.kind != 'fighter']
             if nonfighters:
@@ -2006,7 +2021,9 @@ class MovementController:
         candidates = self.space_cannon_assignment_candidates(session)
         target = next((unit for unit in candidates if unit.unit_id == unit_id), None)
         if target is None:
-            raise MovementError('Choose an eligible ship to take the Space Cannon hit')
+            target_type = ('ground force' if session.space_cannon_events[0].get('source') == 'planetary_defense'
+                           else 'ship')
+            raise MovementError(f'Choose an eligible {target_type} to take the Space Cannon hit')
 
         event = session.space_cannon_events.pop(0)
         self.apply_hit(session.target, [target], session)
@@ -2014,7 +2031,12 @@ class MovementController:
             session.space_cannon_nes_cancel = 1
         outcome = 'damaged' if target in session.target.units and target.damaged else 'destroyed'
         session.cannon_log.append(f'{target.owner.upper()} {target.kind.title()} {outcome}')
-        if target in session.target.units and target.damaged and event['owner'] != target.owner:
+        if event.get('source') == 'planetary_defense':
+            session.defense_log.append(
+                f'{target.kind.title()} on {event["planet_id"]} {outcome}')
+        if (target in session.target.units and target.damaged and
+                event['owner'] != target.owner and target.location.region == Region.SPACE and
+                UNIT_TYPES[target.kind]['ship']):
             session.pending_direct_hits.setdefault(event['owner'], []).append(target.unit_id)
             session.space_cannon_direct_hit = (event['owner'], target.unit_id)
             session.stage = 'space_cannon_direct_hit'
@@ -3870,7 +3892,13 @@ class MovementController:
         session.captured_planets = list(session.titans_awakened_captured)
         session.ground_planets = []
         session.ground_planet_index = 0
-        self.resolve_planetary_cannon_defense(session)
+        if not self.resolve_planetary_cannon_defense(session):
+            return
+        self.continue_invasion_after_planetary_cannon(session)
+
+    def continue_invasion_after_planetary_cannon(self, session):
+        target, player = session.target, session.player
+        landed_planets = session.landed_planets
         for planet_id in landed_planets:
             attackers = [unit for unit in target.units if unit.owner == player.faction and
                          unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
@@ -3920,22 +3948,24 @@ class MovementController:
         session.defense_log.clear()
         session.defense_checked = True
         faction = session.player.faction
+        session.space_cannon_next_stage = 'planetary_defense'
+        session.space_cannon_events.clear()
+        session.space_cannon_group_target = None
+        session.space_cannon_queue.clear()
+        session.space_cannon_nes_cancel = 0
+        session.defense_planet_queue = list(session.landed_planets)
         if 'l4' in session.player.technologies:
             session.defense_log.append('L4 Disruptors prevent space cannon defense during this invasion.')
-            return
-        nes_cancel = {}
+            return True
+
+        return self._resolve_next_planetary_cannon_defense(session)
+
+    def _resolve_next_planetary_cannon_defense(self, session):
+        faction = session.player.faction
         argent = self.faction_player('argent')
-        argent_pds = [(int(unit_profile(unit)['spaceCannonHitsOn']), unit.unit_id)
-                      for planet_id in session.landed_planets
-                      for unit in session.target.units
-                      if unit.owner == 'argent' and unit.kind == 'pds' and
-                      unit.location.region == Region.PLANET and
-                      unit.location.planet_id == planet_id and
-                      unit.unit_id not in session.disabled_pds and
-                      unit_profile(unit).get('spaceCannonHitsOn')]
-        argent_cannon = (min(argent_pds)[1] if argent_pds and argent and
-                         leader_available(argent, 'argentcommander') else None)
-        for planet_id in session.landed_planets:
+        argent_commander_ready = bool(argent and leader_available(argent, 'argentcommander'))
+        while session.defense_planet_queue:
+            planet_id = session.defense_planet_queue.pop(0)
             # Space Cannon Defense is resolved independently on each invaded
             # planet; Plasma Scoring can add one die to a unit on every planet.
             plasma_used = set()
@@ -3945,6 +3975,16 @@ class MovementController:
                        unit_profile(unit).get('spaceCannonHitsOn')]
             if not cannons:
                 continue
+            argent_cannons = [(int(unit_profile(unit)['spaceCannonHitsOn']), unit.unit_id)
+                              for unit in cannons if unit.owner == 'argent']
+            argent_cannon = (min(argent_cannons)[1]
+                             if argent_cannons and argent_commander_ready else None)
+            attackers = [unit for unit in session.target.units if unit.owner == faction and
+                         unit.location.region == Region.PLANET and
+                         unit.location.planet_id == planet_id and
+                         unit.kind in self.GROUND_FORCES]
+            if not attackers:
+                continue
             for cannon in cannons:
                 profile = unit_profile(cannon)
                 shooter = self.faction_player(cannon.owner)
@@ -3953,6 +3993,8 @@ class MovementController:
                 extra = int(plasma_bonus)
                 if plasma_bonus:
                     plasma_used.add(cannon.owner)
+                # A defense roll is a separate timing event on each invaded
+                # planet, so Trrakan may add a die once for that planet's roll.
                 argent_bonus = cannon.unit_id == argent_cannon
                 extra += int(argent_bonus)
                 dice = [self.roll_d10(session)
@@ -3968,21 +4010,16 @@ class MovementController:
                     (' · Plasma Scoring +1 die' if plasma_bonus else '') +
                     (' · Argent commander +1 die' if argent_bonus else ''))
                 for _ in range(hits):
-                    if nes_cancel.get(planet_id, 0):
-                        nes_cancel[planet_id] -= 1
-                        session.defense_log.append('Non-Euclidean Shielding canceled 1 additional hit.')
-                        continue
-                    attackers = [unit for unit in session.target.units if unit.owner == faction and
-                                 unit.location.region == Region.PLANET and unit.location.planet_id == planet_id and
-                                 unit.kind in self.GROUND_FORCES]
-                    if not attackers:
-                        break
-                    target = self.apply_hit(session.target, attackers, session)
-                    if target in session.target.units and target.damaged and \
-                            self.has_tech(target.owner, 'nes'):
-                        nes_cancel[planet_id] = 1
-                    session.defense_log.append(
-                        f'{target.kind.title()} on {planet_id} {"damaged" if target.damaged else "destroyed"}')
+                    session.space_cannon_events.append({
+                        'owner': cannon.owner,
+                        'target': faction,
+                        'source': 'planetary_defense',
+                        'planet_id': planet_id,
+                        'candidates': [unit.unit_id for unit in attackers],
+                    })
+            if session.space_cannon_events:
+                return self._finish_space_cannon_rolls(session)
+        return True
 
     def capture_planet(self, session, planet_id):
         target, player = session.target, session.player

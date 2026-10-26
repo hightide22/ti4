@@ -542,6 +542,10 @@ class ActionCardController:
         if effect == 'experimental_battlestation':
             return (faction, effect, session.target.position, 'space-cannon')
         if effect == 'maneuvering_jets':
+            event = session.space_cannon_events[0] if session.space_cannon_events else {}
+            if event.get('source') == 'planetary_defense':
+                return (faction, effect, session.target.position, 'space-cannon-defense',
+                        event.get('planet_id'))
             return (faction, effect, session.target.position, 'space-cannon')
         if effect == 'salvage':
             return (faction, effect, session.target.position, 'space-combat-won')
